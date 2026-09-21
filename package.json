@@ -1,0 +1,20 @@
+{
+  "name": "sgb",
+  "version": "2.0.0-alpha.1",
+  "private": true,
+  "description": "Sistema de Gestión Bovina multiadministrador y multipropiedad",
+  "engines": {
+    "node": "22.x"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dev:api": "npm run dev --workspace @sgb/api",
+    "dev:web": "npm run dev --workspace @sgb/web",
+    "audit:prod": "npm audit --omit=dev"
+  }
+}

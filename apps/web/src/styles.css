@@ -1,0 +1,7 @@
+:root{font-family:Inter,system-ui,sans-serif;color:#173126;background:#f4f7f5;color-scheme:light dark}
+*{box-sizing:border-box}body{margin:0;min-width:320px;min-height:100vh;background:inherit}
+#root{min-height:100vh;display:grid;place-items:center;padding:24px}
+.foundation{width:min(620px,100%);padding:40px;border:1px solid #cbd8d1;border-radius:24px;background:#fff;box-shadow:0 20px 60px rgba(23,49,38,.12)}
+.foundation span{color:#168451;font-weight:800;letter-spacing:.08em}.foundation h1{margin:10px 0;font-size:clamp(2rem,7vw,3.5rem);line-height:1}
+.foundation p{margin:0;color:#5b6f65;line-height:1.65}
+@media(prefers-color-scheme:dark){:root{color:#edf8f1;background:#08110d}.foundation{border-color:#284137;background:#101b16}.foundation p{color:#a9bdb3}}
