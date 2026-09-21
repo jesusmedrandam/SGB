@@ -21,6 +21,9 @@ hasta completar las pruebas y la migración voluntaria.
 - `database/migrations`: migraciones PostgreSQL inmutables.
 - `docs`: reglas funcionales y decisiones de arquitectura.
 
+Las reglas de especies, catálogos y unidades están documentadas en
+[`docs/CATALOGOS.md`](docs/CATALOGOS.md).
+
 ## Estado
 
 Fase 0: arquitectura fundacional. Todavía no debe desplegarse como reemplazo del

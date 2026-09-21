@@ -16,7 +16,8 @@
 
 ## Fase 2 — Núcleo ganadero
 
-- Catálogos, animales, parentesco y propietarios.
+- Catálogos gobernados por ámbito, especie y contexto de uso.
+- Animales, parentesco y propietarios.
 - Grupos, potreros, corrales e historial de ubicación.
 - Multimedia y fichas públicas.
 - Primera descarga offline por propiedad.

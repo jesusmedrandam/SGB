@@ -46,3 +46,14 @@ Fecha de corte: 2026-09-21.
 - Producción y reproducción aceptarán hora opcional.
 - Las fechas y horas se almacenan con zona horaria; la finca usa por defecto
   `America/Guayaquil`.
+
+## Catálogos
+
+- Las especies son globales y de solo lectura para los usuarios.
+- La primera versión admite únicamente bovinos mediante `BOVINE_V1`.
+- Una especie nueva se incorpora únicamente después de implementar sus reglas.
+- Las unidades de medida son globales y se filtran por contexto de uso.
+- Una presentación comercial no se considera unidad de medida.
+- Razas y colores son extensibles; los demás catálogos operativos pertenecen a
+  la propiedad correspondiente.
+- Las reglas se validan tanto online como offline y siempre se confirman en API.
