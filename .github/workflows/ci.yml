@@ -43,5 +43,12 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm run migrate --workspace @sgb/api
+      - name: Verificar creación inicial del superadministrador
+        run: npm run bootstrap:superadmin --workspace @sgb/api
+        env:
+          BOOTSTRAP_SUPERADMIN_EMAIL: superadmin-integration@example.test
+          BOOTSTRAP_SUPERADMIN_PASSWORD: Clave-superadmin-integracion-2026
+          BOOTSTRAP_SUPERADMIN_NAME: Superadministrador de integración
+      - run: npm run test:integration --workspace @sgb/api
       - run: npm test
       - run: npm audit --omit=dev --audit-level=high

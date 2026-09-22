@@ -254,11 +254,12 @@ export async function register(input: RegisterInput, metadata: RequestMetadata) 
         `INSERT INTO audit_event(
            actor_user_id, property_id, active_role_id, action, entity_type, entity_id,
            after_data, ip_address, user_agent
-         ) VALUES($1,$2,$3,'ACCOUNT_REGISTERED','APP_USER',$1,$4,$5,$6)`,
+         ) VALUES($1,$2,$3,'ACCOUNT_REGISTERED','APP_USER',$4,$5,$6,$7)`,
         [
           userId,
           propertyId,
           ownerRoleId,
+          userId,
           JSON.stringify({ accountId, propertyId, email: input.email }),
           metadata.ipAddress,
           metadata.userAgent,
@@ -314,8 +315,8 @@ export async function verifyEmail(token: string, metadata: RequestMetadata): Pro
     await client.query(
       `INSERT INTO audit_event(
          actor_user_id, action, entity_type, entity_id, ip_address, user_agent
-       ) VALUES($1,'EMAIL_VERIFIED','APP_USER',$1,$2,$3)`,
-      [verification.user_id, metadata.ipAddress, metadata.userAgent],
+       ) VALUES($1,'EMAIL_VERIFIED','APP_USER',$2,$3,$4)`,
+      [verification.user_id, verification.user_id, metadata.ipAddress, metadata.userAgent],
     );
   });
 }
