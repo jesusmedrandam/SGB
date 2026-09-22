@@ -92,3 +92,61 @@ export function isUnitAllowed(
 ): boolean {
   return (allowedUnitsByContext[context] as readonly MeasurementUnitCode[]).includes(unit);
 }
+
+export const accountQuotaCodes = [
+  'MEDIA_STORAGE_BYTES',
+  'MANAGED_ANIMALS',
+  'COLLABORATOR_USERS',
+] as const;
+export type AccountQuotaCode = typeof accountQuotaCodes[number];
+
+export const defaultAccountQuotas = {
+  MEDIA_STORAGE_BYTES: 2 * 1024 * 1024 * 1024,
+  MANAGED_ANIMALS: 100,
+  COLLABORATOR_USERS: 10,
+} as const satisfies Record<AccountQuotaCode, number>;
+
+export const animalAvailabilityStatuses = [
+  'ACTIVE',
+  'MISSING',
+  'INACTIVE',
+  'EXITED',
+  'DEAD',
+] as const;
+export type AnimalAvailabilityStatus = typeof animalAvailabilityStatuses[number];
+
+export const animalExitReasons = [
+  'SALE',
+  'DONATION',
+  'SLAUGHTER',
+  'EXTERNAL_TRANSFER',
+  'OTHER',
+] as const;
+export type AnimalExitReason = typeof animalExitReasons[number];
+
+export const saleAnimalEffects = [
+  'KEEP_CURRENT_PROPERTY',
+  'EXIT_CURRENT_PROPERTY',
+  'TRANSFER_TO_PROPERTY',
+] as const;
+export type SaleAnimalEffect = typeof saleAnimalEffects[number];
+
+export const quotaCountingAnimalStatuses = [
+  'ACTIVE',
+  'MISSING',
+  'INACTIVE',
+] as const satisfies readonly AnimalAvailabilityStatus[];
+
+export const animalStatusTransitions = [
+  ['ACTIVE', 'MISSING', 'REPORT_MISSING'],
+  ['MISSING', 'ACTIVE', 'MARK_FOUND'],
+  ['ACTIVE', 'INACTIVE', 'DEACTIVATE'],
+  ['INACTIVE', 'ACTIVE', 'REACTIVATE'],
+  ['ACTIVE', 'DEAD', 'RECORD_DEATH'],
+  ['MISSING', 'DEAD', 'RECORD_DEATH'],
+  ['INACTIVE', 'DEAD', 'RECORD_DEATH'],
+  ['ACTIVE', 'EXITED', 'RECORD_EXIT'],
+  ['MISSING', 'EXITED', 'RECORD_EXIT'],
+  ['INACTIVE', 'EXITED', 'RECORD_EXIT'],
+  ['EXITED', 'ACTIVE', 'REVERSE_EXIT'],
+] as const satisfies readonly (readonly [AnimalAvailabilityStatus, AnimalAvailabilityStatus, string])[];

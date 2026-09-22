@@ -57,3 +57,19 @@ Fecha de corte: 2026-09-21.
 - Razas y colores son extensibles; los demás catálogos operativos pertenecen a
   la propiedad correspondiente.
 - Las reglas se validan tanto online como offline y siempre se confirman en API.
+
+## Límites de cuenta
+
+- Los límites se comparten entre todas las propiedades de una cuenta propietaria.
+- El valor inicial es 2 GiB de multimedia, 100 animales gestionados y 10 colaboradores.
+- Los colaboradores se cuentan como personas únicas; una invitación pendiente reserva cupo.
+- Reducir un límite no elimina datos existentes, pero bloquea nuevas altas.
+- El superadministrador puede modificar o retirar cada límite con auditoría.
+
+## Estado y venta de animales
+
+- Los estados de disponibilidad son `ACTIVE`, `MISSING`, `INACTIVE`, `EXITED` y `DEAD`.
+- Venta, donación, sacrificio y traslado externo son motivos de salida.
+- Una venta exige indicar si el animal permanece, sale o se transfiere.
+- Una venta en borrador no cambia el animal; la confirmación aplica todo en una transacción.
+- Las reversiones conservan el evento original y exigen motivo y auditoría.

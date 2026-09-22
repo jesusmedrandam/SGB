@@ -25,6 +25,8 @@ Las reglas de especies, catálogos y unidades están documentadas en
 [`docs/CATALOGOS.md`](docs/CATALOGOS.md).
 El modelo inicial de autenticación y selección de contexto está en
 [`docs/ACCESO_Y_CONTEXTO.md`](docs/ACCESO_Y_CONTEXTO.md).
+Los límites de cuenta y las reglas de venta/estado del animal están en
+[`docs/LIMITES_Y_CICLO_ANIMAL.md`](docs/LIMITES_Y_CICLO_ANIMAL.md).
 
 ## Estado
 
