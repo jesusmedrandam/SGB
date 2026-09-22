@@ -37,8 +37,12 @@ try {
     await client.query(
       `INSERT INTO audit_event(
          actor_user_id, action, entity_type, entity_id, superadmin_access, after_data
-       ) VALUES($1,'SUPERADMIN_BOOTSTRAPPED','APP_USER',$1,true,$2)`,
-      [inserted.rows[0]!.id, JSON.stringify({ email: input.BOOTSTRAP_SUPERADMIN_EMAIL })],
+       ) VALUES($1,'SUPERADMIN_BOOTSTRAPPED','APP_USER',$2,true,$3)`,
+      [
+        inserted.rows[0]!.id,
+        inserted.rows[0]!.id,
+        JSON.stringify({ email: input.BOOTSTRAP_SUPERADMIN_EMAIL }),
+      ],
     );
     return { created: true as const, email: input.BOOTSTRAP_SUPERADMIN_EMAIL };
   });
