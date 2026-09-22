@@ -176,3 +176,34 @@ export const videoUploadPolicy = {
 
 export const mediaTrashRetentionDays = 30 as const;
 export const mediaQuotaReservationMinutes = 30 as const;
+
+export const entityRemovalActions = [
+  'ARCHIVE',
+  'MOVE_TO_TRASH',
+  'RESTORE',
+  'PURGE',
+] as const;
+export type EntityRemovalAction = typeof entityRemovalActions[number];
+
+export const storageObjectStatuses = [
+  'PENDING_UPLOAD',
+  'PROCESSING',
+  'AVAILABLE',
+  'QUARANTINED',
+  'TRASHED',
+  'DELETE_PENDING',
+  'PURGED',
+  'FAILED',
+] as const;
+export type StorageObjectStatus = typeof storageObjectStatuses[number];
+
+export const deletionJobStatuses = [
+  'PENDING',
+  'PROCESSING',
+  'RETRY',
+  'COMPLETED',
+  'FAILED',
+] as const;
+export type DeletionJobStatus = typeof deletionJobStatuses[number];
+
+export const animalTrashRetentionDays = 30 as const;

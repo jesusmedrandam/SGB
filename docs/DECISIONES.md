@@ -82,3 +82,13 @@ Fecha de corte: 2026-09-21.
 - Se eliminan metadatos EXIF, GPS, dispositivo y nombres originales.
 - La cuota cuenta la versión canónica, no las miniaturas generadas internamente.
 - La deduplicación se limita a una misma cuenta y las cargas son reanudables e idempotentes.
+
+## Archivo y borrado
+
+- Venta, muerte, desaparición o traslado nunca eliminan físicamente un animal.
+- Los animales reales se archivan; la papelera se reserva para errores y duplicados.
+- Enviar a papelera cierra ubicación y grupo dentro de la misma transacción.
+- La purga se bloquea si existen operaciones históricas dependientes.
+- La auditoría conserva instantáneas y no depende de la existencia del animal.
+- Un archivo externo solo se marca purgado después de que el proveedor confirme su eliminación.
+- Los trabajos de eliminación son idempotentes, reintentables y reconciliables.

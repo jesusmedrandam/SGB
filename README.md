@@ -29,6 +29,8 @@ Los límites de cuenta y las reglas de venta/estado del animal están en
 [`docs/LIMITES_Y_CICLO_ANIMAL.md`](docs/LIMITES_Y_CICLO_ANIMAL.md).
 La compresión, privacidad y sincronización de archivos están definidas en
 [`docs/MULTIMEDIA.md`](docs/MULTIMEDIA.md).
+La política para evitar historiales rotos y archivos huérfanos está en
+[`docs/BORRADO_SEGURO.md`](docs/BORRADO_SEGURO.md).
 
 ## Estado
 
