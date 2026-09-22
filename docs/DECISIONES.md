@@ -92,3 +92,13 @@ Fecha de corte: 2026-09-21.
 - La auditoría conserva instantáneas y no depende de la existencia del animal.
 - Un archivo externo solo se marca purgado después de que el proveedor confirme su eliminación.
 - Los trabajos de eliminación son idempotentes, reintentables y reconciliables.
+
+## Núcleo ganadero
+
+- Fecha de nacimiento e ingreso son fechas civiles sin conversión de zona horaria.
+- Disponibilidad del animal y ciclo del registro son estados independientes.
+- Madre y padre se guardan como relaciones validadas, no como columnas libres.
+- Un progenitor externo puede conservarse como nombre informado sin crear un animal ficticio.
+- Grupo y ubicación se guardan como intervalos históricos; solo uno puede permanecer abierto por animal.
+- Restaurar desde papelera no reabre automáticamente una ubicación potencialmente obsoleta.
+- La ocupación excluye desaparecidos, salidos, muertos, archivados y registros en papelera.

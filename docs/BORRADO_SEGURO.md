@@ -37,7 +37,10 @@ ocupantes, incluso si se detecta un dato histórico inconsistente.
 
 ## Purga de animales
 
-Durante 30 días el propietario puede restaurar el registro con sus relaciones.
+Durante 30 días el propietario puede restaurar el perfil y su multimedia. La
+ubicación y el grupo anteriores quedan en el historial, pero no se reabren de
+forma automática porque pudieron cambiar mientras el registro estuvo oculto.
+Al restaurar se elige nuevamente una posición válida.
 Al vencer el plazo:
 
 - un registro sin operaciones dependientes puede purgar sus datos operativos;

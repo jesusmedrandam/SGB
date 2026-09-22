@@ -207,3 +207,47 @@ export const deletionJobStatuses = [
 export type DeletionJobStatus = typeof deletionJobStatuses[number];
 
 export const animalTrashRetentionDays = 30 as const;
+
+export const animalSexes = ['FEMALE', 'MALE'] as const;
+export type AnimalSex = typeof animalSexes[number];
+
+export const recordLifecycleStatuses = [
+  'CURRENT',
+  'ARCHIVED',
+  'TRASHED',
+  'PURGED',
+] as const;
+export type RecordLifecycleStatus = typeof recordLifecycleStatuses[number];
+
+export const physicalLocationKinds = ['PASTURE', 'CORRAL'] as const;
+export type PhysicalLocationKind = typeof physicalLocationKinds[number];
+
+export const animalParentRoles = ['MOTHER', 'FATHER'] as const;
+export type AnimalParentRole = typeof animalParentRoles[number];
+
+export const propertyPartyKinds = [
+  'USER',
+  'EXTERNAL_PERSON',
+  'ORGANIZATION',
+] as const;
+export type PropertyPartyKind = typeof propertyPartyKinds[number];
+
+export const occupancyAnimalStatuses = [
+  'ACTIVE',
+  'INACTIVE',
+] as const satisfies readonly AnimalAvailabilityStatus[];
+
+export const animalCorePermissions = [
+  'ANIMAL_VIEW',
+  'ANIMAL_CREATE',
+  'ANIMAL_UPDATE',
+  'ANIMAL_ARCHIVE',
+  'ANIMAL_TRASH',
+  'ANIMAL_RESTORE',
+  'ANIMAL_PURGE',
+  'GROUP_VIEW',
+  'GROUP_MANAGE',
+  'LOCATION_VIEW',
+  'LOCATION_MANAGE',
+] as const;
+export type AnimalCorePermission = typeof animalCorePermissions[number];
