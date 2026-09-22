@@ -33,6 +33,8 @@ La política para evitar historiales rotos y archivos huérfanos está en
 [`docs/BORRADO_SEGURO.md`](docs/BORRADO_SEGURO.md).
 El modelo de animales, parentesco, propietarios, grupos y ubicaciones está en
 [`docs/NUCLEO_GANADERO.md`](docs/NUCLEO_GANADERO.md).
+La creación, adopción de migraciones manuales y arranque del superadministrador
+están documentados en [`docs/INICIO_BASE_DATOS.md`](docs/INICIO_BASE_DATOS.md).
 
 ## Estado
 

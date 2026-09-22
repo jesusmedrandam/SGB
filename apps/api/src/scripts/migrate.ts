@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { pool } from '../database/pool.js';
 
-const migrationsDirectory = resolve(process.cwd(), 'database/migrations');
+const migrationsDirectory = fileURLToPath(
+  new URL('../../../../database/migrations/', import.meta.url),
+);
 const transactionWrapper = /^\s*BEGIN;([\s\S]*)COMMIT;\s*$/i;
 
 try {
