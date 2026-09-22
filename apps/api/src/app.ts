@@ -2,18 +2,30 @@ import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import { env } from './config.js';
+import { asyncHandler } from './core/async-handler.js';
+import { errorHandler, notFoundHandler } from './core/error-handler.js';
+import { pool } from './database/pool.js';
+import { requestId } from './middleware/request-id.js';
+import { authRouter } from './modules/auth/auth.routes.js';
 
 export const app = express();
 
 app.disable('x-powered-by');
+if (env.TRUST_PROXY) app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
+app.use(requestId);
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/health', (_request, response) => {
   response.json({ ok: true, service: 'sgb-api', version: '2.0.0-alpha.1' });
 });
 
-app.use((_request, response) => {
-  response.status(404).json({ ok: false, error: 'Ruta no encontrada.' });
-});
+app.get('/health/ready', asyncHandler(async (_request, response) => {
+  await pool.query('SELECT 1');
+  response.json({ ok: true, database: 'ready' });
+}));
+
+app.use('/auth', authRouter);
+app.use(notFoundHandler);
+app.use(errorHandler);

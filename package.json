@@ -13,6 +13,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
     "dev:api": "npm run dev --workspace @sgb/api",
     "dev:web": "npm run dev --workspace @sgb/web",
     "audit:prod": "npm audit --omit=dev"

@@ -8,10 +8,12 @@
 
 ## Fase 1 — Acceso y contexto
 
-- Registro, activación, inicio de sesión y recuperación.
+- Registro, activación e inicio de sesión por dispositivo.
 - Creación transaccional de cuenta y primera propiedad.
+- Renovación rotativa, cierre de sesión y contexto validado.
+- Recuperación de contraseña e integración del proveedor de correo.
 - Invitaciones por correo.
-- Selector global de propiedad y rol.
+- Selector global de propiedad y rol en la aplicación.
 - Panel del superadministrador.
 
 ## Fase 2 — Núcleo ganadero

@@ -23,6 +23,8 @@ hasta completar las pruebas y la migración voluntaria.
 
 Las reglas de especies, catálogos y unidades están documentadas en
 [`docs/CATALOGOS.md`](docs/CATALOGOS.md).
+El modelo inicial de autenticación y selección de contexto está en
+[`docs/ACCESO_Y_CONTEXTO.md`](docs/ACCESO_Y_CONTEXTO.md).
 
 ## Estado
 
@@ -37,7 +39,15 @@ Requiere Node.js 22 LTS.
 npm install
 npm run typecheck
 npm run build
+npm test
 npm run audit:prod
+```
+
+Para aplicar migraciones en orden y verificar que ninguna migración histórica
+haya sido alterada:
+
+```bash
+npm run migrate --workspace @sgb/api
 ```
 
 Las credenciales se configuran mediante variables de entorno. Nunca deben

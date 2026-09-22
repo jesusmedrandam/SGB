@@ -8,6 +8,9 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/security/password.test.js dist/security/tokens.test.js",
+    "migrate": "npm run build && node dist/scripts/migrate.js",
+    "bootstrap:superadmin": "npm run build && node dist/scripts/bootstrap-superadmin.js",
     "start": "node dist/server.js"
   },
   "dependencies": {
@@ -15,6 +18,7 @@
     "cors": "2.8.6",
     "dotenv": "18.0.2",
     "express": "5.2.1",
+    "express-rate-limit": "^8.7.0",
     "helmet": "8.3.0",
     "pg": "8.23.0",
     "zod": "4.6.5"
