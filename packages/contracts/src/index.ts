@@ -150,3 +150,29 @@ export const animalStatusTransitions = [
   ['INACTIVE', 'EXITED', 'RECORD_EXIT'],
   ['EXITED', 'ACTIVE', 'REVERSE_EXIT'],
 ] as const satisfies readonly (readonly [AnimalAvailabilityStatus, AnimalAvailabilityStatus, string])[];
+
+export const mediaPolicyVersion = 1 as const;
+
+export const imageUploadPolicy = {
+  maxInputBytes: 25 * 1024 * 1024,
+  maxStoredBytes: 5 * 1024 * 1024,
+  maxLongEdgePixels: 2560,
+  thumbnailLongEdgePixels: 512,
+  preferredMimeType: 'image/webp',
+  fallbackMimeType: 'image/jpeg',
+  initialQuality: 82,
+  acceptedInputMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/heic'],
+} as const;
+
+export const videoUploadPolicy = {
+  maxInputBytes: 500 * 1024 * 1024,
+  maxStoredBytes: 120 * 1024 * 1024,
+  maxDurationSeconds: 5 * 60,
+  maxHeightPixels: 720,
+  mimeType: 'video/mp4',
+  videoCodec: 'h264',
+  audioCodec: 'aac',
+} as const;
+
+export const mediaTrashRetentionDays = 30 as const;
+export const mediaQuotaReservationMinutes = 30 as const;

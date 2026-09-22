@@ -21,7 +21,7 @@
 - Catálogos gobernados por ámbito, especie y contexto de uso.
 - Animales, parentesco y propietarios.
 - Grupos, potreros, corrales e historial de ubicación.
-- Multimedia y fichas públicas.
+- Procesamiento multimedia nativo, sanitización del servidor y fichas públicas.
 - Primera descarga offline por propiedad.
 
 ## Fase 3 — Operaciones

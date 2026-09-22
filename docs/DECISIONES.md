@@ -73,3 +73,12 @@ Fecha de corte: 2026-09-21.
 - Una venta exige indicar si el animal permanece, sale o se transfiere.
 - Una venta en borrador no cambia el animal; la confirmación aplica todo en una transacción.
 - Las reversiones conservan el evento original y exigen motivo y auditoría.
+
+## Multimedia
+
+- La aplicación instalada utiliza módulos nativos para procesar y sincronizar archivos.
+- Imágenes y videos se comprimen y limpian antes de subir para ahorrar conexión.
+- El servidor vuelve a validar y codificar; nunca confía únicamente en el cliente.
+- Se eliminan metadatos EXIF, GPS, dispositivo y nombres originales.
+- La cuota cuenta la versión canónica, no las miniaturas generadas internamente.
+- La deduplicación se limita a una misma cuenta y las cargas son reanudables e idempotentes.
