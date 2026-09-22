@@ -35,6 +35,8 @@ El modelo de animales, parentesco, propietarios, grupos y ubicaciones está en
 [`docs/NUCLEO_GANADERO.md`](docs/NUCLEO_GANADERO.md).
 La creación, adopción de migraciones manuales y arranque del superadministrador
 están documentados en [`docs/INICIO_BASE_DATOS.md`](docs/INICIO_BASE_DATOS.md).
+El despliegue seguro y gradual de la interfaz está en
+[`docs/DESPLIEGUE_FRONTEND.md`](docs/DESPLIEGUE_FRONTEND.md).
 
 ## Estado
 
