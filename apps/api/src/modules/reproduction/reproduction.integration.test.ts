@@ -8,7 +8,7 @@ import { getSessionOverview, login, register, resendEmailVerification, verifyEma
 import { createHeat, createPregnancy, createService, getReproductionSettings, listReproduction,
   recordBirth, recordLoss, updateReproductionSettings } from './reproduction.service.js';
 import { createLactation, finishLactation, listProduction, recordMilk,
-  recordTank, setLactationMilking } from '../production/production.service.js';
+  recordTank, setLactationMilking, setCowMilking } from '../production/production.service.js';
 
 const metadata = { ipAddress: '127.0.0.1', userAgent: 'sgb-reproduction-test' };
 
@@ -184,6 +184,15 @@ test('la reproducción conserva propiedad, parentesco, espera y auditoría', asy
     await finishLactation(auth,context,lactation.id,today,metadata);
     await assert.rejects(()=>recordMilk(auth,context,{lactationId:lactation.id,
       producedOn:today,shift:'AFTERNOON',liters:3,source:'MANUAL'},metadata),
+    (error:{code?:string})=>error.code==='MILKING_UNAVAILABLE');
+    await setCowMilking(auth,context,mother.id,true,metadata);
+    const standalone=await recordMilk(auth,context,{cowId:mother.id,
+      producedOn:today,shift:'AFTERNOON',liters:3,source:'MANUAL'},metadata);
+    assert.equal(standalone.lactationId,null);
+    assert.equal((await listProduction(context)).milk.find((row)=>row.id===standalone.id)?.lactationId,null);
+    await setCowMilking(auth,context,mother.id,false,metadata);
+    await assert.rejects(()=>recordMilk(auth,context,{cowId:mother.id,
+      producedOn:today,shift:'NIGHT',liters:1,source:'MANUAL'},metadata),
     (error:{code?:string})=>error.code==='MILKING_UNAVAILABLE');
   } finally { await pool.end(); }
 });

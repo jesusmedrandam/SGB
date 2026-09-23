@@ -12,10 +12,12 @@ export const lactationSchema = z.object({
 export const finishLactationSchema = z.object({ endedOn: z.iso.date() });
 export const milkingSchema = z.object({ inMilking: z.boolean() });
 export const milkSchema = z.object({
-  lactationId: z.uuid(), producedOn: z.iso.date(), shift,
+  cowId: z.uuid().optional(), lactationId: z.uuid().optional(),
+  producedOn: z.iso.date(), shift,
   liters: z.number().finite().min(0).max(10000), source,
   externalReference: z.string().trim().max(160).nullable().optional(), notes,
-});
+}).refine((value)=>Boolean(value.cowId||value.lactationId),
+  'Selecciona una vaca o lactancia en ordeño.');
 export const tankSchema = z.object({
   producedOn: z.iso.date(), shift, liters: z.number().finite().min(0).max(100000), source,
   externalReference: z.string().trim().max(160).nullable().optional(), notes,

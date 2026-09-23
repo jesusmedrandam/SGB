@@ -1,6 +1,6 @@
 import {type FormEvent,useEffect,useMemo,useState} from 'react';
 import {ApiRequestError,createLactation,finishLactation,getProduction,recordMilk,
-  recordTank,setLactationMilking,type MilkShift,type ProductionRecords} from './api';
+  recordTank,setLactationMilking,setCowMilking,type MilkShift,type ProductionRecords} from './api';
 
 function localDate(){const date=new Date();return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;}
 const issue=(error:unknown)=>error instanceof ApiRequestError ? error.message
@@ -23,7 +23,7 @@ export function ProductionPanel({accessToken,canManage}:{accessToken:string;canM
       .catch((failure)=>{if(active)setError(issue(failure));});
     return ()=>{active=false;};
   },[accessToken,revision]);
-  const activeLactations=records?.lactations.filter((row)=>!row.endedOn&&row.inMilking)??[];
+  const milkingCows=records?.cows.filter((row)=>row.inMilking)??[];
   const daily=useMemo(()=>({
     milk:records?.milk.filter((row)=>row.producedOn===date)??[],
     tanks:records?.tanks.filter((row)=>row.producedOn===date)??[],
@@ -41,7 +41,7 @@ export function ProductionPanel({accessToken,canManage}:{accessToken:string;canM
   }
   function milk(event:FormEvent<HTMLFormElement>){event.preventDefault();const form=event.currentTarget;
     const data=new FormData(form);
-    void run(()=>recordMilk(accessToken,{lactationId:String(data.get('lactationId')),
+    void run(()=>recordMilk(accessToken,{cowId:String(data.get('cowId')),
       producedOn:String(data.get('producedOn')),shift:String(data.get('shift')) as MilkShift,
       liters:Number(data.get('liters')),source:String(data.get('source')) as 'MANUAL'|'SENSOR',
       externalReference:optional(data,'externalReference'),notes:optional(data,'notes')}),form);
@@ -72,9 +72,10 @@ export function ProductionPanel({accessToken,canManage}:{accessToken:string;canM
       </form>
       <form className="group-new-form" onSubmit={milk}>
         <h3>Registrar ordeño</h3>
-        <label><span>Lactancia en ordeño *</span><select name="lactationId" required defaultValue="">
+        <label><span>Vaca en ordeño *</span><select name="cowId" required defaultValue="">
           <option value="" disabled>Selecciona la vaca</option>
-          {activeLactations.map((row)=><option key={row.id} value={row.id}>{row.cowName} · {row.startedOn}</option>)}
+          {milkingCows.map((row)=><option key={row.id} value={row.id}>
+            {row.name}{row.lactationId?' · con lactancia':' · sin lactancia'}</option>)}
         </select></label>
         <label><span>Fecha *</span><input type="date" name="producedOn" required defaultValue={localDate()} /></label>
         <label><span>Turno</span><ShiftSelect/></label>
@@ -84,7 +85,7 @@ export function ProductionPanel({accessToken,canManage}:{accessToken:string;canM
         </select></label>
         <label><span>Referencia externa</span><input name="externalReference" maxLength={160}/></label>
         <label><span>Observaciones</span><textarea name="notes" maxLength={2000}/></label>
-        <button className="primary-button compact" disabled={busy||!activeLactations.length}>Guardar ordeño</button>
+        <button className="primary-button compact" disabled={busy||!milkingCows.length}>Guardar ordeño</button>
       </form>
       <form className="group-new-form" onSubmit={tank}>
         <h3>Registrar tanque</h3>
@@ -100,6 +101,16 @@ export function ProductionPanel({accessToken,canManage}:{accessToken:string;canM
       </form>
     </div>}
     {records&&<div className="production-forms">
+      <div><h3>Vacas aptas para ordeño</h3>
+        {!records.cows.length&&<p className="muted">No hay vacas con parto reciente.</p>}
+        {records.cows.map((cow)=><article key={cow.id} className="group-location-item">
+          <strong>{cow.name}</strong>
+          <small>{cow.inMilking?'En ordeño':'Sin ordeño'}{cow.lactationId?' · con lactancia':''}</small>
+          {canManage&&<button className="secondary-button compact" disabled={busy}
+            onClick={()=>void run(()=>setCowMilking(accessToken,cow.id,!cow.inMilking))}>
+            {cow.inMilking?'Pausar ordeño':'Activar ordeño'}</button>}
+        </article>)}
+      </div>
       <div><h3>Lactancias</h3>
         {!records.lactations.length&&<p className="muted">Sin lactancias registradas.</p>}
         {records.lactations.map((row)=><article key={row.id} className="group-location-item">

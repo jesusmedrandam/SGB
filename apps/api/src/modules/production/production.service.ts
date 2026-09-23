@@ -48,7 +48,7 @@ function translate(error: unknown): never {
 }
 
 export async function listProduction(context: PropertyContext) {
-  const [lactations, milk, tanks, births] = await Promise.all([
+  const [lactations, milk, tanks, births, cows] = await Promise.all([
     pool.query(`SELECT l.id,l.cow_id AS "cowId",a.name AS "cowName",l.birth_id AS "birthId",
       l.started_on::text AS "startedOn",l.ended_on::text AS "endedOn",
       l.in_milking AS "inMilking",l.notes
@@ -67,8 +67,59 @@ export async function listProduction(context: PropertyContext) {
       JOIN animal a ON a.id=b.mother_id WHERE b.property_id=$1
       AND NOT EXISTS(SELECT 1 FROM milk_lactation l WHERE l.birth_id=b.id)
       ORDER BY b.occurred_on DESC LIMIT 500`,[context.propertyId]),
+    pool.query(`SELECT a.id,a.name,COALESCE(ms.enabled,false) AS "inMilking",
+      (SELECT l.id FROM milk_lactation l WHERE l.cow_id=a.id AND l.ended_on IS NULL
+       LIMIT 1) AS "lactationId"
+      FROM animal a LEFT JOIN milk_animal_state ms ON ms.cow_id=a.id
+      LEFT JOIN reproduction_setting rs ON rs.property_id=a.property_id
+      WHERE a.property_id=$1 AND a.sex='FEMALE' AND a.record_status='CURRENT'
+        AND a.availability_status_code='ACTIVE'
+        AND EXISTS(SELECT 1 FROM reproduction_birth b WHERE b.mother_id=a.id
+          AND b.occurred_on+COALESCE(rs.max_milking_days,305)
+            >= (now() AT TIME ZONE (SELECT timezone FROM property WHERE id=$1))::date)
+      ORDER BY lower(a.name),a.id LIMIT 2000`,[context.propertyId]),
   ]);
-  return { lactations:lactations.rows,milk:milk.rows,tanks:tanks.rows,births:births.rows };
+  return { lactations:lactations.rows,milk:milk.rows,tanks:tanks.rows,births:births.rows,
+    cows:cows.rows };
+}
+
+async function upsertMilkingState(client:PoolClient,context:PropertyContext,accountId:string,
+  cowId:string,enabled:boolean,userId:string) {
+  await client.query(`INSERT INTO milk_animal_state(cow_id,property_id,account_id,enabled,updated_by)
+    VALUES($1,$2,$3,$4,$5) ON CONFLICT(cow_id) DO UPDATE SET
+      enabled=EXCLUDED.enabled,updated_by=EXCLUDED.updated_by,updated_at=now()`,
+  [cowId,context.propertyId,accountId,enabled,userId]);
+}
+
+async function ensureRecentBirth(client:PoolClient,context:PropertyContext,cowId:string,
+  date:string,maxDays:number) {
+  const result=await client.query(`SELECT 1 FROM reproduction_birth WHERE mother_id=$1
+    AND property_id=$2 AND $3::date BETWEEN occurred_on AND occurred_on+$4::int LIMIT 1`,
+  [cowId,context.propertyId,date,maxDays]);
+  if(!result.rowCount)throw invalidRequest('MILKING_PERIOD_EXPIRED',
+    `La vaca requiere un parto dentro de los últimos ${maxDays} días.`);
+}
+
+export async function setCowMilking(auth:AuthState,context:PropertyContext,cowId:string,
+  inMilking:boolean,metadata:RequestMetadata) {
+  try{return await inTransaction(async(client)=>{
+    const {account_id:accountId,today,max_days:maxDays}=await access(client,auth,context,'PRODUCTION_MANAGE');
+    const cow=await client.query(`SELECT id FROM animal WHERE id=$1 AND account_id=$2 AND property_id=$3
+      AND sex='FEMALE' AND record_status='CURRENT' AND availability_status_code='ACTIVE' FOR UPDATE`,
+    [cowId,accountId,context.propertyId]);
+    if(!cow.rowCount)throw invalidRequest('COW_UNAVAILABLE','La vaca debe estar activa en esta propiedad.');
+    if(inMilking)await ensureRecentBirth(client,context,cowId,today,maxDays);
+    const prior=await client.query<{enabled:boolean}>(
+      `SELECT enabled FROM milk_animal_state WHERE cow_id=$1`,[cowId]);
+    const lactation=await client.query(`SELECT id FROM milk_lactation WHERE cow_id=$1
+      AND property_id=$2 AND ended_on IS NULL FOR UPDATE`,[cowId,context.propertyId]);
+    if(lactation.rows[0])await client.query(`UPDATE milk_lactation SET in_milking=$2,updated_at=now()
+      WHERE id=$1`,[lactation.rows[0].id,inMilking]);
+    await upsertMilkingState(client,context,accountId,cowId,inMilking,auth.userId);
+    await audit(client,auth,context,metadata,'COW_MILKING_CHANGED','ANIMAL',cowId,
+      {inMilking:prior.rows[0]?.enabled??false},{inMilking});
+    return {cowId,inMilking};
+  });}catch(error){return translate(error);}
 }
 
 export async function createLactation(auth: AuthState, context: PropertyContext,
@@ -96,6 +147,7 @@ export async function createLactation(auth: AuthState, context: PropertyContext,
         input.inMilking,input.notes ?? null,auth.userId]);
     const created={id:result.rows[0]!.id,cowId,birthId:input.birthId,startedOn,
       endedOn:input.endedOn ?? null,inMilking:input.inMilking,notes:input.notes ?? null};
+    await upsertMilkingState(client,context,accountId,cowId,input.inMilking,auth.userId);
     await audit(client,auth,context,metadata,'MILK_LACTATION_CREATED','MILK_LACTATION',created.id,null,created);
     return created;
   }); } catch(error) { return translate(error); }
@@ -104,7 +156,7 @@ export async function createLactation(auth: AuthState, context: PropertyContext,
 export async function finishLactation(auth: AuthState,context:PropertyContext,id:string,
   endedOn:string,metadata:RequestMetadata) {
   try { return await inTransaction(async(client)=>{
-    const { today,max_days:maxDays }=await access(client,auth,context,'PRODUCTION_MANAGE');
+    const { account_id:accountId,today,max_days:maxDays }=await access(client,auth,context,'PRODUCTION_MANAGE');
     const lactation=await client.query<{cow_id:string;started_on:string}>(
       `SELECT cow_id,started_on::text FROM milk_lactation WHERE id=$1 AND property_id=$2
         AND ended_on IS NULL FOR UPDATE`,[id,context.propertyId]);
@@ -120,6 +172,7 @@ export async function finishLactation(auth: AuthState,context:PropertyContext,id
         'El cierre debe incluir los ordeños registrados y respetar el límite posparto.');
     await client.query(`UPDATE milk_lactation SET ended_on=$2,in_milking=false,updated_at=now()
       WHERE id=$1`,[id,endedOn]);
+    await upsertMilkingState(client,context,accountId,row.cow_id,false,auth.userId);
     await audit(client,auth,context,metadata,'MILK_LACTATION_FINISHED','MILK_LACTATION',id,
       {id,endedOn:null},{id,endedOn,inMilking:false});
     return {id,endedOn,inMilking:false};
@@ -129,9 +182,9 @@ export async function finishLactation(auth: AuthState,context:PropertyContext,id
 export async function setLactationMilking(auth:AuthState,context:PropertyContext,id:string,
   inMilking:boolean,metadata:RequestMetadata) {
   return inTransaction(async(client)=>{
-    const {today,max_days:maxDays}=await access(client,auth,context,'PRODUCTION_MANAGE');
-    const result=await client.query<{started_on:string;in_milking:boolean}>(
-      `SELECT started_on::text,in_milking FROM milk_lactation WHERE id=$1
+    const {account_id:accountId,today,max_days:maxDays}=await access(client,auth,context,'PRODUCTION_MANAGE');
+    const result=await client.query<{cow_id:string;started_on:string;in_milking:boolean}>(
+      `SELECT cow_id,started_on::text,in_milking FROM milk_lactation WHERE id=$1
        AND property_id=$2 AND ended_on IS NULL FOR UPDATE`,[id,context.propertyId]);
     const row=result.rows[0];
     if(!row)throw new ApiError(404,'LACTATION_NOT_FOUND','La lactancia activa no está disponible.');
@@ -140,6 +193,7 @@ export async function setLactationMilking(auth:AuthState,context:PropertyContext
     if(inMilking && today>upper)throw invalidRequest('MILKING_PERIOD_EXPIRED',
       `No se puede ordeñar después de ${maxDays} días desde el parto.`);
     await client.query(`UPDATE milk_lactation SET in_milking=$2,updated_at=now() WHERE id=$1`,[id,inMilking]);
+    await upsertMilkingState(client,context,accountId,row.cow_id,inMilking,auth.userId);
     await audit(client,auth,context,metadata,'MILK_LACTATION_MILKING_CHANGED','MILK_LACTATION',id,
       {inMilking:row.in_milking},{inMilking});
     return {id,inMilking};
@@ -151,28 +205,41 @@ export async function recordMilk(auth:AuthState,context:PropertyContext,input:Mi
   try {return await inTransaction(async(client)=>{
     const {account_id:accountId,today,max_days:maxDays}=await access(client,auth,context,'PRODUCTION_MANAGE');
     if(input.producedOn>today)throw invalidRequest('FUTURE_PRODUCTION_DATE','La fecha no puede ser futura.');
-    const lactation=await client.query<{cow_id:string;started_on:string;ended_on:string|null;in_milking:boolean}>(
-      `SELECT cow_id,started_on::text,ended_on::text,in_milking FROM milk_lactation
-       WHERE id=$1 AND account_id=$2 AND property_id=$3 FOR UPDATE`,
-      [input.lactationId,accountId,context.propertyId]);
-    const row=lactation.rows[0];
-    if(!row || !row.in_milking || row.ended_on)
-      throw invalidRequest('MILKING_UNAVAILABLE','Selecciona una lactancia abierta y en ordeño.');
-    const limit=(await client.query<{limit_on:string}>(
-      `SELECT ($1::date+$2::int)::text AS limit_on`,[row.started_on,maxDays])).rows[0]!.limit_on;
-    if(input.producedOn<row.started_on || input.producedOn>limit)
-      throw invalidRequest('MILKING_PERIOD_EXPIRED',`El ordeño debe estar dentro de los ${maxDays} días posparto.`);
-    const animal=await client.query(`SELECT 1 FROM animal WHERE id=$1 AND property_id=$2
-      AND sex='FEMALE' AND record_status='CURRENT' AND availability_status_code='ACTIVE' FOR SHARE`,
-    [row.cow_id,context.propertyId]);
+    const selected=input.lactationId ? await client.query<{cow_id:string}>(
+      `SELECT cow_id FROM milk_lactation WHERE id=$1 AND account_id=$2 AND property_id=$3`,
+      [input.lactationId,accountId,context.propertyId]) : null;
+    if(input.lactationId && !selected?.rows[0])
+      throw invalidRequest('MILKING_UNAVAILABLE','La lactancia no está disponible.');
+    const cowId=input.cowId ?? selected?.rows[0]?.cow_id;
+    if(!cowId || (selected?.rows[0] && selected.rows[0].cow_id!==cowId))
+      throw invalidRequest('COW_UNAVAILABLE','La vaca y la lactancia deben coincidir.');
+    const animal=await client.query(`SELECT 1 FROM animal WHERE id=$1 AND account_id=$2 AND property_id=$3
+      AND sex='FEMALE' AND record_status='CURRENT' AND availability_status_code='ACTIVE' FOR UPDATE`,
+    [cowId,accountId,context.propertyId]);
     if(!animal.rowCount)throw invalidRequest('COW_UNAVAILABLE','La vaca debe estar activa en esta propiedad.');
+    const state=await client.query<{enabled:boolean}>(
+      `SELECT enabled FROM milk_animal_state WHERE cow_id=$1 AND account_id=$2 AND property_id=$3`,
+      [cowId,accountId,context.propertyId]);
+    if(!state.rows[0]?.enabled)
+      throw invalidRequest('MILKING_UNAVAILABLE','La vaca debe estar en ordeño.');
+    await ensureRecentBirth(client,context,cowId,input.producedOn,maxDays);
+    const open=await client.query<{id:string;started_on:string;in_milking:boolean}>(
+      `SELECT id,started_on::text,in_milking FROM milk_lactation WHERE cow_id=$1
+       AND account_id=$2 AND property_id=$3 AND ended_on IS NULL FOR UPDATE`,
+      [cowId,accountId,context.propertyId]);
+    const row=open.rows[0];
+    if(input.lactationId && input.lactationId!==row?.id || row && !row.in_milking)
+      throw invalidRequest('MILKING_UNAVAILABLE','Selecciona una lactancia abierta y en ordeño.');
+    if(row && input.producedOn<row.started_on)
+      throw invalidRequest('MILKING_PERIOD_EXPIRED','El ordeño debe ser posterior al parto de la lactancia.');
+    const lactationId=row?.id??null;
     const result=await client.query<{id:string}>(
       `INSERT INTO milk_production(account_id,property_id,cow_id,lactation_id,
         produced_on,shift,liters,source,external_reference,notes,created_by)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-      [accountId,context.propertyId,row.cow_id,input.lactationId,input.producedOn,
+      [accountId,context.propertyId,cowId,lactationId,input.producedOn,
         input.shift,input.liters,input.source,input.externalReference ?? null,input.notes ?? null,auth.userId]);
-    const created={id:result.rows[0]!.id,cowId:row.cow_id,...input};
+    const created={id:result.rows[0]!.id,...input,cowId,lactationId};
     await audit(client,auth,context,metadata,'MILK_PRODUCTION_RECORDED','MILK_PRODUCTION',created.id,null,created);
     return created;
   });}catch(error){return translate(error);}

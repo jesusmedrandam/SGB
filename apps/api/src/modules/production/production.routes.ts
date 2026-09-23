@@ -3,7 +3,7 @@ import { asyncHandler } from '../../core/async-handler.js';
 import { authenticate,requireModule,requirePermission,requirePropertyContext } from '../auth/auth.middleware.js';
 import type { RequestMetadata } from '../auth/auth.types.js';
 import { finishLactation,listProduction,recordMilk,recordTank,
-  createLactation,setLactationMilking } from './production.service.js';
+  createLactation,setLactationMilking,setCowMilking } from './production.service.js';
 import { finishLactationSchema,idSchema,lactationSchema,milkSchema,milkingSchema,tankSchema } from './production.schemas.js';
 
 const metadata=(request:Request):RequestMetadata=>({
@@ -30,6 +30,13 @@ productionRouter.put('/lactations/:id/milking',requirePermission('PRODUCTION_MAN
     const {id}=idSchema.parse(request.params);
     const {inMilking}=milkingSchema.parse(request.body);
     response.json({ok:true,data:await setLactationMilking(request.auth!,request.propertyContext!,
+      id,inMilking,metadata(request))});
+  }));
+productionRouter.put('/cows/:id/milking',requirePermission('PRODUCTION_MANAGE'),
+  asyncHandler(async(request,response)=>{
+    const {id}=idSchema.parse(request.params);
+    const {inMilking}=milkingSchema.parse(request.body);
+    response.json({ok:true,data:await setCowMilking(request.auth!,request.propertyContext!,
       id,inMilking,metadata(request))});
   }));
 productionRouter.post('/milk',requirePermission('PRODUCTION_MANAGE'),asyncHandler(async(request,response)=>{

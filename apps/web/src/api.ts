@@ -653,7 +653,7 @@ export interface MilkLactation {
   endedOn:string|null; inMilking:boolean; notes:string|null;
 }
 export interface MilkRecord {
-  id:string; cowId:string; cowName:string; lactationId:string;
+  id:string; cowId:string; cowName:string; lactationId:string|null;
   producedOn:string; shift:string; liters:number; source:string;
   externalReference:string|null; notes:string|null;
 }
@@ -664,6 +664,7 @@ export interface TankRecord {
 export interface ProductionRecords {
   lactations:MilkLactation[]; milk:MilkRecord[]; tanks:TankRecord[];
   births:Array<{id:string;cowId:string;cowName:string;occurredOn:string}>;
+  cows:Array<{id:string;name:string;inMilking:boolean;lactationId:string|null}>;
 }
 export function getProduction(accessToken:string) {
   return request<ProductionRecords>('/production',{headers:bearer(accessToken)});
@@ -684,8 +685,13 @@ export function setLactationMilking(accessToken:string,id:string,inMilking:boole
     method:'PUT',headers:bearer(accessToken),body:JSON.stringify({inMilking}),
   });
 }
+export function setCowMilking(accessToken:string,id:string,inMilking:boolean) {
+  return request<{cowId:string;inMilking:boolean}>(`/production/cows/${encodeURIComponent(id)}/milking`,{
+    method:'PUT',headers:bearer(accessToken),body:JSON.stringify({inMilking}),
+  });
+}
 export type MilkShift='MORNING'|'AFTERNOON'|'NIGHT'|'SINGLE';
-export function recordMilk(accessToken:string,input:{lactationId:string;producedOn:string;
+export function recordMilk(accessToken:string,input:{cowId?:string;lactationId?:string;producedOn:string;
   shift:MilkShift;liters:number;source:'MANUAL'|'SENSOR';externalReference?:string|null;
   notes?:string|null}) {
   return request<MilkRecord>('/production/milk',{

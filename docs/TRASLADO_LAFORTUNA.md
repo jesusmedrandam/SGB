@@ -28,7 +28,7 @@ el aislamiento por cuenta, propiedad, rol y módulos de SGB.
 | Animales, razas, colores, padres, propietarios y marquillas | Incorporados con catálogos globales y opciones por cuenta | `src/modules/animals`, `catalogs`, `marks` |
 | Grupos, potreros y corrales | Incorporados con historial de ubicación y requisitos de módulos | `src/modules/groups`, `locations` |
 | Celos, preñeces, partos y pérdidas | Incorporados; crías, parentesco, propietarios, reglas por propiedad y auditoría | `src/modules/reproduction/reproduction.routes.ts`, `src/services/reproduction-policy.ts`, `frontend/src/pages/reproduction` |
-| Servicios asistidos, lactancias, ordeño y tanque | Incorporados con límite posparto configurable; pendientes edición de registros y gráficas avanzadas | `src/modules/reproduction`, `records`, `frontend/src/pages/production` |
+| Servicios asistidos, lactancias, ordeño y tanque | Incorporados con límite posparto configurable y ordeño independiente de lactancia tras un parto; pendientes edición de registros y gráficas avanzadas | `src/modules/reproduction`, `records`, `frontend/src/pages/production` |
 | Movimientos detallados y asistencia animal | Pendientes; conservar historial de grupo y ubicación | `src/modules/movements`, `frontend/src/pages/operations/MovementsPage.tsx` |
 | Sanidad, tratamientos, limpiezas y actividades | Pendientes; registrar eventos y consumos de cada propiedad | `src/modules/sanitary`, `health`, `cleanings`, `activities` |
 | Ventas, compras y finanzas personales | Pendientes; ventas deben conservar efectos sobre disponibilidad del animal | `src/modules/sales`, `purchases`, `personal-finance` |
