@@ -614,6 +614,16 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     const ownerTwo = await createOwner(ownerAuth, secondContext,
       { kind: 'EXTERNAL_PERSON', name: `Propietario ${suffix}` }, metadata);
     assert.ok((await listOwners(secondContext)).some((row) => row.id === ownerOne.id));
+    const newlyOwnedBrand = await createBrand(ownerAuth, secondContext, `Propietarios ${suffix}`,
+      metadata, [ownerOne.id, ownerTwo.id]);
+    assert.equal((await listBrands(ownerContext)).find((row) => row.id === newlyOwnedBrand.id)?.owner_ids?.length, 2);
+    const newlyOwnedAnimal = await createAnimal(ownerAuth, secondContext, {
+      name: 'Animal de varios propietarios', sex: 'FEMALE', speciesCode: 'BOVINE',
+      owners: [{ partyId: ownerOne.id, percent: 50, isPrimary: true },
+        { partyId: ownerTwo.id, percent: 50, isPrimary: false }],
+      brandIds: [newlyOwnedBrand.id],
+    }, metadata);
+    assert.equal(newlyOwnedAnimal.owners.length, 2);
     await setBrandOwners(ownerAuth, secondContext, anotherBrand.id, [ownerOne.id, ownerTwo.id], metadata);
     assert.equal((await listBrands(ownerContext)).find((row) => row.id === anotherBrand.id)?.owner_ids?.length, 2);
     const otherAccountContext = { ...ownerContext,
@@ -717,11 +727,13 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         'PROPERTY_CREATED',
         'ANIMAL_CREATED',
         'ANIMAL_CREATED',
-        'CATALOG_ITEM_STATE_CHANGED',
         'OWNER_CREATED',
         'OWNER_CREATED',
+        'LIVESTOCK_BRAND_CREATED',
+        'ANIMAL_CREATED',
         'BRAND_OWNERS_UPDATED',
         'ANIMAL_OWNERS_UPDATED',
+        'CATALOG_ITEM_STATE_CHANGED',
         'PROPERTY_MODULE_UPDATED',
         'PROPERTY_CREATED',
         'AUTH_LOGOUT',

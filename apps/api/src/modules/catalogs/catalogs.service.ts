@@ -72,7 +72,7 @@ async function ensureManageAccess(client: PoolClient, auth: AuthState, context: 
      JOIN catalog_definition cd ON cd.code = $4 AND cd.active
        AND cd.scope = 'PROPERTY' AND cd.mutability = 'PROPERTY_EXTENSIBLE'
      WHERE p.id = $1 AND pr.id = $3 AND p.deleted_at IS NULL AND p.status = 'ACTIVE'
-     FOR SHARE OF p, aa, pm, pr`,
+     FOR SHARE OF p, pm, pr`,
     [context.propertyId, auth.userId, context.roleId, code],
   );
   if (!access.rows[0]) throw forbidden('CATALOG_MANAGE_DENIED', 'El rol activo no permite editar este catálogo.');

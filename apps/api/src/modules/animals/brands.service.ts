@@ -25,7 +25,7 @@ async function access(client: PoolClient, auth: AuthState, context: PropertyCont
      JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = p.id AND pr.active
      JOIN role_permission rp ON rp.role_id = pr.id AND rp.permission_code = 'CATALOG_MANAGE'
      WHERE p.id = $1 AND pr.id = $3 AND p.deleted_at IS NULL AND p.status = 'ACTIVE'
-     FOR SHARE OF p, aa, pm, pr`,
+     FOR SHARE OF p, pm, pr`,
     [context.propertyId, auth.userId, context.roleId],
   );
   if (!result.rows[0]) throw forbidden('BRAND_MANAGE_DENIED', 'El rol activo no permite administrar marquillas.');
