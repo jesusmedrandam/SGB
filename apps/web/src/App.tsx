@@ -1,14 +1,20 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ApiRequestError,
   changeContext,
   getSessionOverview,
   login,
   logout,
+  register,
   refreshSession,
+  resendVerification,
+  verifyEmail,
+  type RegistrationResult,
   type SessionOverview,
   type SessionPayload,
 } from './api';
+import { AuthScreen, type VerificationState } from './AuthScreen';
+import { Brand } from './Brand';
 import { SuperadminPanel } from './SuperadminPanel';
 
 type Theme = 'light' | 'dark';
@@ -37,69 +43,6 @@ function errorMessage(error: unknown): string {
   return error instanceof ApiRequestError
     ? error.message
     : 'Ocurrió un error inesperado. Inténtalo nuevamente.';
-}
-
-function Brand() {
-  return <div className="brand" aria-label="Sistema de Gestión Bovina">
-    <span className="brand-mark" aria-hidden="true">SGB</span>
-    <span className="brand-copy"><strong>SGB</strong><small>Gestión bovina</small></span>
-  </div>;
-}
-
-function LoginScreen({ busy, error, onLogin }: {
-  busy: boolean;
-  error: string | null;
-  onLogin: (email: string, password: string) => Promise<void>;
-}) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    await onLogin(email, password);
-  }
-
-  return <main className="login-layout">
-    <section className="login-intro">
-      <Brand />
-      <div className="intro-copy">
-        <span className="eyebrow">SGB 2.0</span>
-        <h1>Tu finca, organizada y disponible donde estés.</h1>
-        <p>Una nueva base preparada para trabajar por propiedad, por rol y con funcionamiento sin conexión.</p>
-      </div>
-      <div className="intro-points">
-        <span>Seguridad y auditoría</span><span>Acceso por propiedad</span><span>Base para trabajo offline</span>
-      </div>
-    </section>
-
-    <section className="login-panel">
-      <div className="login-card">
-        <div className="mobile-brand"><Brand /></div>
-        <span className="eyebrow">Acceso seguro</span>
-        <h2>Iniciar sesión</h2>
-        <p className="muted">Ingresa con el correo configurado para tu cuenta.</p>
-        <form onSubmit={submit} className="login-form">
-          <label><span>Correo electrónico</span><input type="email" autoComplete="username"
-            value={email} onChange={(event) => setEmail(event.target.value)}
-            placeholder="nombre@correo.com" required disabled={busy} /></label>
-          <label><span>Contraseña</span><span className="password-field">
-            <input type={showPassword ? 'text' : 'password'} autoComplete="current-password"
-              value={password} onChange={(event) => setPassword(event.target.value)}
-              placeholder="Tu contraseña" required disabled={busy} />
-            <button type="button" onClick={() => setShowPassword((value) => !value)}>
-              {showPassword ? 'Ocultar' : 'Mostrar'}
-            </button>
-          </span></label>
-          {error && <div className="form-error" role="alert">{error}</div>}
-          <button className="primary-button" type="submit" disabled={busy}>
-            {busy ? <><span className="spinner" />Ingresando…</> : 'Ingresar'}
-          </button>
-        </form>
-        <p className="security-note">La sesión se protege de forma independiente en cada dispositivo.</p>
-      </div>
-    </section>
-  </main>;
 }
 
 function Dashboard({ session, busy, error, onLogout, onContextChange }: {
@@ -173,6 +116,17 @@ export function App() {
   const [initializing, setInitializing] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingRegistration, setPendingRegistration] = useState<{
+    email: string; delivery: RegistrationResult['verificationDelivery'];
+  } | null>(null);
+  const [resendAccepted, setResendAccepted] = useState(false);
+  const [verificationToken, setVerificationToken] = useState(
+    () => new URLSearchParams(window.location.search).get('verify-email'),
+  );
+  const [verificationState, setVerificationState] = useState<VerificationState>(
+    verificationToken ? 'CHECKING' : 'NONE',
+  );
+  const [verificationMessage, setVerificationMessage] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -194,6 +148,22 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (!verificationToken) return;
+    void verifyEmail(verificationToken).then(() => {
+      setVerificationState('VERIFIED');
+      setVerificationMessage('Tu correo quedó verificado. Ya puedes iniciar sesión.');
+    }).catch((verificationError) => {
+      setVerificationState('INVALID');
+      setVerificationMessage(errorMessage(verificationError));
+    }).finally(() => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('verify-email');
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+      setVerificationToken(null);
+    });
+  }, [verificationToken]);
+
+  useEffect(() => {
     if (!session) return;
     const delay = Math.max(10_000, new Date(session.accessExpiresAt).getTime() - Date.now() - 60_000);
     const timer = window.setTimeout(() => void refreshSession().then(completeSession).catch(() => setSession(null)), delay);
@@ -205,6 +175,32 @@ export function App() {
     try { await completeSession(await login(email, password, deviceId())); }
     catch (loginError) { setError(errorMessage(loginError)); }
     finally { setBusy(false); }
+  }
+
+  async function handleRegister(input: {
+    displayName: string; propertyName: string; email: string; password: string;
+  }) {
+    setBusy(true); setError(null); setResendAccepted(false);
+    try {
+      const result = await register(input);
+      setPendingRegistration({ email: input.email, delivery: result.verificationDelivery });
+    } catch (registrationError) { setError(errorMessage(registrationError)); }
+    finally { setBusy(false); }
+  }
+
+  async function handleResend(email: string) {
+    setBusy(true); setError(null); setResendAccepted(false);
+    try { await resendVerification(email); setResendAccepted(true); }
+    catch (resendError) { setError(errorMessage(resendError)); }
+    finally { setBusy(false); }
+  }
+
+  function useLogin() {
+    setPendingRegistration(null);
+    setResendAccepted(false);
+    setVerificationState('NONE');
+    setVerificationMessage(null);
+    setError(null);
   }
 
   async function handleLogout() {
@@ -233,6 +229,9 @@ export function App() {
       <p>Restaurando sesión segura…</p></main>
       : session ? <Dashboard session={session} busy={busy} error={error} onLogout={handleLogout}
         onContextChange={handleContextChange} />
-        : <LoginScreen busy={busy} error={error} onLogin={handleLogin} />}
+        : <AuthScreen busy={busy} error={error} pendingRegistration={pendingRegistration}
+          verificationState={verificationState} verificationMessage={verificationMessage}
+          resendAccepted={resendAccepted} onLogin={handleLogin} onRegister={handleRegister}
+          onResend={handleResend} onUseLogin={useLogin} />}
   </>;
 }

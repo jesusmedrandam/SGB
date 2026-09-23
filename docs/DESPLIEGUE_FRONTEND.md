@@ -25,6 +25,20 @@ Antes del cambio definitivo, la API debe tener como `FRONTEND_URL` la dirección
 exacta desde la que se probará el sitio. Para producción será
 `https://medranda.onrender.com`.
 
+## Correo de verificación
+
+En el servicio de la API configura:
+
+```text
+BREVO_API_KEY=tu_clave_api_de_brevo
+BREVO_SENDER_EMAIL=remitente-verificado@tu-dominio.com
+BREVO_SENDER_NAME=SGB
+```
+
+Debe usarse una clave de API, no una clave SMTP. El correo del remitente debe
+estar verificado en Brevo. No agregues estas variables al sitio estático ni al
+repositorio; pertenecen únicamente al servidor de la API.
+
 ## Sesiones
 
 - El token de acceso se conserva únicamente en memoria.

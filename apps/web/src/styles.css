@@ -65,12 +65,21 @@ button:disabled { cursor: wait; opacity: .65; }
 
 .login-panel { display: grid; place-items: center; min-width: 0; padding: clamp(24px, 6vw, 90px); background: var(--bg); }
 .login-card { width: min(460px, 100%); }
+.login-card.registration-card { width: min(640px, 100%); }
 .mobile-brand { display: none; margin-bottom: 42px; }
 .login-card h2 { margin: 9px 0 8px; font-size: clamp(2rem, 4vw, 3rem); letter-spacing: -.04em; }
 .muted { color: var(--muted); line-height: 1.55; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 32px; padding: 5px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-soft); }
+.auth-tabs button { min-height: 40px; border: 0; border-radius: 10px; color: var(--muted); background: transparent; font-weight: 780; }
+.auth-tabs button.active { color: var(--text); background: var(--surface); box-shadow: 0 4px 14px rgba(0,0,0,.08); }
 .login-form { display: grid; gap: 21px; margin-top: 34px; }
 .login-form label, .context-controls label { display: grid; gap: 8px; min-width: 0; }
 .login-form label > span:first-child, .context-controls label > span:first-child { font-size: .86rem; font-weight: 760; }
+.registration-form { gap: 16px; margin-top: 25px; }
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.password-requirements { display: flex; flex-wrap: wrap; gap: 7px; }
+.password-requirements span { border: 1px solid var(--border); border-radius: 999px; padding: 6px 9px; color: var(--muted); background: var(--surface); font-size: .7rem; font-weight: 720; }
+.password-requirements span.valid { border-color: color-mix(in srgb, var(--primary) 40%, var(--border)); color: var(--primary); background: var(--primary-soft); }
 input, select { width: 100%; min-width: 0; min-height: 52px; border: 1px solid var(--border); border-radius: 14px; outline: 0; color: var(--text); background: var(--surface); padding: 0 15px; transition: border-color .18s, box-shadow .18s; }
 input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 15%, transparent); }
 .password-field { position: relative; display: block; }
@@ -81,7 +90,16 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
 .secondary-button { border: 1px solid var(--border); color: var(--text); background: var(--surface); }
 .compact { min-height: 42px; border-radius: 12px; padding: 0 16px; }
 .form-error { border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border)); border-radius: 12px; padding: 12px 14px; color: var(--danger); background: var(--danger-soft); line-height: 1.45; }
+.form-success { border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border)); border-radius: 12px; padding: 12px 14px; color: var(--primary); background: var(--primary-soft); line-height: 1.45; }
 .security-note { margin: 24px 0 0; color: var(--muted); font-size: .78rem; line-height: 1.5; text-align: center; }
+.verification-card { display: grid; justify-items: center; gap: 14px; text-align: center; }
+.verification-card h2 { margin: 0; }
+.verification-card p { max-width: 460px; margin: 0 0 8px; color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
+.verification-card .primary-button { width: 100%; margin-top: 5px; }
+.verification-icon { display: grid; place-items: center; width: 72px; height: 72px; margin-bottom: 12px; border-radius: 24px 24px 24px 8px; color: white; background: var(--primary); font-size: 1.7rem; font-weight: 900; }
+.verification-icon.failed { background: var(--danger); }
+.verification-icon .spinner.large { border-color: rgba(255,255,255,.45); border-top-color: white; }
+.auth-back { font-size: .84rem; }
 .spinner { width: 17px; height: 17px; border: 2px solid rgba(255,255,255,.4); border-top-color: white; border-radius: 50%; animation: spin .7s linear infinite; }
 .spinner.large { width: 30px; height: 30px; border-color: var(--border); border-top-color: var(--primary); }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -200,6 +218,7 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px 
   .icon-button { width: 40px; height: 40px; }
   .login-panel { align-items: start; padding: 28px 22px; }
   .login-card { padding-top: 34px; }
+  .field-pair { grid-template-columns: 1fr; }
   .topbar { min-height: 72px; padding: 10px 16px; }
   .topbar .brand-copy { display: none; }
   .topbar .brand-mark { width: 44px; height: 44px; flex-basis: 44px; border-radius: 14px 14px 14px 5px; }

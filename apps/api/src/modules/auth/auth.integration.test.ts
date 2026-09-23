@@ -9,7 +9,14 @@ import {
   updateAccountModule,
   updateAccountQuota,
 } from '../superadmin/superadmin.service.js';
-import { getSessionOverview, login, logout, register, verifyEmail } from './auth.service.js';
+import {
+  getSessionOverview,
+  login,
+  logout,
+  register,
+  resendEmailVerification,
+  verifyEmail,
+} from './auth.service.js';
 
 const metadata = { ipAddress: '127.0.0.1', userAgent: 'sgb-integration-test' };
 
@@ -27,7 +34,15 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     }, metadata);
 
     assert.match(registration.userId, /^[0-9a-f-]{36}$/);
-    await verifyEmail(registration.verificationToken, metadata);
+    await pool.query(
+      `UPDATE email_verification_token
+          SET created_at = now() - interval '2 minutes'
+        WHERE user_id = $1`,
+      [registration.userId],
+    );
+    const resent = await resendEmailVerification(email, metadata);
+    assert.ok(resent.verificationToken);
+    await verifyEmail(resent.verificationToken, metadata);
 
     const session = await login({
       email,
@@ -108,7 +123,13 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     );
     assert.deepEqual(
       audit.rows.map((row) => row.action),
-      ['ACCOUNT_REGISTERED', 'EMAIL_VERIFIED', 'AUTH_LOGIN', 'AUTH_LOGOUT'],
+      [
+        'ACCOUNT_REGISTERED',
+        'EMAIL_VERIFICATION_REQUESTED',
+        'EMAIL_VERIFIED',
+        'AUTH_LOGIN',
+        'AUTH_LOGOUT',
+      ],
     );
   } finally {
     await pool.end();

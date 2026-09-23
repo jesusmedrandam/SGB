@@ -5,7 +5,13 @@ import { asyncHandler } from '../../core/async-handler.js';
 import { unauthorized } from '../../core/errors.js';
 import { clearRefreshCookie, readCookie, setRefreshCookie } from '../../security/cookies.js';
 import { authenticate } from './auth.middleware.js';
-import { contextSchema, loginSchema, registerSchema, verifyEmailSchema } from './auth.schemas.js';
+import {
+  contextSchema,
+  loginSchema,
+  registerSchema,
+  resendVerificationSchema,
+  verifyEmailSchema,
+} from './auth.schemas.js';
 import {
   changeContext,
   getSessionOverview,
@@ -13,6 +19,7 @@ import {
   logout,
   refreshSession,
   register,
+  resendEmailVerification,
   verifyEmail,
 } from './auth.service.js';
 import type { RequestMetadata } from './auth.types.js';
@@ -27,6 +34,17 @@ const authLimiter = rateLimit({
   message: {
     ok: false,
     error: { code: 'AUTH_RATE_LIMIT', message: 'Demasiados intentos. Espera unos minutos.' },
+  },
+});
+
+const verificationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: {
+    ok: false,
+    error: { code: 'VERIFICATION_RATE_LIMIT', message: 'Espera unos minutos antes de solicitar otro correo.' },
   },
 });
 
@@ -66,7 +84,22 @@ authRouter.post('/register', authLimiter, asyncHandler(async (request, response)
       propertyId: result.propertyId,
       verificationRequired: true,
       verificationExpiresAt: result.verificationExpiresAt.toISOString(),
+      verificationDelivery: result.verificationDelivery,
       ...(env.EXPOSE_AUTH_TOKENS ? { verificationToken: result.verificationToken } : {}),
+    },
+  });
+}));
+
+authRouter.post('/resend-verification', verificationLimiter, asyncHandler(async (request, response) => {
+  const { email } = resendVerificationSchema.parse(request.body);
+  const result = await resendEmailVerification(email, metadata(request));
+  response.status(202).json({
+    ok: true,
+    data: {
+      accepted: true,
+      ...(env.EXPOSE_AUTH_TOKENS && result.verificationToken
+        ? { verificationToken: result.verificationToken }
+        : {}),
     },
   });
 }));

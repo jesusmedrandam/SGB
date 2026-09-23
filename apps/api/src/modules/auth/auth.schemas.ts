@@ -17,6 +17,10 @@ export const verifyEmailSchema = z.object({
   token: z.string().min(40).max(200),
 });
 
+export const resendVerificationSchema = z.object({
+  email: z.email().max(254).transform((value) => value.trim().toLowerCase()),
+});
+
 export const loginSchema = z.object({
   email: z.email().max(254).transform((value) => value.trim().toLowerCase()),
   password: z.string().min(1).max(128),

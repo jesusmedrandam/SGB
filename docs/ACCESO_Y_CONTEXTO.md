@@ -57,17 +57,27 @@ Los middlewares de operaciones vuelven a consultar:
 
 Por ello, cambiar manualmente identificadores en una solicitud no concede acceso.
 
-## Modo de desarrollo
+## Verificación de correo
 
-Mientras se integra el proveedor de correo, una instalación no productiva puede
-devolver el token de verificación con `EXPOSE_AUTH_TOKENS=true`. Esta opción queda
-deshabilitada automáticamente en producción y nunca sustituirá el envío de correo.
+SGB envía el enlace de activación mediante la API transaccional de Brevo. En el
+servidor deben configurarse `BREVO_API_KEY`, `BREVO_SENDER_EMAIL` y,
+opcionalmente, `BREVO_SENDER_NAME`. El remitente debe existir y estar verificado
+en Brevo. El enlace utiliza `FRONTEND_URL` y vence en 24 horas por defecto.
+
+El reenvío responde siempre de forma genérica para no revelar si un correo está
+registrado, se limita por dirección IP y aplica una espera mínima entre tokens.
+Solicitar uno nuevo invalida los enlaces anteriores.
+
+Una instalación no productiva puede devolver el token con
+`EXPOSE_AUTH_TOKENS=true`. Esta opción queda deshabilitada automáticamente en
+producción y nunca sustituye el envío de correo.
 
 ## Rutas iniciales
 
 | Método | Ruta | Función |
 | --- | --- | --- |
 | `POST` | `/auth/register` | Crea usuario, cuenta y primera propiedad |
+| `POST` | `/auth/resend-verification` | Solicita otro correo sin revelar cuentas existentes |
 | `POST` | `/auth/verify-email` | Activa el correo mediante token de un solo uso |
 | `POST` | `/auth/login` | Abre una sesión por dispositivo |
 | `POST` | `/auth/refresh` | Rota los tokens de la sesión |

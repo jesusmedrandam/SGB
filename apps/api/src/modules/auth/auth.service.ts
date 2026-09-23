@@ -5,6 +5,7 @@ import { pool } from '../../database/pool.js';
 import { inTransaction } from '../../database/transaction.js';
 import { hashPassword, verifyPassword } from '../../security/password.js';
 import { hashToken, issueToken, type IssuedToken } from '../../security/tokens.js';
+import { sendVerificationEmail } from '../../services/email.service.js';
 import type { LoginInput, RegisterInput } from './auth.schemas.js';
 import type { AuthState, RequestMetadata } from './auth.types.js';
 
@@ -173,7 +174,7 @@ export async function register(input: RegisterInput, metadata: RequestMetadata) 
   const verificationExpiresAt = addMilliseconds(env.EMAIL_TOKEN_TTL_HOURS * 60 * 60 * 1000);
 
   try {
-    return await inTransaction(async (client) => {
+    const result = await inTransaction(async (client) => {
       const userResult = await client.query<{ id: string }>(
         `INSERT INTO app_user(email, password_hash, display_name, status)
          VALUES($1,$2,$3,'PENDING') RETURNING id`,
@@ -276,6 +277,13 @@ export async function register(input: RegisterInput, metadata: RequestMetadata) 
         verificationExpiresAt,
       };
     });
+    const verificationDelivery = await sendVerificationEmail({
+      email: input.email,
+      displayName: input.displayName,
+      token: result.verificationToken,
+      expiresAt: result.verificationExpiresAt,
+    });
+    return { ...result, verificationDelivery };
   } catch (error) {
     const databaseError = error as { code?: string; constraint?: string };
     if (databaseError.code === '23505' && databaseError.constraint?.includes('email')) {
@@ -283,6 +291,66 @@ export async function register(input: RegisterInput, metadata: RequestMetadata) 
     }
     throw error;
   }
+}
+
+export async function resendEmailVerification(email: string, metadata: RequestMetadata) {
+  const verification = issueToken('verify');
+  const expiresAt = addMilliseconds(env.EMAIL_TOKEN_TTL_HOURS * 60 * 60 * 1000);
+  const pending = await inTransaction(async (client) => {
+    const result = await client.query<{ id: string; email: string; display_name: string }>(
+      `SELECT id, email::text, display_name
+         FROM app_user
+        WHERE email = $1 AND status = 'PENDING' AND deleted_at IS NULL
+        FOR UPDATE`,
+      [email],
+    );
+    const user = result.rows[0];
+    if (!user) return null;
+
+    const recent = await client.query<{ too_soon: boolean }>(
+      `SELECT EXISTS(
+         SELECT 1 FROM email_verification_token
+          WHERE user_id = $1
+            AND created_at > now() - ($2::integer * interval '1 second')
+       ) AS too_soon`,
+      [user.id, env.EMAIL_VERIFICATION_RESEND_SECONDS],
+    );
+    if (recent.rows[0]?.too_soon) return null;
+
+    await client.query(
+      `UPDATE email_verification_token
+          SET consumed_at = coalesce(consumed_at, now())
+        WHERE user_id = $1 AND consumed_at IS NULL`,
+      [user.id],
+    );
+    await client.query(
+      `INSERT INTO email_verification_token(user_id, token_hash, expires_at)
+       VALUES($1,$2,$3)`,
+      [user.id, verification.hash, expiresAt],
+    );
+    await client.query(
+      `INSERT INTO audit_event(
+         actor_user_id, action, entity_type, entity_id, after_data, ip_address, user_agent
+       ) VALUES($1,'EMAIL_VERIFICATION_REQUESTED','APP_USER',$2,$3,$4,$5)`,
+      [
+        user.id,
+        user.id,
+        JSON.stringify({ email: user.email }),
+        metadata.ipAddress,
+        metadata.userAgent,
+      ],
+    );
+    return user;
+  });
+
+  if (!pending) return { accepted: true as const, verificationToken: null, delivery: null };
+  const delivery = await sendVerificationEmail({
+    email: pending.email,
+    displayName: pending.display_name,
+    token: verification.value,
+    expiresAt,
+  });
+  return { accepted: true as const, verificationToken: verification.value, delivery };
 }
 
 export async function verifyEmail(token: string, metadata: RequestMetadata): Promise<void> {

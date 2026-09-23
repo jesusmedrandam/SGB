@@ -38,6 +38,16 @@ export interface SessionOverview {
   enabledUserModules: string[];
 }
 
+export interface RegistrationResult {
+  userId: string;
+  accountId: string;
+  propertyId: string;
+  verificationRequired: true;
+  verificationExpiresAt: string;
+  verificationDelivery: 'SENT' | 'UNAVAILABLE' | 'FAILED';
+  verificationToken?: string;
+}
+
 export interface AdministrativeAccountSummary {
   id: string;
   name: string;
@@ -141,6 +151,32 @@ export function login(email: string, password: string, deviceId: string) {
   return request<SessionPayload>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password, deviceId, deviceName: 'Navegador web' }),
+  });
+}
+
+export function register(input: {
+  displayName: string;
+  propertyName: string;
+  email: string;
+  password: string;
+}) {
+  return request<RegistrationResult>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function verifyEmail(token: string) {
+  return request<{ verified: true }>('/auth/verify-email', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+export function resendVerification(email: string) {
+  return request<{ accepted: true; verificationToken?: string }>('/auth/resend-verification', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
   });
 }
 
