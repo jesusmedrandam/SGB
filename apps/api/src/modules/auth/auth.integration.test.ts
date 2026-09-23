@@ -201,10 +201,11 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     );
 
     await updatePropertyMembershipStatus(ownerAuth, ownerContext, collaboratorMembership.id, 'SUSPENDED', metadata);
-    assert.equal((await getSessionOverview(activeCollaboratorAuth)).properties.length, 0);
+    const suspendedCollaborator = await getSessionOverview(activeCollaboratorAuth);
+    assert.deepEqual(suspendedCollaborator.properties.map((item) => item.id), [collaboratorOwned.propertyId]);
     assert.equal((await getPropertyTeam(ownerAuth, ownerContext)).quota.used, 1);
     await updatePropertyMembershipStatus(ownerAuth, ownerContext, collaboratorMembership.id, 'ACTIVE', metadata);
-    assert.equal((await getSessionOverview(activeCollaboratorAuth)).properties.length, 1);
+    assert.equal((await getSessionOverview(activeCollaboratorAuth)).properties.length, 2);
     await logout(collaboratorSession.accessToken, collaboratorSession.refreshToken, metadata);
 
     const superadmin = await pool.query<{
