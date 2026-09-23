@@ -757,6 +757,52 @@ export function cancelMovement(accessToken:string,id:string){
   });
 }
 
+export interface HealthMedicine {
+  id:string;name:string;kind:'VACUNA'|'DESPARASITACION'|'ENFERMEDAD'|'OTRO';
+  activeIngredient:string|null;defaultUnitCode:string;suggestedDose:string|null;
+  indications:string|null;withdrawalMilkDays:number;withdrawalMeatDays:number;active:boolean;
+}
+export interface HealthOptions {
+  animals:Array<{id:string;name:string;earTagCode:string|null;groupId:string|null}>;
+  groups:Array<{id:string;name:string}>;
+  units:Array<{code:string;name:string;symbol:string}>;
+}
+export interface HealthAnimalInput {
+  animalId:string;selected:boolean;dose:number;unitCode:string;notes?:string|null;
+}
+export interface HealthCampaignInput {
+  medicineId:string;administrationRoute:'ORAL'|'INTRAMUSCULAR'|'SUBCUTANEA'|'INTRAVENOSA'|'TOPICA'|'OTRA';
+  selectionMode:'TODOS'|'GRUPO'|'MANUAL';groupId?:string|null;appliedOn:string;
+  responsible?:string|null;notes?:string|null;animals:HealthAnimalInput[];expectedVersion?:number;
+}
+export interface HealthCampaign extends Omit<HealthCampaignInput,'animals'> {
+  id:string;medicineName:string;kind:HealthMedicine['kind'];groupName:string|null;
+  status:'BORRADOR'|'COMPLETADO'|'CANCELADO';version:number;
+  animals:Array<HealthAnimalInput&{name:string}>;createdAt:string;appliedAt:string|null;
+  cancelledAt:string|null;
+}
+export function getHealthMedicines(accessToken:string){return request<HealthMedicine[]>(
+  '/health-records/medicines',{headers:bearer(accessToken)});}
+export function createHealthMedicine(accessToken:string,input:Omit<HealthMedicine,'id'|'active'>){
+  return request<HealthMedicine>('/health-records/medicines',{
+    method:'POST',headers:{...bearer(accessToken),'Content-Type':'application/json'},body:JSON.stringify(input)});}
+export function getHealthOptions(accessToken:string){return request<HealthOptions>(
+  '/health-records/options',{headers:bearer(accessToken)});}
+export function getHealthCampaigns(accessToken:string){return request<HealthCampaign[]>(
+  '/health-records/campaigns',{headers:bearer(accessToken)});}
+export function createHealthCampaign(accessToken:string,input:HealthCampaignInput){
+  return request<HealthCampaign>('/health-records/campaigns',{
+    method:'POST',headers:{...bearer(accessToken),'Content-Type':'application/json'},body:JSON.stringify(input)});}
+export function updateHealthCampaign(accessToken:string,id:string,input:HealthCampaignInput){
+  return request<HealthCampaign>(`/health-records/campaigns/${encodeURIComponent(id)}`,{
+    method:'PUT',headers:{...bearer(accessToken),'Content-Type':'application/json'},body:JSON.stringify(input)});}
+export function applyHealthCampaign(accessToken:string,id:string){
+  return request<HealthCampaign>(`/health-records/campaigns/${encodeURIComponent(id)}/apply`,{
+    method:'POST',headers:bearer(accessToken)});}
+export function cancelHealthCampaign(accessToken:string,id:string){
+  return request<HealthCampaign>(`/health-records/campaigns/${encodeURIComponent(id)}/cancel`,{
+    method:'POST',headers:bearer(accessToken)});}
+
 export function createAccountProperty(accessToken: string, name: string) {
   return request<{ accountId: string; propertyId: string; roleId: string }>('/property-settings/properties', {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name }),

@@ -18,6 +18,7 @@ import { superadminRouter } from './modules/superadmin/superadmin.routes.js';
 import { reproductionRouter } from './modules/reproduction/reproduction.routes.js';
 import { productionRouter } from './modules/production/production.routes.js';
 import { movementsRouter } from './modules/movements/movements.routes.js';
+import { healthRouter } from './modules/health/health.routes.js';
 
 export const app = express();
 
@@ -52,5 +53,6 @@ app.use('/superadmin', superadminRouter);
 app.use('/reproduction', reproductionRouter);
 app.use('/production', productionRouter);
 app.use('/movements', movementsRouter);
+app.use('/health-records', healthRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);

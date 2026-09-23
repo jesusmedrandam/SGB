@@ -121,6 +121,7 @@ textarea { border-radius: 12px; }
 .stat-reproduction { color: #b83f71; background: #ffe6f0; }.stat-production { color: #1e8990; background: #def6f7; }
 .stat-movements { color: #3675c7; background: #e3efff; }
 .stat-team { color: #3675c7; background: #e3efff; }.stat-admin { color: #7550bf; background: #eee7ff; }
+.stat-health { color: #a43e68; background: #ffe8f1; }
 .dashboard-module-copy { display: grid; gap: 3px; min-width: 0; }.dashboard-module-copy strong { font-size: .96rem; }
 .dashboard-module-copy small { color: var(--muted); font-size: .72rem; line-height: 1.35; }
 .livestock-shell .summary-grid { margin-top: 18px; }.livestock-shell .summary-grid article { padding: 18px; }
@@ -189,6 +190,10 @@ textarea { border-radius: 12px; }
 .movement-card details { color: var(--muted); font-size: .78rem; }
 .movement-card summary { cursor: pointer; }.movement-animal-name { display: inline-block; margin: 7px 7px 0 0;
   padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); }
+.health-animal-row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 7px; border: 1px solid var(--border); border-radius: 10px; }
+.health-animal-row label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.health-animal-row input[type="number"] { width: 120px; min-width: 90px; }
 
 @media (max-width: 1100px) {
   .dashboard-module-grid { grid-template-columns: 1fr; }

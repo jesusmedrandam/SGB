@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test dist/security/password.test.js dist/security/tokens.test.js",
-    "test:integration": "npm run build && node --test --test-concurrency=1 dist/modules/auth/auth.integration.test.js dist/modules/reproduction/reproduction.integration.test.js dist/modules/movements/movements.integration.test.js",
+    "test:integration": "npm run build && node --test --test-concurrency=1 dist/modules/auth/auth.integration.test.js dist/modules/reproduction/reproduction.integration.test.js dist/modules/movements/movements.integration.test.js dist/modules/health/health.integration.test.js",
     "migrate": "npm run build && node dist/scripts/migrate.js",
     "bootstrap:superadmin": "npm run build && node dist/scripts/bootstrap-superadmin.js",
     "start": "node dist/server.js"
