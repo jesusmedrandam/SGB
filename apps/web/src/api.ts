@@ -535,6 +535,7 @@ export interface ReproductionHeat {
 }
 export interface ReproductionPregnancy {
   id: string; cowId: string; cowName: string; heatId: string | null;
+  serviceId: string | null;
   fatherId: string | null; externalFather: string | null;
   conceptionMethod: string; confirmationMethod: string;
   confirmedOn: string; expectedBirthOn: string | null;
@@ -553,6 +554,15 @@ export interface ReproductionLoss {
 export interface ReproductionRecords {
   heats: ReproductionHeat[]; pregnancies: ReproductionPregnancy[];
   births: ReproductionBirth[]; losses: ReproductionLoss[];
+  services: ReproductionService[];
+}
+export interface ReproductionService {
+  id: string; cowId: string; cowName: string; heatId: string | null;
+  fatherId: string | null; externalFather: string | null;
+  donorId: string | null; externalDonor: string | null;
+  kind: 'INSEMINATION' | 'EMBRYO_TRANSFER'; occurredOn: string;
+  materialCode: string | null; quality: string | null; technician: string | null;
+  supplier: string | null; notes: string | null; cancelled: boolean; hasPregnancy: boolean;
 }
 export interface ReproductionCandidate { id: string; name: string; sex: Animal['sex'] }
 export interface ReproductionSettings {
@@ -561,6 +571,7 @@ export interface ReproductionSettings {
   minimumCowMonths: number; minimumBullMonths: number;
   allowSecondHeat: boolean; allowFalseHeatInPregnancy: boolean;
   useLastValidHeat: boolean;
+  maxMilkingDays: number;
 }
 export function getReproductionSettings(accessToken: string) {
   return request<ReproductionSettings>('/reproduction/settings', { headers: bearer(accessToken) });
@@ -584,8 +595,25 @@ export function createHeat(accessToken: string, input: {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
   });
 }
+export function createService(accessToken: string, input: {
+  cowId: string; heatId?: string | null; fatherId?: string | null;
+  externalFather?: string | null; donorId?: string | null; externalDonor?: string | null;
+  kind: 'INSEMINATION' | 'EMBRYO_TRANSFER'; occurredOn: string;
+  materialCode?: string | null; quality?: string | null; technician?: string | null;
+  supplier?: string | null; notes?: string | null;
+}) {
+  return request<ReproductionService>('/reproduction/services', {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+export function cancelService(accessToken: string, id: string) {
+  return request<{ id: string; cancelled: boolean }>(`/reproduction/services/${encodeURIComponent(id)}/cancel`, {
+    method: 'POST', headers: bearer(accessToken),
+  });
+}
 export function createPregnancy(accessToken: string, input: {
   cowId: string; heatId?: string | null; fatherId?: string | null;
+  serviceId?: string | null;
   externalFather?: string | null; conceptionMethod: string; confirmationMethod: string;
   confirmedOn: string; gestationDays?: number | null; notes?: string | null;
 }) {
@@ -617,6 +645,58 @@ export function cancelPregnancy(accessToken: string, id: string) {
 export function cancelHeat(accessToken: string, id: string) {
   return request<{ id: string; cancelled: boolean }>(`/reproduction/heats/${encodeURIComponent(id)}/cancel`, {
     method: 'POST', headers: bearer(accessToken),
+  });
+}
+
+export interface MilkLactation {
+  id:string; cowId:string; cowName:string; birthId:string; startedOn:string;
+  endedOn:string|null; inMilking:boolean; notes:string|null;
+}
+export interface MilkRecord {
+  id:string; cowId:string; cowName:string; lactationId:string;
+  producedOn:string; shift:string; liters:number; source:string;
+  externalReference:string|null; notes:string|null;
+}
+export interface TankRecord {
+  id:string; producedOn:string; shift:string; liters:number; source:string;
+  externalReference:string|null; notes:string|null;
+}
+export interface ProductionRecords {
+  lactations:MilkLactation[]; milk:MilkRecord[]; tanks:TankRecord[];
+  births:Array<{id:string;cowId:string;cowName:string;occurredOn:string}>;
+}
+export function getProduction(accessToken:string) {
+  return request<ProductionRecords>('/production',{headers:bearer(accessToken)});
+}
+export function createLactation(accessToken:string,input:{birthId:string;endedOn?:string|null;
+  inMilking:boolean;notes?:string|null}) {
+  return request<MilkLactation>('/production/lactations',{
+    method:'POST',headers:bearer(accessToken),body:JSON.stringify(input),
+  });
+}
+export function finishLactation(accessToken:string,id:string,endedOn:string) {
+  return request<MilkLactation>(`/production/lactations/${encodeURIComponent(id)}/finish`,{
+    method:'POST',headers:bearer(accessToken),body:JSON.stringify({endedOn}),
+  });
+}
+export function setLactationMilking(accessToken:string,id:string,inMilking:boolean) {
+  return request<MilkLactation>(`/production/lactations/${encodeURIComponent(id)}/milking`,{
+    method:'PUT',headers:bearer(accessToken),body:JSON.stringify({inMilking}),
+  });
+}
+export type MilkShift='MORNING'|'AFTERNOON'|'NIGHT'|'SINGLE';
+export function recordMilk(accessToken:string,input:{lactationId:string;producedOn:string;
+  shift:MilkShift;liters:number;source:'MANUAL'|'SENSOR';externalReference?:string|null;
+  notes?:string|null}) {
+  return request<MilkRecord>('/production/milk',{
+    method:'POST',headers:bearer(accessToken),body:JSON.stringify(input),
+  });
+}
+export function recordTank(accessToken:string,input:{producedOn:string;
+  shift:MilkShift;liters:number;source:'MANUAL'|'SENSOR';externalReference?:string|null;
+  notes?:string|null}) {
+  return request<TankRecord>('/production/tanks',{
+    method:'POST',headers:bearer(accessToken),body:JSON.stringify(input),
   });
 }
 

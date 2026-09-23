@@ -2,9 +2,9 @@ import { Router, type Request } from 'express';
 import { asyncHandler } from '../../core/async-handler.js';
 import { authenticate, requireModule, requirePermission, requirePropertyContext } from '../auth/auth.middleware.js';
 import type { RequestMetadata } from '../auth/auth.types.js';
-import { createBirthSchema, createHeatSchema, createLossSchema, createPregnancySchema, idSchema,
+import { createBirthSchema, createHeatSchema, createLossSchema, createPregnancySchema, createServiceSchema, idSchema,
   reproductionSettingSchema } from './reproduction.schemas.js';
-import { cancelHeat, cancelPregnancy, createHeat, createPregnancy, listReproduction,
+import { cancelHeat, cancelPregnancy, cancelService, createHeat, createPregnancy, createService, listReproduction,
   listReproductionCandidates, getReproductionSettings, updateReproductionSettings,
   recordBirth, recordLoss } from './reproduction.service.js';
 
@@ -30,6 +30,16 @@ reproductionRouter.post('/heats', requirePermission('REPRODUCTION_MANAGE'), asyn
   response.status(201).json({ ok: true, data: await createHeat(request.auth!, request.propertyContext!,
     createHeatSchema.parse(request.body), metadata(request)) });
 }));
+reproductionRouter.post('/services', requirePermission('REPRODUCTION_MANAGE'), asyncHandler(async (request, response) => {
+  response.status(201).json({ ok: true, data: await createService(request.auth!, request.propertyContext!,
+    createServiceSchema.parse(request.body), metadata(request)) });
+}));
+reproductionRouter.post('/services/:id/cancel', requirePermission('REPRODUCTION_MANAGE'),
+  asyncHandler(async (request, response) => {
+    const { id } = idSchema.parse(request.params);
+    response.json({ ok: true, data: await cancelService(request.auth!, request.propertyContext!,
+      id, metadata(request)) });
+  }));
 reproductionRouter.post('/pregnancies', requirePermission('REPRODUCTION_MANAGE'), asyncHandler(async (request, response) => {
   response.status(201).json({ ok: true, data: await createPregnancy(request.auth!, request.propertyContext!,
     createPregnancySchema.parse(request.body), metadata(request)) });

@@ -1,5 +1,16 @@
 # Política multimedia
 
+## Registros disponibles para adjuntos
+
+Los identificadores de celos, servicios reproductivos, preñeces, partos,
+pérdidas, lactancias, ordeños y producción de tanque son estables y tienen
+su tipo en `media_entity_type_catalog`. La API de carga debe verificar en
+servidor que el registro indicado pertenezca a la misma cuenta y propiedad
+del archivo antes de insertar `media_attachment`, y conservar los adjuntos
+al cerrar o cancelar registros históricos. La inscripción del tipo no habilita
+todavía la carga de archivos: se implementará con la validación y cuotas de
+esta política.
+
 ## Estrategia híbrida
 
 La aplicación conserva la interfaz compartida en React y se distribuye mediante

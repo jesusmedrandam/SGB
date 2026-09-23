@@ -3,7 +3,8 @@ import { ApiError, conflict, forbidden, invalidRequest } from '../../core/errors
 import { pool } from '../../database/pool.js';
 import { inTransaction } from '../../database/transaction.js';
 import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.types.js';
-import type { BirthInput, HeatInput, LossInput, PregnancyInput, ReproductionSettingInput } from './reproduction.schemas.js';
+import type { BirthInput, HeatInput, LossInput, PregnancyInput, ReproductionSettingInput,
+  ServiceInput } from './reproduction.schemas.js';
 
 // Ported from lafortuna/src/services/reproduction-policy.ts. The old queries
 // are mapped to the new account/property scoped tables.
@@ -28,7 +29,8 @@ const settingFields = `
   COALESCE(s.minimum_bull_months, 12) AS "minimumBullMonths",
   COALESCE(s.allow_second_heat, true) AS "allowSecondHeat",
   COALESCE(s.allow_false_heat_in_pregnancy, true) AS "allowFalseHeatInPregnancy",
-  COALESCE(s.use_last_valid_heat, true) AS "useLastValidHeat"`;
+  COALESCE(s.use_last_valid_heat, true) AS "useLastValidHeat",
+  COALESCE(s.max_milking_days, 305) AS "maxMilkingDays"`;
 
 async function settings(client: PoolClient, propertyId: string): Promise<ReproductionSettingInput> {
   const result = await client.query<ReproductionSettingInput>(
@@ -51,8 +53,8 @@ export async function updateReproductionSettings(auth: AuthState, context: Prope
     await client.query(`INSERT INTO reproduction_setting(property_id, days_after_birth_heat,
       days_after_birth_pregnancy, days_after_loss_heat, days_after_loss_pregnancy,
       minimum_cow_months, minimum_bull_months, allow_second_heat,
-      allow_false_heat_in_pregnancy, use_last_valid_heat, updated_by)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      allow_false_heat_in_pregnancy, use_last_valid_heat, max_milking_days, updated_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       ON CONFLICT(property_id) DO UPDATE SET
         days_after_birth_heat = EXCLUDED.days_after_birth_heat,
         days_after_birth_pregnancy = EXCLUDED.days_after_birth_pregnancy,
@@ -63,11 +65,12 @@ export async function updateReproductionSettings(auth: AuthState, context: Prope
         allow_second_heat = EXCLUDED.allow_second_heat,
         allow_false_heat_in_pregnancy = EXCLUDED.allow_false_heat_in_pregnancy,
         use_last_valid_heat = EXCLUDED.use_last_valid_heat,
+        max_milking_days = EXCLUDED.max_milking_days,
         updated_by = EXCLUDED.updated_by, updated_at = now()`,
     [context.propertyId, input.daysAfterBirthHeat, input.daysAfterBirthPregnancy,
       input.daysAfterLossHeat, input.daysAfterLossPregnancy, input.minimumCowMonths,
       input.minimumBullMonths, input.allowSecondHeat, input.allowFalseHeatInPregnancy,
-      input.useLastValidHeat, auth.userId]);
+      input.useLastValidHeat, input.maxMilkingDays, auth.userId]);
     await audit(client, auth, context, metadata, 'REPRODUCTION_SETTINGS_UPDATED',
       'REPRODUCTION_SETTING', context.propertyId, before, input);
     return input;
@@ -180,14 +183,14 @@ function translate(error: unknown): never {
 }
 
 export async function listReproduction(context: PropertyContext) {
-  const [heats, pregnancies, births, losses] = await Promise.all([
+  const [heats, pregnancies, births, losses, services] = await Promise.all([
     pool.query(`SELECT h.id, h.cow_id AS "cowId", a.name AS "cowName",
       h.bull_id AS "bullId", h.starts_on::text AS "startsOn", h.ends_on::text AS "endsOn",
       h.is_false AS "isFalse", h.notes, h.cancelled_at IS NOT NULL AS cancelled
       FROM reproduction_heat h JOIN animal a ON a.id = h.cow_id
       WHERE h.property_id = $1 ORDER BY h.starts_on DESC, h.created_at DESC LIMIT 300`, [context.propertyId]),
     pool.query(`SELECT p.id, p.cow_id AS "cowId", a.name AS "cowName", p.heat_id AS "heatId",
-      p.father_id AS "fatherId", p.external_father AS "externalFather",
+      p.father_id AS "fatherId", p.external_father AS "externalFather", p.service_id AS "serviceId",
       p.conception_method AS "conceptionMethod", p.confirmation_method AS "confirmationMethod",
       p.confirmed_on::text AS "confirmedOn", p.expected_birth_on::text AS "expectedBirthOn",
       p.gestation_days AS "gestationDays", p.status, p.notes
@@ -205,8 +208,79 @@ export async function listReproduction(context: PropertyContext) {
       a.name AS "cowName", l.occurred_on::text AS "occurredOn", l.notes
       FROM reproduction_loss l JOIN animal a ON a.id = l.cow_id
       WHERE l.property_id = $1 ORDER BY l.occurred_on DESC, l.created_at DESC LIMIT 300`, [context.propertyId]),
+    pool.query(`SELECT s.id, s.cow_id AS "cowId", a.name AS "cowName", s.heat_id AS "heatId",
+      s.father_id AS "fatherId", s.external_father AS "externalFather",
+      s.donor_id AS "donorId", s.external_donor AS "externalDonor", s.kind,
+      s.occurred_on::text AS "occurredOn", s.material_code AS "materialCode", s.quality,
+      s.technician, s.supplier, s.notes, s.cancelled_at IS NOT NULL AS cancelled,
+      EXISTS(SELECT 1 FROM reproduction_pregnancy p WHERE p.service_id=s.id
+        AND p.status<>'CANCELLED') AS "hasPregnancy"
+      FROM reproduction_service s JOIN animal a ON a.id=s.cow_id
+      WHERE s.property_id=$1 ORDER BY s.occurred_on DESC,s.created_at DESC LIMIT 300`, [context.propertyId]),
   ]);
-  return { heats: heats.rows, pregnancies: pregnancies.rows, births: births.rows, losses: losses.rows };
+  return { heats: heats.rows, pregnancies: pregnancies.rows, births: births.rows,
+    losses: losses.rows, services: services.rows };
+}
+
+export async function createService(auth: AuthState, context: PropertyContext,
+  input: ServiceInput, metadata: RequestMetadata) {
+  try {
+    return await inTransaction(async (client) => {
+      const { account_id: accountId, today } = await access(client, auth, context, 'REPRODUCTION_MANAGE');
+      if (input.occurredOn > today) throw invalidRequest('FUTURE_REPRODUCTION_DATE',
+        'La fecha del servicio no puede ser futura.');
+      const config = await settings(client, context.propertyId);
+      await eligibleAnimal(client, context, input.cowId, 'FEMALE', accountId,
+        input.occurredOn, true, config.minimumCowMonths);
+      await femalePolicy(client, input.cowId, input.occurredOn, 'PREGNANCY', config);
+      let fatherId = input.fatherId ?? null;
+      if (input.heatId) {
+        const heat = await client.query<{ bull_id: string | null }>(
+          `SELECT bull_id FROM reproduction_heat WHERE id=$1 AND property_id=$2
+           AND cow_id=$3 AND cancelled_at IS NULL AND NOT is_false
+           AND starts_on<=$4::date FOR SHARE`,
+          [input.heatId, context.propertyId, input.cowId, input.occurredOn]);
+        if (!heat.rows[0]) throw invalidRequest('HEAT_UNAVAILABLE', 'El celo no corresponde al servicio.');
+        if (!fatherId && !input.externalFather) fatherId = heat.rows[0].bull_id;
+      }
+      if (fatherId) await eligibleAnimal(client, context, fatherId, 'MALE', accountId,
+        input.occurredOn, false, config.minimumBullMonths);
+      if (input.donorId) await eligibleAnimal(client, context, input.donorId, 'FEMALE', accountId,
+        input.occurredOn, false, 0);
+      const result = await client.query<{ id: string }>(
+        `INSERT INTO reproduction_service(account_id, property_id, cow_id, heat_id,
+          father_id, external_father, donor_id, external_donor, kind, occurred_on,
+          material_code, quality, technician, supplier, notes, created_by)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+        [accountId, context.propertyId, input.cowId, input.heatId ?? null, fatherId,
+          input.externalFather ?? null, input.donorId ?? null, input.externalDonor ?? null,
+          input.kind, input.occurredOn, input.materialCode ?? null, input.quality ?? null,
+          input.technician ?? null, input.supplier ?? null, input.notes ?? null, auth.userId]);
+      const created = { id: result.rows[0]!.id, ...input, fatherId, cancelled: false };
+      await audit(client, auth, context, metadata, 'REPRODUCTION_SERVICE_CREATED',
+        'REPRODUCTION_SERVICE', created.id, null, created);
+      return created;
+    });
+  } catch (error) { return translate(error); }
+}
+
+export async function cancelService(auth: AuthState, context: PropertyContext,
+  id: string, metadata: RequestMetadata) {
+  return inTransaction(async (client) => {
+    await access(client, auth, context, 'REPRODUCTION_MANAGE');
+    const service = await client.query(`SELECT id FROM reproduction_service WHERE id=$1
+      AND property_id=$2 AND cancelled_at IS NULL FOR UPDATE`, [id, context.propertyId]);
+    if (!service.rows[0]) throw new ApiError(404, 'SERVICE_NOT_FOUND', 'El servicio no está disponible.');
+    const linked = await client.query(`SELECT 1 FROM reproduction_pregnancy
+      WHERE service_id=$1 AND status<>'CANCELLED' LIMIT 1`, [id]);
+    if (linked.rowCount) throw conflict('SERVICE_HAS_PREGNANCY',
+      'Este servicio tiene una preñez relacionada y debe conservarse.');
+    await client.query(`UPDATE reproduction_service SET cancelled_at=now(),cancelled_by=$2
+      WHERE id=$1`, [id, auth.userId]);
+    await audit(client, auth, context, metadata, 'REPRODUCTION_SERVICE_CANCELLED',
+      'REPRODUCTION_SERVICE', id, { id, cancelled: false }, { id, cancelled: true });
+    return { id, cancelled: true };
+  });
 }
 
 export async function listReproductionCandidates(context: PropertyContext) {
@@ -258,7 +332,31 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
       let conceptionOn: string | null = null;
       let gestationDays = input.gestationDays ?? null;
       let heatId = input.heatId ?? null;
-      if (!heatId && config.useLastValidHeat) {
+      let fatherId = input.fatherId ?? null;
+      let externalFather = input.externalFather ?? null;
+      if (input.serviceId) {
+        const service = await client.query<{ occurred_on: string; heat_id: string | null;
+          father_id: string | null; external_father: string | null; kind: string }>(
+          `SELECT occurred_on::text,heat_id,father_id,external_father,kind
+           FROM reproduction_service WHERE id=$1 AND property_id=$2 AND cow_id=$3
+             AND account_id=$4 AND cancelled_at IS NULL FOR SHARE`,
+          [input.serviceId, context.propertyId, input.cowId, accountId]);
+        const selected = service.rows[0];
+        if (!selected || selected.kind !== input.conceptionMethod || selected.occurred_on > input.confirmedOn
+          || (heatId && heatId !== selected.heat_id)
+          || (fatherId && fatherId !== selected.father_id)
+          || (externalFather && externalFather !== selected.external_father))
+          throw invalidRequest('SERVICE_UNAVAILABLE', 'El servicio no corresponde a esta preñez.');
+        heatId = selected.heat_id;
+        fatherId = selected.father_id;
+        externalFather = selected.external_father;
+        conceptionOn = selected.occurred_on;
+        gestationDays = (await client.query<{ days: number }>(
+          `SELECT ($1::date-$2::date)::int AS days`, [input.confirmedOn, conceptionOn])).rows[0]!.days;
+        if (gestationDays > 400) throw invalidRequest('PREGNANCY_DATES_CONFLICT',
+          'La confirmación supera los 400 días desde el servicio.');
+      }
+      if (!input.serviceId && !heatId && config.useLastValidHeat) {
         const latest = await client.query<{ id: string }>(
           `SELECT id FROM reproduction_heat WHERE cow_id = $1 AND property_id = $2
            AND cancelled_at IS NULL AND NOT is_false AND starts_on <= $3::date
@@ -271,8 +369,7 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
           [input.cowId, context.propertyId, input.confirmedOn]);
         heatId = latest.rows[0]?.id ?? null;
       }
-      let fatherId = input.fatherId ?? null;
-      if (heatId) {
+      if (!input.serviceId && heatId) {
         const heat = await client.query<{ starts_on: string; ends_on: string | null; bull_id: string | null }>(
           `SELECT starts_on::text, ends_on::text, bull_id FROM reproduction_heat WHERE id = $1 AND cow_id = $2
            AND property_id = $3 AND cancelled_at IS NULL AND NOT is_false FOR SHARE`,
@@ -290,22 +387,22 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
         if (gestationDays > 400)
           throw invalidRequest('PREGNANCY_DATES_CONFLICT',
             'La confirmación supera los 400 días desde el celo seleccionado.');
-      } else if (gestationDays !== null) {
+      } else if (!input.serviceId && gestationDays !== null) {
         conceptionOn = addDays(input.confirmedOn, -gestationDays);
       }
       if (fatherId) await eligibleAnimal(client, context, fatherId, 'MALE', accountId,
         input.confirmedOn, false, config.minimumBullMonths);
       const expectedBirthOn = conceptionOn ? addDays(conceptionOn, GESTATION_DAYS) : null;
       const result = await client.query<{ id: string }>(
-        `INSERT INTO reproduction_pregnancy(account_id, property_id, cow_id, heat_id,
+        `INSERT INTO reproduction_pregnancy(account_id, property_id, cow_id, heat_id, service_id,
           father_id, external_father, conception_method, confirmation_method, confirmed_on,
           gestation_days, conception_on, expected_birth_on, notes, created_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
-        [accountId, context.propertyId, input.cowId, heatId,
-          fatherId, input.externalFather ?? null, input.conceptionMethod,
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+        [accountId, context.propertyId, input.cowId, heatId, input.serviceId ?? null,
+          fatherId, externalFather, input.conceptionMethod,
           input.confirmationMethod, input.confirmedOn, gestationDays, conceptionOn,
           expectedBirthOn, input.notes ?? null, auth.userId]);
-      const created = { id: result.rows[0]!.id, ...input, heatId, fatherId, gestationDays,
+      const created = { id: result.rows[0]!.id, ...input, heatId, fatherId, externalFather, gestationDays,
         expectedBirthOn, status: 'CONFIRMED' };
       await audit(client, auth, context, metadata, 'REPRODUCTION_PREGNANCY_CREATED',
         'REPRODUCTION_PREGNANCY', created.id, null, created);

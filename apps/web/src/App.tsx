@@ -26,6 +26,7 @@ import { PropertyTeamPanel } from './PropertyTeamPanel';
 import { PropertySettingsPanel } from './PropertySettingsPanel';
 import { SuperadminPanel } from './SuperadminPanel';
 import { ReproductionPanel } from './ReproductionPanel';
+import { ProductionPanel } from './ProductionPanel';
 
 type Theme = 'light' | 'dark';
 type AppSession = SessionPayload & { overview: SessionOverview };
@@ -189,6 +190,11 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
         <ReproductionPanel key={`reproduction:${activeProperty.id}:${activeRole.id}`}
           accessToken={session.accessToken}
           canManage={activeRole.permissions.includes('REPRODUCTION_MANAGE')} />}
+      {activeProperty && activeProperty.enabledModules.includes('PRODUCTION')
+        && activeRole?.permissions.includes('PRODUCTION_VIEW') &&
+        <ProductionPanel key={`production:${activeProperty.id}:${activeRole.id}`}
+          accessToken={session.accessToken}
+          canManage={activeRole.permissions.includes('PRODUCTION_MANAGE')} />}
     </main>
   </div>;
 }

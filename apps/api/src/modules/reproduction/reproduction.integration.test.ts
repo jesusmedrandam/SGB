@@ -5,8 +5,10 @@ import { pool } from '../../database/pool.js';
 import { createAnimal, getAnimal } from '../animals/animals.service.js';
 import { createOwner } from '../animals/owners.service.js';
 import { getSessionOverview, login, register, resendEmailVerification, verifyEmail } from '../auth/auth.service.js';
-import { createHeat, createPregnancy, getReproductionSettings, listReproduction,
+import { createHeat, createPregnancy, createService, getReproductionSettings, listReproduction,
   recordBirth, recordLoss, updateReproductionSettings } from './reproduction.service.js';
+import { createLactation, finishLactation, listProduction, recordMilk,
+  recordTank, setLactationMilking } from '../production/production.service.js';
 
 const metadata = { ipAddress: '127.0.0.1', userAgent: 'sgb-reproduction-test' };
 
@@ -42,6 +44,12 @@ test('la reproducción conserva propiedad, parentesco, espera y auditoría', asy
     await pool.query(`INSERT INTO property_module(property_id, module_code, enabled, configured_by)
       VALUES($1,'REPRODUCTION',true,$2) ON CONFLICT(property_id,module_code)
       DO UPDATE SET enabled = true`, [property.id, auth.userId]);
+    await pool.query(`INSERT INTO account_module(account_id,module_code,enabled,configured_by)
+      VALUES($1,'PRODUCTION',true,$2) ON CONFLICT(account_id,module_code)
+      DO UPDATE SET enabled=true`,[registration.accountId,auth.userId]);
+    await pool.query(`INSERT INTO property_module(property_id,module_code,enabled,configured_by)
+      VALUES($1,'PRODUCTION',true,$2) ON CONFLICT(property_id,module_code)
+      DO UPDATE SET enabled=true`,[property.id,auth.userId]);
 
     const owner = await createOwner(auth, context, { kind: 'USER', userId: auth.userId }, metadata);
     const mother = await createAnimal(auth, context, { name: 'Madre de prueba', sex: 'FEMALE',
@@ -126,5 +134,56 @@ test('la reproducción conserva propiedad, parentesco, espera y auditoría', asy
       [auth.userId]);
     assert.ok(audit.rows.some((row) => row.action === 'REPRODUCTION_BIRTH_REGISTERED'));
     assert.ok(audit.rows.some((row) => row.action === 'REPRODUCTION_LOSS_REGISTERED'));
+
+    const today = (await pool.query<{ today: string }>(
+      `SELECT to_char((now() AT TIME ZONE timezone)::date,'YYYY-MM-DD') AS today
+       FROM property WHERE id=$1`,[property.id])).rows[0]!.today;
+    const relative = (days:number) => {
+      const date=new Date(`${today}T12:00:00Z`);
+      date.setUTCDate(date.getUTCDate()+days);
+      return date.toISOString().slice(0,10);
+    };
+    const service = await createService(auth,context,{cowId:mother.id,fatherId:father.id,
+      kind:'INSEMINATION',occurredOn:relative(-220),technician:'Profesional de prueba'},metadata);
+    const linked = await createPregnancy(auth,context,{cowId:mother.id,serviceId:service.id,
+      conceptionMethod:'INSEMINATION',confirmationMethod:'ULTRASOUND',
+      confirmedOn:relative(-190)},metadata);
+    assert.equal(linked.fatherId,father.id);
+    assert.equal(linked.gestationDays,30);
+    assert.equal((await listReproduction(context)).pregnancies.find((row)=>row.id===linked.id)?.serviceId,service.id);
+    const recentBirth = await recordBirth(auth,context,{pregnancyId:linked.id,
+      occurredOn:relative(-20),stillbornCount:1,calves:[]},metadata);
+    const lactation = await createLactation(auth,context,{birthId:recentBirth.id,inMilking:true},metadata);
+    assert.equal(lactation.cowId,mother.id);
+    await assert.rejects(()=>createLactation(auth,wrongProperty,
+      {birthId:recentBirth.id,inMilking:true},metadata),
+    (error:{code?:string})=>error.code==='PRODUCTION_DENIED');
+    await updateReproductionSettings(auth,context,{...defaults,maxMilkingDays:10},metadata);
+    await assert.rejects(()=>recordMilk(auth,context,{lactationId:lactation.id,
+      producedOn:today,shift:'MORNING',liters:2,source:'MANUAL'},metadata),
+    (error:{code?:string})=>error.code==='MILKING_PERIOD_EXPIRED');
+    await updateReproductionSettings(auth,context,defaults,metadata);
+    await setLactationMilking(auth,context,lactation.id,false,metadata);
+    await assert.rejects(()=>recordMilk(auth,context,{lactationId:lactation.id,
+      producedOn:today,shift:'MORNING',liters:2,source:'MANUAL'},metadata),
+    (error:{code?:string})=>error.code==='MILKING_UNAVAILABLE');
+    await setLactationMilking(auth,context,lactation.id,true,metadata);
+    const milk=await recordMilk(auth,context,{lactationId:lactation.id,
+      producedOn:today,shift:'MORNING',liters:4.25,source:'MANUAL'},metadata);
+    assert.equal(milk.cowId,mother.id);
+    await assert.rejects(()=>recordMilk(auth,context,{lactationId:lactation.id,
+      producedOn:today,shift:'MORNING',liters:1,source:'MANUAL'},metadata),
+    (error:{code?:string})=>error.code==='PRODUCTION_DUPLICATE');
+    await recordTank(auth,context,{producedOn:today,shift:'MORNING',liters:4,source:'MANUAL'},metadata);
+    const production=await listProduction(context);
+    assert.equal(production.milk.length,1);
+    assert.equal(production.tanks.length,1);
+    assert.equal((await listProduction(wrongProperty)).milk.length,0);
+    await assert.rejects(()=>finishLactation(auth,context,lactation.id,relative(-1),metadata),
+    (error:{code?:string})=>error.code==='LACTATION_DATES_INVALID');
+    await finishLactation(auth,context,lactation.id,today,metadata);
+    await assert.rejects(()=>recordMilk(auth,context,{lactationId:lactation.id,
+      producedOn:today,shift:'AFTERNOON',liters:3,source:'MANUAL'},metadata),
+    (error:{code?:string})=>error.code==='MILKING_UNAVAILABLE');
   } finally { await pool.end(); }
 });

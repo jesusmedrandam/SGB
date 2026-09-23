@@ -139,13 +139,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .context-card p { margin: 0; }
 .context-controls { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 12px; min-width: 0; }
 .section-block { margin-top: 52px; }
-.reproduction-forms, .reproduction-records { display: grid;
+.reproduction-forms, .reproduction-records, .production-forms { display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 20px; }
-.reproduction-forms .group-new-form { align-self: start; }
+.reproduction-forms .group-new-form, .production-forms .group-new-form { align-self: start; }
 .reproduction-records > div { min-width: 0; }
 .reproduction-records .group-location-item { margin: 8px 0; }
 @media (max-width: 760px) {
-  .reproduction-forms, .reproduction-records { grid-template-columns: 1fr; }
+  .reproduction-forms, .reproduction-records, .production-forms { grid-template-columns: 1fr; }
 }
 .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-bottom: 19px; }
 .section-heading h2 { margin: 8px 0 0; font-size: clamp(1.65rem, 3vw, 2.3rem); letter-spacing: -.035em; }

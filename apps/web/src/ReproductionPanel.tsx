@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import {
-  ApiRequestError, cancelHeat, cancelPregnancy, createHeat, createPregnancy,
+  ApiRequestError, cancelHeat, cancelPregnancy, cancelService, createHeat, createPregnancy, createService,
   getReproduction, getReproductionCandidates, getReproductionSettings,
   recordBirth, recordLoss, updateReproductionSettings,
   type ReproductionCandidate, type ReproductionRecords, type ReproductionSettings,
@@ -63,13 +63,31 @@ export function ReproductionPanel({ accessToken, canManage }: {
     const form = event.currentTarget;
     const data = new FormData(form);
     const days = optional(data, 'gestationDays');
+    const serviceId = optional(data, 'serviceId');
+    const service = records?.services.find((row) => row.id === serviceId);
     void run(() => createPregnancy(accessToken, {
-      cowId: String(data.get('cowId')), heatId: optional(data, 'heatId'),
-      fatherId: optional(data, 'fatherId'), externalFather: optional(data, 'externalFather'),
-      conceptionMethod: String(data.get('conceptionMethod')),
+      cowId: String(data.get('cowId')), heatId: service ? null : optional(data, 'heatId'), serviceId,
+      fatherId: service ? null : optional(data, 'fatherId'),
+      externalFather: service ? null : optional(data, 'externalFather'),
+      conceptionMethod: service?.kind ?? String(data.get('conceptionMethod')),
       confirmationMethod: String(data.get('confirmationMethod')),
       confirmedOn: String(data.get('confirmedOn')),
       ...(days ? { gestationDays: Number(days) } : {}), notes: optional(data, 'notes'),
+    }), form);
+  }
+
+  function reproductiveService(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    void run(() => createService(accessToken, {
+      cowId: String(data.get('cowId')), heatId: optional(data, 'heatId'),
+      fatherId: optional(data, 'fatherId'), externalFather: optional(data, 'externalFather'),
+      donorId: optional(data, 'donorId'), externalDonor: optional(data, 'externalDonor'),
+      kind: String(data.get('kind')) as 'INSEMINATION' | 'EMBRYO_TRANSFER',
+      occurredOn: String(data.get('occurredOn')), materialCode: optional(data, 'materialCode'),
+      quality: optional(data, 'quality'), technician: optional(data, 'technician'),
+      supplier: optional(data, 'supplier'), notes: optional(data, 'notes'),
     }), form);
   }
 
@@ -113,6 +131,7 @@ export function ReproductionPanel({ accessToken, canManage }: {
       allowSecondHeat: checked('allowSecondHeat'),
       allowFalseHeatInPregnancy: checked('allowFalseHeatInPregnancy'),
       useLastValidHeat: checked('useLastValidHeat'),
+      maxMilkingDays: days('maxMilkingDays'),
     }));
   }
 
@@ -133,6 +152,7 @@ export function ReproductionPanel({ accessToken, canManage }: {
           ['daysAfterLossPregnancy', 'Días tras pérdida para preñez', 365],
           ['minimumCowMonths', 'Edad mínima de la vaca (meses)', 120],
           ['minimumBullMonths', 'Edad mínima del toro (meses)', 120],
+          ['maxMilkingDays', 'Máximo de días de ordeño tras parto', 730],
         ] as const).map(([key, label, max]) => <label key={key}><span>{label}</span>
           <input type="number" name={key} min="0" max={max} required defaultValue={settings[key]} />
         </label>)}
@@ -176,6 +196,12 @@ export function ReproductionPanel({ accessToken, canManage }: {
           {records?.heats.filter((entry) => entry.cowId === cowId && !entry.cancelled && !entry.isFalse)
             .map((entry) => <option key={entry.id} value={entry.id}>{entry.startsOn}</option>)}
         </select></label>
+        <label><span>Servicio asistido relacionado</span><select name="serviceId" defaultValue="" key={`service:${cowId}`}>
+          <option value="">Sin servicio asistido</option>
+          {records?.services.filter((entry) => entry.cowId === cowId && !entry.cancelled && !entry.hasPregnancy)
+            .map((entry) => <option key={entry.id} value={entry.id}>
+              {entry.occurredOn} · {entry.kind === 'INSEMINATION' ? 'Inseminación' : 'Transferencia'}</option>)}
+        </select><small>Si eliges un servicio, se toman su celo y padre.</small></label>
         <label><span>Padre registrado</span><select name="fatherId" defaultValue="">
           <option value="">No registrado</option>
           {males.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
@@ -199,6 +225,40 @@ export function ReproductionPanel({ accessToken, canManage }: {
         <label><span>Observaciones</span><textarea name="notes" maxLength={500} /></label>
         <button className="primary-button compact" disabled={busy || !females.length}>
           Confirmar preñez</button>
+      </form>
+
+      <form className="group-new-form" onSubmit={reproductiveService}>
+        <h3>Inseminación o transferencia</h3>
+        <label><span>Receptora *</span><select name="cowId" required defaultValue="">
+          <option value="" disabled>Selecciona la vaca</option>
+          {females.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
+        </select></label>
+        <label><span>Tipo *</span><select name="kind" defaultValue="INSEMINATION">
+          <option value="INSEMINATION">Inseminación artificial</option>
+          <option value="EMBRYO_TRANSFER">Transferencia de embriones</option>
+        </select></label>
+        <label><span>Fecha *</span><input type="date" name="occurredOn" required defaultValue={localDate()} /></label>
+        <label><span>Celo relacionado</span><select name="heatId" defaultValue="">
+          <option value="">Sin celo registrado</option>
+          {records?.heats.filter((entry) => !entry.cancelled && !entry.isFalse)
+            .map((entry) => <option key={entry.id} value={entry.id}>{entry.cowName} · {entry.startsOn}</option>)}
+        </select></label>
+        <label><span>Padre registrado</span><select name="fatherId" defaultValue="">
+          <option value="">Sin padre registrado</option>
+          {males.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
+        </select></label>
+        <label><span>Padre externo</span><input name="externalFather" maxLength={240} /></label>
+        <label><span>Donante registrada (solo transferencia)</span><select name="donorId" defaultValue="">
+          <option value="">Sin donante registrada</option>
+          {females.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
+        </select></label>
+        <label><span>Donante externa (solo transferencia)</span><input name="externalDonor" maxLength={240} /></label>
+        <label><span>Código de material</span><input name="materialCode" maxLength={160} /></label>
+        <label><span>Calidad</span><input name="quality" maxLength={120} /></label>
+        <label><span>Técnico</span><input name="technician" maxLength={160} /></label>
+        <label><span>Proveedor</span><input name="supplier" maxLength={160} /></label>
+        <label><span>Observaciones</span><textarea name="notes" maxLength={2000} /></label>
+        <button className="primary-button compact" disabled={busy || !females.length}>Guardar servicio</button>
       </form>
 
       <form className="group-new-form" onSubmit={birth}>
@@ -243,6 +303,17 @@ export function ReproductionPanel({ accessToken, canManage }: {
     </div>}
 
     {records && <div className="reproduction-records">
+      <div><h3>Servicios asistidos</h3>
+        {records.services.length === 0 && <p className="muted">Sin servicios registrados.</p>}
+        {records.services.map((item) => <article key={item.id} className="group-location-item">
+          <strong>{item.cowName} · {item.occurredOn}</strong>
+          <small>{item.kind === 'INSEMINATION' ? 'Inseminación' : 'Transferencia'}
+            {item.cancelled ? ' · Cancelado' : ''}{item.hasPregnancy ? ' · Con preñez' : ''}</small>
+          {canManage && !item.cancelled && !item.hasPregnancy &&
+            <button className="secondary-button compact" disabled={busy}
+              onClick={() => { if (window.confirm('¿Cancelar este servicio? Se conservará en el historial.'))
+                void run(() => cancelService(accessToken, item.id)); }}>Cancelar servicio</button>}
+        </article>)}</div>
       <div><h3>Preñeces y próximos partos</h3>
         {records.pregnancies.length === 0 && <p className="muted">Sin preñeces registradas.</p>}
         {records.pregnancies.map((item) => <article key={item.id} className="group-location-item">

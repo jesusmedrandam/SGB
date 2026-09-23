@@ -11,6 +11,7 @@ export const createHeatSchema = z.object({
 
 export const createPregnancySchema = z.object({
   cowId: z.uuid(), heatId: z.uuid().nullable().optional(),
+  serviceId: z.uuid().nullable().optional(),
   fatherId: z.uuid().nullable().optional(), externalFather: z.string().trim().min(1).max(240).nullable().optional(),
   conceptionMethod: z.enum(['NATURAL','INSEMINATION','EMBRYO_TRANSFER','UNKNOWN']),
   confirmationMethod: z.enum(['PALPATION','ULTRASOUND','BLOOD_TEST','OBSERVATION','OTHER']),
@@ -18,6 +19,27 @@ export const createPregnancySchema = z.object({
   notes: note,
 }).refine((value) => !(value.fatherId && value.externalFather),
   'Selecciona un padre registrado o escribe uno externo.');
+
+export const createServiceSchema = z.object({
+  cowId: z.uuid(), heatId: z.uuid().nullable().optional(),
+  fatherId: z.uuid().nullable().optional(),
+  externalFather: z.string().trim().min(1).max(240).nullable().optional(),
+  donorId: z.uuid().nullable().optional(),
+  externalDonor: z.string().trim().min(1).max(240).nullable().optional(),
+  kind: z.enum(['INSEMINATION','EMBRYO_TRANSFER']), occurredOn: z.iso.date(),
+  materialCode: z.string().trim().max(160).nullable().optional(),
+  quality: z.string().trim().max(120).nullable().optional(),
+  technician: z.string().trim().max(160).nullable().optional(),
+  supplier: z.string().trim().max(160).nullable().optional(),
+  notes: z.string().trim().max(2000).nullable().optional(),
+}).superRefine((value, ctx) => {
+  if (value.fatherId && value.externalFather) ctx.addIssue({ code: 'custom', path: ['externalFather'],
+    message: 'Selecciona un padre registrado o uno externo.' });
+  if (value.donorId && value.externalDonor) ctx.addIssue({ code: 'custom', path: ['externalDonor'],
+    message: 'Selecciona una donante registrada o una externa.' });
+  if (value.kind === 'INSEMINATION' && (value.donorId || value.externalDonor))
+    ctx.addIssue({ code: 'custom', path: ['donorId'], message: 'La donante requiere transferencia de embriones.' });
+});
 
 export const createBirthSchema = z.object({
   pregnancyId: z.uuid(), occurredOn: z.iso.date(),
@@ -46,10 +68,12 @@ export const reproductionSettingSchema = z.object({
   allowSecondHeat: z.boolean(),
   allowFalseHeatInPregnancy: z.boolean(),
   useLastValidHeat: z.boolean(),
+  maxMilkingDays: z.number().int().min(1).max(730),
 });
 
 export type HeatInput = z.infer<typeof createHeatSchema>;
 export type PregnancyInput = z.infer<typeof createPregnancySchema>;
+export type ServiceInput = z.infer<typeof createServiceSchema>;
 export type BirthInput = z.infer<typeof createBirthSchema>;
 export type LossInput = z.infer<typeof createLossSchema>;
 export type ReproductionSettingInput = z.infer<typeof reproductionSettingSchema>;
