@@ -59,6 +59,7 @@ async function initialContext(client: PoolClient, userId: string): Promise<Conte
     `SELECT pm.property_id, pr.id AS role_id
        FROM property_membership pm
        JOIN property p ON p.id = pm.property_id AND p.deleted_at IS NULL
+       JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
        JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
        JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = pm.property_id AND pr.active
       WHERE pm.user_id = $1 AND pm.status = 'ACTIVE'
@@ -87,6 +88,7 @@ async function contextIsValid(
        JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
        JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = pm.property_id
        JOIN property p ON p.id = pm.property_id
+       JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
       WHERE pm.user_id = $1
         AND pm.property_id = $2
         AND pm.status = 'ACTIVE'
@@ -548,6 +550,7 @@ export async function changeContext(
       `SELECT p.name AS property_name, pr.code AS role_code, pr.name AS role_name
          FROM property_membership pm
          JOIN property p ON p.id = pm.property_id AND p.deleted_at IS NULL AND p.status = 'ACTIVE'
+         JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
          JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
          JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = pm.property_id AND pr.active
         WHERE pm.user_id = $1 AND pm.property_id = $2 AND pm.status = 'ACTIVE' AND pr.id = $3`,
@@ -603,6 +606,7 @@ export async function getSessionOverview(auth: AuthState) {
             pr.id AS role_id, pr.code AS role_code, pr.name AS role_name
        FROM property_membership pm
        JOIN property p ON p.id = pm.property_id AND p.deleted_at IS NULL AND p.status = 'ACTIVE'
+       JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
        JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
        JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = pm.property_id AND pr.active
       WHERE pm.user_id = $1 AND pm.status = 'ACTIVE'

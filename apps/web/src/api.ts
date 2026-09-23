@@ -38,6 +38,51 @@ export interface SessionOverview {
   enabledUserModules: string[];
 }
 
+export interface AdministrativeAccountSummary {
+  id: string;
+  name: string;
+  status: 'ACTIVE' | 'SUSPENDED' | 'DISABLED';
+  maxProperties: number;
+  createdAt: string;
+  owner: { id: string; name: string; email: string };
+  propertyCount: number;
+  collaboratorCount: number;
+}
+
+export interface PlatformOverview {
+  totals: { users: number; accounts: number; properties: number; managedAnimals: number };
+  accounts: AdministrativeAccountSummary[];
+}
+
+export interface AccountDetails {
+  account: AdministrativeAccountSummary;
+  properties: Array<{
+    id: string;
+    name: string;
+    status: string;
+    timezone: string;
+    createdAt: string;
+    memberCount: number;
+    animalCount: number;
+  }>;
+  quotas: Array<{
+    code: string;
+    name: string;
+    description: string;
+    unit: 'BYTES' | 'COUNT';
+    limitValue: number | null;
+    usedValue: number;
+    warningPercent: number;
+  }>;
+  modules: Array<{
+    code: string;
+    name: string;
+    description: string | null;
+    isCore: boolean;
+    enabled: boolean;
+  }>;
+}
+
 interface ApiEnvelope<T> {
   ok: boolean;
   data: T;
@@ -121,5 +166,53 @@ export async function logout(accessToken: string | null) {
   await request<never>('/auth/logout', {
     method: 'POST',
     headers: accessToken ? { authorization: `Bearer ${accessToken}` } : {},
+  });
+}
+
+const bearer = (accessToken: string) => ({ authorization: `Bearer ${accessToken}` });
+
+export function getPlatformOverview(accessToken: string) {
+  return request<PlatformOverview>('/superadmin/overview', { headers: bearer(accessToken) });
+}
+
+export function getAdministrativeAccount(accessToken: string, accountId: string) {
+  return request<AccountDetails>(`/superadmin/accounts/${accountId}`, { headers: bearer(accessToken) });
+}
+
+export function updateAdministrativeAccount(
+  accessToken: string,
+  accountId: string,
+  input: { status?: AdministrativeAccountSummary['status']; maxProperties?: number },
+) {
+  return request<{ status: string; maxProperties: number }>(`/superadmin/accounts/${accountId}`, {
+    method: 'PATCH',
+    headers: bearer(accessToken),
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateAdministrativeQuota(
+  accessToken: string,
+  accountId: string,
+  quotaCode: string,
+  limitValue: number | null,
+) {
+  return request(`/superadmin/accounts/${accountId}/quotas/${quotaCode}`, {
+    method: 'PUT',
+    headers: bearer(accessToken),
+    body: JSON.stringify({ limitValue }),
+  });
+}
+
+export function updateAdministrativeModule(
+  accessToken: string,
+  accountId: string,
+  moduleCode: string,
+  enabled: boolean,
+) {
+  return request(`/superadmin/accounts/${accountId}/modules/${moduleCode}`, {
+    method: 'PUT',
+    headers: bearer(accessToken),
+    body: JSON.stringify({ enabled }),
   });
 }

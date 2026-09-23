@@ -9,6 +9,7 @@ import {
   type SessionOverview,
   type SessionPayload,
 } from './api';
+import { SuperadminPanel } from './SuperadminPanel';
 
 type Theme = 'light' | 'dark';
 type AppSession = SessionPayload & { overview: SessionOverview };
@@ -101,13 +102,6 @@ function LoginScreen({ busy, error, onLogin }: {
   </main>;
 }
 
-const superadminSections = [
-  { icon: '⌂', title: 'Cuentas y propiedades', detail: 'Administradores, propiedades y límites globales.' },
-  { icon: '◇', title: 'Módulos habilitados', detail: 'Control superior de funciones disponibles por cuenta.' },
-  { icon: '♙', title: 'Usuarios y accesos', detail: 'Estados, roles y accesos entre propiedades.' },
-  { icon: '≡', title: 'Auditoría global', detail: 'Consulta trazable de acciones administrativas.' },
-];
-
 function Dashboard({ session, busy, error, onLogout, onContextChange }: {
   session: AppSession;
   busy: boolean;
@@ -165,13 +159,7 @@ function Dashboard({ session, busy, error, onLogout, onContextChange }: {
         <article><span>Sesión</span><strong>Protegida</strong></article>
       </section>
 
-      {overview.user.isSuperadmin ? <section className="section-block">
-        <div className="section-heading"><div><span className="eyebrow">Administración global</span>
-          <h2>Centro del superadministrador</h2></div><span className="phase-label">Primera etapa</span></div>
-        <div className="feature-grid">{superadminSections.map((item) => <article className="feature-card" key={item.title}>
-          <span className="feature-icon">{item.icon}</span><div><h3>{item.title}</h3><p>{item.detail}</p></div>
-          <span className="coming-soon">En preparación</span></article>)}</div>
-      </section> : <section className="section-block">
+      {overview.user.isSuperadmin ? <SuperadminPanel accessToken={session.accessToken} /> : <section className="section-block">
         <div className="section-heading"><div><span className="eyebrow">Acceso disponible</span><h2>Módulos habilitados</h2></div></div>
         <div className="module-list">{(activeProperty?.enabledModules || []).map((module) => <span key={module}>{module}</span>)}</div>
       </section>}

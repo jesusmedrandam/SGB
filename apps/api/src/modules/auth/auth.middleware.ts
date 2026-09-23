@@ -54,6 +54,14 @@ export const authenticate: RequestHandler = async (request, _response, next) => 
   }
 };
 
+export const requireSuperadmin: RequestHandler = (request, _response, next) => {
+  if (!request.auth) return next(unauthorized());
+  if (!request.auth.isSuperadmin) {
+    return next(forbidden('SUPERADMIN_REQUIRED', 'Esta operación requiere acceso de superadministrador.'));
+  }
+  next();
+};
+
 export const requirePropertyContext: RequestHandler = async (request, _response, next) => {
   try {
     const auth = request.auth;
@@ -72,6 +80,7 @@ export const requirePropertyContext: RequestHandler = async (request, _response,
               rp.permission_code
          FROM property_membership pm
          JOIN property p ON p.id = pm.property_id AND p.deleted_at IS NULL AND p.status = 'ACTIVE'
+         JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
          JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
          JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = pm.property_id AND pr.active
          LEFT JOIN role_permission rp ON rp.role_id = pr.id
