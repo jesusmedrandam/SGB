@@ -123,6 +123,7 @@ textarea { border-radius: 12px; }
 .stat-team { color: #3675c7; background: #e3efff; }.stat-admin { color: #7550bf; background: #eee7ff; }
 .stat-health { color: #a43e68; background: #ffe8f1; }
 .stat-cleanings { color: #36845f; background: #e6f5df; }
+.stat-activities { color: #6261a7; background: #eeeefe; }
 .dashboard-module-copy { display: grid; gap: 3px; min-width: 0; }.dashboard-module-copy strong { font-size: .96rem; }
 .dashboard-module-copy small { color: var(--muted); font-size: .72rem; line-height: 1.35; }
 .livestock-shell .summary-grid { margin-top: 18px; }.livestock-shell .summary-grid article { padding: 18px; }

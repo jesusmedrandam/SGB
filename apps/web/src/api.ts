@@ -863,6 +863,35 @@ export function applyCleaning(accessToken:string,id:string){return request<Clean
 export function cancelCleaning(accessToken:string,id:string){return request<CleaningRecord>(
   `/cleanings/${encodeURIComponent(id)}/cancel`,{method:'POST',headers:bearer(accessToken)});}
 
+export interface ActivityInput {
+  kind:'HERRAJE'|'DESCORNE'|'OTRA';title:string;occurredOn:string;
+  description?:string|null;brandId?:string|null;animalIds:string[];expectedVersion?:number;
+}
+export interface ActivityRecord extends Omit<ActivityInput,'animalIds'> {
+  id:string;brandName:string|null;status:'BORRADOR'|'COMPLETADA'|'CANCELADA';
+  version:number;animals:Array<{id:string;name:string;earTagCode:string|null}>;
+  createdAt:string;appliedAt:string|null;cancelledAt:string|null;
+}
+export interface ActivityOptions {
+  animals:Array<{id:string;name:string;earTagCode:string|null}>;
+  brands:Array<{id:string;name:string}>;
+}
+export function getActivities(accessToken:string){return request<ActivityRecord[]>(
+  '/activities',{headers:bearer(accessToken)});}
+export function getActivityOptions(accessToken:string){return request<ActivityOptions>(
+  '/activities/options',{headers:bearer(accessToken)});}
+export function createActivity(accessToken:string,input:ActivityInput){return request<ActivityRecord>(
+  '/activities',{method:'POST',headers:{...bearer(accessToken),'Content-Type':'application/json'},
+    body:JSON.stringify(input)});}
+export function updateActivity(accessToken:string,id:string,input:ActivityInput){
+  return request<ActivityRecord>(`/activities/${encodeURIComponent(id)}`,{
+    method:'PUT',headers:{...bearer(accessToken),'Content-Type':'application/json'},
+    body:JSON.stringify(input)});}
+export function applyActivity(accessToken:string,id:string){return request<ActivityRecord>(
+  `/activities/${encodeURIComponent(id)}/apply`,{method:'POST',headers:bearer(accessToken)});}
+export function cancelActivity(accessToken:string,id:string){return request<ActivityRecord>(
+  `/activities/${encodeURIComponent(id)}/cancel`,{method:'POST',headers:bearer(accessToken)});}
+
 export function createAccountProperty(accessToken: string, name: string) {
   return request<{ accountId: string; propertyId: string; roleId: string }>('/property-settings/properties', {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name }),
