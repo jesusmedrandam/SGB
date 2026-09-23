@@ -62,7 +62,7 @@ test('sanidad respeta propiedad, dosis, selección, borradores y aplicación ún
     assert.equal(updated.version,created.version+1);
     const applied=await applyCampaign(auth,context,created.id,metadata);
     assert.equal(applied.status,'COMPLETADO');
-    assert.equal(applied.animals[0]?.dose,3);
+    assert.equal(applied.animals.find((animal:{animalId:string})=>animal.animalId===first.id)?.dose,3);
     await assert.rejects(()=>applyCampaign(auth,context,created.id,metadata),
       (error:{code?:string})=>error.code==='HEALTH_CAMPAIGN_FINAL');
     const cancelled=await createCampaign(auth,context,{...base,selectionMode:'MANUAL',
