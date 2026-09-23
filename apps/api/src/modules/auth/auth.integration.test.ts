@@ -728,6 +728,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
         'PROPERTY_CREATED',
+        'CATALOG_ITEM_STATE_CHANGED',
         'ANIMAL_CREATED',
         'ANIMAL_CREATED',
         'OWNER_CREATED',
