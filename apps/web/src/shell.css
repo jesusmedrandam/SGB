@@ -119,6 +119,7 @@ textarea { border-radius: 12px; }
 .stat-icon { width: 43px; height: 43px; display: grid; place-items: center; border-radius: 13px;
   color: var(--primary); background: var(--primary-soft); }
 .stat-reproduction { color: #b83f71; background: #ffe6f0; }.stat-production { color: #1e8990; background: #def6f7; }
+.stat-movements { color: #3675c7; background: #e3efff; }
 .stat-team { color: #3675c7; background: #e3efff; }.stat-admin { color: #7550bf; background: #eee7ff; }
 .dashboard-module-copy { display: grid; gap: 3px; min-width: 0; }.dashboard-module-copy strong { font-size: .96rem; }
 .dashboard-module-copy small { color: var(--muted); font-size: .72rem; line-height: 1.35; }
@@ -159,6 +160,35 @@ textarea { border-radius: 12px; }
 .livestock-shell .reproduction-forms > form, .livestock-shell .production-forms > form {
   width: 100%; max-width: 780px; margin: 0 0 18px; }
 [hidden] { display: none !important; }
+.movement-form { max-width: 950px; display: grid; grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 13px; padding: 20px; border: 1px solid var(--border); border-radius: 17px;
+  background: var(--surface); box-shadow: var(--shadow); }
+.movement-form h3, .movement-wide { grid-column: 1/-1; }
+.movement-form h3 { margin: 0 0 4px; }
+.movement-form label { min-width: 0; display: grid; align-content: start; gap: 6px; }
+.movement-form label > span:first-child { font-size: .79rem; font-weight: 800; }
+.movement-form label small { color: var(--muted); font-size: .72rem; line-height: 1.4; }
+.movement-selection { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--border);
+  border-radius: 12px; background: var(--surface-soft); }
+.movement-selection > .secondary-button { justify-self: start; }
+.movement-animal-grid { max-height: 240px; overflow-y: auto; display: grid;
+  grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 7px; }
+.movement-animal-grid label { display: flex; align-items: center; gap: 8px; padding: 9px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.movement-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.movement-list { display: grid; gap: 10px; margin-top: 24px; }.movement-list h3 { margin: 0 0 4px; }
+.movement-card { display: grid; gap: 9px; padding: 17px; border: 1px solid var(--border);
+  border-radius: 17px; background: var(--surface); }
+.movement-card p { margin: 0; line-height: 1.5; }.movement-card > small { color: var(--muted); }
+.movement-card-top { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.movement-card-top > div { display: grid; gap: 3px; }.movement-card-top small { color: var(--muted); }
+.movement-status { flex: none; padding: 5px 9px; border-radius: 99px; color: var(--primary-dark);
+  background: var(--primary-soft); font-size: .7rem; font-weight: 800; }
+.status-borrador { color: #825817; background: #fff1d7; }
+.status-cancelado { color: var(--muted); background: var(--surface-soft); }
+.movement-card details { color: var(--muted); font-size: .78rem; }
+.movement-card summary { cursor: pointer; }.movement-animal-name { display: inline-block; margin: 7px 7px 0 0;
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); }
 
 @media (max-width: 1100px) {
   .dashboard-module-grid { grid-template-columns: 1fr; }
@@ -185,6 +215,8 @@ textarea { border-radius: 12px; }
   .livestock-shell .production-forms > div, .livestock-shell .reproduction-records > div { padding: 13px; }
   .form-toolbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
   .form-toolbar button { flex: none; }
+  .movement-form { grid-template-columns: 1fr; padding: 14px; }
+  .movement-card-top { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
   .sidebar, .dashboard-module-card { transition: none !important; }

@@ -27,12 +27,13 @@ import { PropertySettingsPanel } from './PropertySettingsPanel';
 import { SuperadminPanel } from './SuperadminPanel';
 import { ReproductionPanel } from './ReproductionPanel';
 import { ProductionPanel } from './ProductionPanel';
+import { MovementPanel } from './MovementPanel';
 import { ShellIcon, type ShellIconName } from './ShellIcon';
 
 type Theme = 'light' | 'dark';
 type AppSession = SessionPayload & { overview: SessionOverview };
 type SectionId = 'home'|'animals'|'groups'|'reproduction'|'production'|'catalogs'|
-  'team'|'settings'|'admin';
+  'movements'|'team'|'settings'|'admin';
 type NavigationItem = { id:SectionId; label:string; description:string; icon:ShellIconName;
   group:'principal'|'operations'|'configuration'; enabled:boolean };
 
@@ -95,6 +96,7 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
     {id:'groups',label:'Grupos y potreros',description:'Grupos y ubicaciones',icon:'groups',group:'principal',enabled:has('GROUP_VIEW')},
     {id:'reproduction',label:'Reproducción',description:'Celos, preñeces y partos',icon:'reproduction',group:'operations',enabled:has('REPRODUCTION_VIEW')&&modules.includes('REPRODUCTION')},
     {id:'production',label:'Producción',description:'Lactancias y ordeños',icon:'production',group:'operations',enabled:has('PRODUCTION_VIEW')&&modules.includes('PRODUCTION')},
+    {id:'movements',label:'Movimientos',description:'Grupos, potreros y traslados',icon:'movements',group:'operations',enabled:has('MOVEMENT_VIEW')&&modules.includes('MOVEMENTS')},
     {id:'catalogs',label:'Catálogos',description:'Razas, colores y marquillas',icon:'catalogs',group:'configuration',enabled:has('CATALOG_VIEW')},
     {id:'team',label:'Equipo y roles',description:'Acceso a la propiedad',icon:'team',group:'configuration',enabled:has('MEMBERSHIP_VIEW')},
     {id:'settings',label:'Configuración',description:'Propiedades y módulos',icon:'settings',group:'configuration',enabled:has('MODULE_VIEW')},
@@ -262,6 +264,12 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
         <ProductionPanel key={`production:${activeProperty.id}:${activeRole.id}`}
           accessToken={session.accessToken}
           canManage={activeRole.permissions.includes('PRODUCTION_MANAGE')} />}
+      {section==='movements' && activeProperty && activeProperty.enabledModules.includes('MOVEMENTS')
+        && activeRole?.permissions.includes('MOVEMENT_VIEW') &&
+        <MovementPanel key={`movements:${activeProperty.id}:${activeRole.id}`}
+          accessToken={session.accessToken} propertyId={activeProperty.id}
+          canManage={activeRole.permissions.includes('MOVEMENT_MANAGE')}
+          canCancel={activeRole.permissions.includes('MOVEMENT_CANCEL')} />}
     </main>
     <footer className="app-footer">SGB · Sistema de Gestión Bovina</footer>
     </div>

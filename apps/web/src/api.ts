@@ -706,6 +706,57 @@ export function recordTank(accessToken:string,input:{producedOn:string;
   });
 }
 
+export interface MovementRecord {
+  id:string;kind:'UBICACION'|'GRUPO'|'PROPIEDAD'|'COMBINADO';
+  selectionMode:'GRUPO'|'MANUAL';status:'BORRADOR'|'COMPLETADO'|'CANCELADO';version:number;
+  sourcePropertyId:string;sourcePropertyName:string;destinationPropertyId:string;destinationPropertyName:string;
+  sourceGroupId:string;sourceGroupName:string;destinationGroupId:string;destinationGroupName:string;
+  sourceLocationId:string|null;sourceLocationName:string|null;
+  destinationLocationId:string|null;destinationLocationName:string|null;
+  movementOn:string;reason:string;notes:string|null;createdAt:string;
+  appliedAt:string|null;cancelledAt:string|null;
+  animals:Array<{id:string;name:string;sourceGroupId:string;sourceLocationId:string|null;
+    destinationGroupId:string;destinationLocationId:string|null}>;
+}
+export interface MovementOptions {
+  properties:Array<{id:string;name:string}>;
+  groups:Array<{id:string;name:string;propertyId:string;locationId:string|null;locationName:string|null}>;
+  locations:Array<{id:string;name:string;kind:'PASTURE'|'CORRAL';propertyId:string}>;
+  animals:Array<{id:string;name:string;earTagCode:string|null;groupId:string|null;locationId:string|null}>;
+}
+export interface MovementInput {
+  kind:MovementRecord['kind'];selectionMode:MovementRecord['selectionMode'];
+  sourceGroupId:string;destinationPropertyId:string;destinationGroupId:string;
+  destinationLocationId?:string|null;movementOn:string;reason:string;notes?:string|null;
+  animalIds:string[];expectedVersion?:number;
+}
+export function getMovements(accessToken:string){
+  return request<MovementRecord[]>('/movements',{headers:bearer(accessToken)});
+}
+export function getMovementOptions(accessToken:string){
+  return request<MovementOptions>('/movements/options',{headers:bearer(accessToken)});
+}
+export function createMovement(accessToken:string,input:MovementInput){
+  return request<MovementRecord>('/movements',{
+    method:'POST',headers:bearer(accessToken),body:JSON.stringify(input),
+  });
+}
+export function updateMovement(accessToken:string,id:string,input:MovementInput){
+  return request<MovementRecord>(`/movements/${encodeURIComponent(id)}`,{
+    method:'PUT',headers:bearer(accessToken),body:JSON.stringify(input),
+  });
+}
+export function applyMovement(accessToken:string,id:string){
+  return request<MovementRecord>(`/movements/${encodeURIComponent(id)}/apply`,{
+    method:'POST',headers:bearer(accessToken),
+  });
+}
+export function cancelMovement(accessToken:string,id:string){
+  return request<MovementRecord>(`/movements/${encodeURIComponent(id)}/cancel`,{
+    method:'POST',headers:bearer(accessToken),
+  });
+}
+
 export function createAccountProperty(accessToken: string, name: string) {
   return request<{ accountId: string; propertyId: string; roleId: string }>('/property-settings/properties', {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name }),
