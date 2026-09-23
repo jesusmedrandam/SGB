@@ -392,9 +392,9 @@ export async function updatePropertyMembershipStatus(
     }
     await client.query(
       `UPDATE property_membership
-          SET status = $3,
-              joined_at = CASE WHEN $3 = 'ACTIVE' THEN coalesce(joined_at, now()) ELSE joined_at END,
-              ended_at = CASE WHEN $3 = 'ENDED' THEN now() ELSE NULL END
+          SET status = $3::membership_status,
+              joined_at = CASE WHEN $3::membership_status = 'ACTIVE' THEN coalesce(joined_at, now()) ELSE joined_at END,
+              ended_at = CASE WHEN $3::membership_status = 'ENDED' THEN now() ELSE NULL END
         WHERE id = $1 AND property_id = $2`,
       [membershipId, context.propertyId, status],
     );
