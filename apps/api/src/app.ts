@@ -7,6 +7,7 @@ import { errorHandler, notFoundHandler } from './core/error-handler.js';
 import { pool } from './database/pool.js';
 import { requestId } from './middleware/request-id.js';
 import { authRouter } from './modules/auth/auth.routes.js';
+import { animalsRouter } from './modules/animals/animals.routes.js';
 import { catalogsRouter } from './modules/catalogs/catalogs.routes.js';
 import { invitationRouter, propertyTeamRouter } from './modules/collaboration/collaboration.routes.js';
 import { ownAccountRouter, propertySettingsRouter } from './modules/properties/properties.routes.js';
@@ -31,6 +32,7 @@ app.get('/health/ready', asyncHandler(async (_request, response) => {
 }));
 
 app.use('/auth', authRouter);
+app.use('/animals', animalsRouter);
 app.use('/invitations', invitationRouter);
 app.use('/property-team', propertyTeamRouter);
 app.use('/my-account', ownAccountRouter);

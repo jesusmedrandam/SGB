@@ -63,6 +63,22 @@ export interface CatalogReference {
   units: Array<{ contextCode: string; code: string; name: string; symbol: string; isDefault: boolean }>;
 }
 
+export interface Animal {
+  id: string;
+  name: string;
+  earTagCode: string | null;
+  sex: 'FEMALE' | 'MALE';
+  speciesCode: 'BOVINE';
+  birthDate: string | null;
+  entryDate: string;
+  initialWeight: number | null;
+  initialWeightUnitCode: string | null;
+  availabilityStatusCode: string;
+  version: number;
+}
+
+export interface AnimalList { items: Animal[]; page: number; hasMore: boolean }
+
 export interface RegistrationResult {
   userId: string;
   accountId: string | null;
@@ -300,6 +316,25 @@ export function getPropertySettings(accessToken: string) {
 
 export function getCatalogReference(accessToken: string) {
   return request<CatalogReference>('/catalogs/reference', { headers: bearer(accessToken) });
+}
+
+export function getAnimals(accessToken: string, page = 1, search = '') {
+  const query = new URLSearchParams({ page: String(page), search });
+  return request<AnimalList>(`/animals?${query}`, { headers: bearer(accessToken) });
+}
+
+export function getAnimal(accessToken: string, id: string) {
+  return request<Animal>(`/animals/${encodeURIComponent(id)}`, { headers: bearer(accessToken) });
+}
+
+export function createAnimal(accessToken: string, input: {
+  name: string; sex: Animal['sex']; speciesCode: 'BOVINE';
+  earTagCode?: string; birthDate?: string; entryDate?: string;
+  initialWeight?: number; initialWeightUnitCode?: string;
+}) {
+  return request<Animal>('/animals', {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
 }
 
 export function listCatalogItems(accessToken: string, code: EditableCatalogCode) {

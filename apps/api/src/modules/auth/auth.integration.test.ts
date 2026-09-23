@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { pool } from '../../database/pool.js';
+import { createAnimal, getAnimal, listAnimals } from '../animals/animals.service.js';
 import {
   createCatalogItem, getCatalogReference, listCatalogItems, setCatalogItemActive,
 } from '../catalogs/catalogs.service.js';
@@ -110,6 +111,47 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       enabledModules: new Set(ownerProperty.enabledModules),
       enabledSpecies: new Set(ownerProperty.enabledSpecies),
     };
+
+    const animal = await createAnimal(ownerAuth, ownerContext, {
+      name: 'Primera vaca', sex: 'FEMALE', speciesCode: 'BOVINE',
+      earTagCode: `TAG-${suffix}`, birthDate: '2020-01-02', entryDate: '2021-01-03',
+      initialWeight: 150.5, initialWeightUnitCode: 'KILOGRAM',
+    }, metadata);
+    assert.equal(animal.birthDate, '2020-01-02');
+    assert.equal(animal.entryDate, '2021-01-03');
+    assert.equal(animal.initialWeight, 150.5);
+    assert.equal((await getAnimal(ownerContext, animal.id)).id, animal.id);
+    assert.equal((await listAnimals(ownerContext, 1, 'tag-')).items[0]?.id, animal.id);
+    await assert.rejects(
+      () => createAnimal(ownerAuth, ownerContext, {
+        name: 'Duplicada', sex: 'FEMALE', speciesCode: 'BOVINE', earTagCode: `tag-${suffix}`,
+      }, metadata),
+      (error: { code?: string }) => error.code === 'ANIMAL_TAG_TAKEN',
+    );
+    await assert.rejects(
+      () => createAnimal(ownerAuth, ownerContext, {
+        name: 'Fecha inválida', sex: 'MALE', speciesCode: 'BOVINE',
+        birthDate: '2024-01-02', entryDate: '2023-01-01',
+      }, metadata),
+      (error: { code?: string }) => error.code === 'INVALID_ANIMAL_DATES',
+    );
+    await assert.rejects(
+      () => createAnimal(ownerAuth, ownerContext, {
+        name: 'Peso inválido', sex: 'MALE', speciesCode: 'BOVINE',
+        initialWeight: 10, initialWeightUnitCode: 'HECTARE',
+      }, metadata),
+      (error: { code?: string }) => error.code === 'INVALID_WEIGHT_UNIT',
+    );
+    const viewer = await pool.query<{ id: string }>(
+      `SELECT id FROM property_role WHERE property_id = $1 AND code = 'VIEWER'`,
+      [ownerContext.propertyId],
+    );
+    await assert.rejects(
+      () => createAnimal({ ...ownerAuth, activeRoleId: viewer.rows[0]!.id },
+        { ...ownerContext, roleId: viewer.rows[0]!.id },
+        { name: 'Sin permiso', sex: 'MALE', speciesCode: 'BOVINE' }, metadata),
+      (error: { code?: string }) => error.code === 'ANIMAL_CREATE_DENIED',
+    );
 
     const reference = await getCatalogReference(ownerContext);
     assert.ok(reference.species.some((species) => species.code === 'BOVINE'));
@@ -318,6 +360,12 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     })).properties.length, 2);
 
     await updateAccount(platformAuth, accountId, { maxProperties: 3 }, metadata);
+    await updateAccountQuota(platformAuth, accountId, 'MANAGED_ANIMALS', 1, metadata);
+    await assert.rejects(
+      () => createAnimal(ownerAuth, ownerContext,
+        { name: 'Fuera de cupo', sex: 'MALE', speciesCode: 'BOVINE' }, metadata),
+      (error: { code?: string }) => error.code === 'ANIMAL_LIMIT_REACHED',
+    );
     await updateAccountQuota(platformAuth, accountId, 'MANAGED_ANIMALS', 150, metadata);
     await updateAccountModule(platformAuth, accountId, 'PRODUCTION', false, metadata);
 
@@ -331,6 +379,18 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     const nextProperty = await createAccountProperty(ownerAuth, ownerContext, `Segunda ${suffix}`, metadata);
     assert.equal(nextProperty.accountId, accountId);
     const secondContext = { ...ownerContext, propertyId: nextProperty.propertyId, roleId: nextProperty.roleId };
+    await assert.rejects(
+      () => getAnimal(secondContext, animal.id),
+      (error: { code?: string }) => error.code === 'ANIMAL_NOT_FOUND',
+    );
+    const secondAnimal = await createAnimal(ownerAuth, secondContext,
+      { name: 'Vaca de la segunda finca', sex: 'FEMALE', speciesCode: 'BOVINE' }, metadata);
+    const localToday = await pool.query<{ today: string }>(
+      `SELECT to_char((now() AT TIME ZONE timezone)::date, 'YYYY-MM-DD') AS today
+       FROM property WHERE id = $1`, [nextProperty.propertyId],
+    );
+    assert.equal(secondAnimal.entryDate, localToday.rows[0]?.today);
+    assert.equal((await listAnimals(ownerContext, 1, '')).items.some((row) => row.id === secondAnimal.id), false);
     assert.equal((await listCatalogItems(secondContext, 'BREEDS')).some((row) => row.id === breed.id), false);
     await assert.rejects(
       () => setCatalogItemActive(ownerAuth, secondContext, 'COLORS', color.id, false, metadata),
@@ -381,6 +441,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         'EMAIL_VERIFICATION_REQUESTED',
         'EMAIL_VERIFIED',
         'AUTH_LOGIN',
+        'ANIMAL_CREATED',
         'CATALOG_ITEM_CREATED',
         'CATALOG_ITEM_CREATED',
         'CATALOG_ITEM_STATE_CHANGED',
@@ -388,6 +449,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
         'PROPERTY_CREATED',
+        'ANIMAL_CREATED',
         'PROPERTY_MODULE_UPDATED',
         'PROPERTY_CREATED',
         'AUTH_LOGOUT',

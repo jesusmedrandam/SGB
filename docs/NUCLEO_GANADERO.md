@@ -11,6 +11,17 @@ no les agrega zona horaria ni los convierte a UTC. Los instantes de movimientos,
 estados y auditoría usan `timestamptz`; se guardan como instantes y se muestran
 en la zona horaria configurada para la propiedad.
 
+El primer flujo operativo de la API es `GET /animals`, `GET /animals/:id` y
+`POST /animals`. Se limita a la propiedad y rol activos; la búsqueda por nombre
+o marquilla se pagina de 40 en 40. El alta registra nombre, sexo y especie bovina
+obligatorios; marquilla, nacimiento, ingreso y peso inicial son opcionales.
+Si no se indica ingreso, se toma el día civil actual de la zona horaria de la
+finca, no el día UTC del servidor. No se admiten fechas futuras ni nacimiento
+posterior al ingreso. El servidor valida la unidad de peso, evita marquillas
+duplicadas, respeta el límite compartido por cuenta y audita cada creación.
+La asociación de razas y colores, los progenitores, propietarios y multimedia
+se incorporarán en flujos posteriores con sus propias reglas y relaciones.
+
 ## Estado frente a ciclo del registro
 
 Son conceptos distintos:

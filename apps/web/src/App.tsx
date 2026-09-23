@@ -18,6 +18,7 @@ import {
   type SessionPayload,
 } from './api';
 import { AuthScreen, type VerificationState } from './AuthScreen';
+import { AnimalPanel } from './AnimalPanel';
 import { Brand } from './Brand';
 import { CatalogPanel } from './CatalogPanel';
 import { PropertyTeamPanel } from './PropertyTeamPanel';
@@ -167,6 +168,9 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
       {activeProperty && activeRole?.permissions.includes('CATALOG_VIEW') &&
         <CatalogPanel key={`${activeProperty?.id}:${activeRole.id}`} accessToken={session.accessToken}
           canManage={activeRole.permissions.includes('CATALOG_MANAGE')} />}
+      {activeProperty && activeRole?.permissions.includes('ANIMAL_VIEW') &&
+        <AnimalPanel key={`${activeProperty.id}:${activeRole.id}`} accessToken={session.accessToken}
+          canCreate={activeRole.permissions.includes('ANIMAL_CREATE')} />}
     </main>
   </div>;
 }
