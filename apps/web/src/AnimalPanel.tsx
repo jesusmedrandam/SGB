@@ -380,6 +380,8 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         }}>{showCreate ? 'Cerrar' : '+ Animal'}</button>}
     </div>
     {error && <div className="form-error admin-error" role="alert">{error}</div>}
+    <details className="animal-reference-config">
+      <summary>Propietarios y marquillas <span>Administrar opciones compartidas</span></summary>
     <div className="animal-brand-manager">
       <h3>Propietarios de la cuenta</h3>
       {canManageBrands && <>
@@ -431,6 +433,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
                 disabled={busy} onClick={() => void changeBrandState(brand)}>
                 {brand.active ? 'Desactivar' : 'Activar'}</button>}</div>)}</div>}
     </div>
+    </details>
     {showCreate && <form className="animal-create" onSubmit={(event) => void create(event)}>
       <label><span>Nombre *</span><input name="name" maxLength={160} required disabled={busy} /></label>
       <label className="animal-full-width"><span>Descripción</span>

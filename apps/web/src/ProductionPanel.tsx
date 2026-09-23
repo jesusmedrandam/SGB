@@ -17,6 +17,7 @@ export function ProductionPanel({accessToken,canManage}:{accessToken:string;canM
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState<string|null>(null);
   const [date,setDate]=useState(localDate());
+  const [activeForm,setActiveForm]=useState<'LACTATION'|'MILK'|'TANK'|null>(null);
   useEffect(()=>{
     let active=true;
     void getProduction(accessToken).then((value)=>{if(active)setRecords(value);})
@@ -59,8 +60,13 @@ export function ProductionPanel({accessToken,canManage}:{accessToken:string;canM
     </div></div>
     {error&&<div role="alert" className="form-error admin-error">{error}</div>}
     {!records&&!error&&<p className="muted">Cargando producción…</p>}
-    {canManage&&records&&<div className="production-forms">
-      <form className="group-new-form" onSubmit={start}>
+    {canManage&&records&&<div className="form-toolbar" aria-label="Registrar producción">
+      {([['LACTATION','Iniciar lactancia'],['MILK','Ordeño'],['TANK','Tanque']] as const)
+        .map(([id,label])=><button type="button" key={id} className={activeForm===id?'active':''}
+          aria-pressed={activeForm===id} onClick={()=>setActiveForm(activeForm===id?null:id)}>{label}</button>)}
+    </div>}
+    {canManage&&records&&activeForm&&<div className="production-forms">
+      <form className="group-new-form" onSubmit={start} hidden={activeForm!=='LACTATION'}>
         <h3>Iniciar lactancia</h3>
         <label><span>Parto *</span><select name="birthId" required defaultValue="">
           <option value="" disabled>Selecciona el parto de la vaca</option>
@@ -70,7 +76,7 @@ export function ProductionPanel({accessToken,canManage}:{accessToken:string;canM
         <label><span>Observaciones</span><textarea name="notes" maxLength={2000}/></label>
         <button className="primary-button compact" disabled={busy||!records.births.length}>Iniciar lactancia</button>
       </form>
-      <form className="group-new-form" onSubmit={milk}>
+      <form className="group-new-form" onSubmit={milk} hidden={activeForm!=='MILK'}>
         <h3>Registrar ordeño</h3>
         <label><span>Vaca en ordeño *</span><select name="cowId" required defaultValue="">
           <option value="" disabled>Selecciona la vaca</option>
@@ -87,7 +93,7 @@ export function ProductionPanel({accessToken,canManage}:{accessToken:string;canM
         <label><span>Observaciones</span><textarea name="notes" maxLength={2000}/></label>
         <button className="primary-button compact" disabled={busy||!milkingCows.length}>Guardar ordeño</button>
       </form>
-      <form className="group-new-form" onSubmit={tank}>
+      <form className="group-new-form" onSubmit={tank} hidden={activeForm!=='TANK'}>
         <h3>Registrar tanque</h3>
         <label><span>Fecha *</span><input type="date" name="producedOn" required defaultValue={localDate()}/></label>
         <label><span>Turno</span><ShiftSelect/></label>

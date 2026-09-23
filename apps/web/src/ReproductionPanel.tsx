@@ -25,6 +25,7 @@ export function ReproductionPanel({ accessToken, canManage }: {
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeForm, setActiveForm] = useState<'HEAT'|'PREGNANCY'|'SERVICE'|'BIRTH'|'LOSS'|null>(null);
   const females = candidates.filter((animal) => animal.sex === 'FEMALE');
   const males = candidates.filter((animal) => animal.sex === 'MALE');
   const confirmed = records?.pregnancies.filter((pregnancy) => pregnancy.status === 'CONFIRMED') ?? [];
@@ -166,8 +167,15 @@ export function ReproductionPanel({ accessToken, canManage }: {
         <button className="primary-button compact" disabled={busy}>Guardar reglas</button>
       </form>
     </details>}
-    {canManage && <div className="reproduction-forms">
-      <form className="group-new-form" onSubmit={heat}>
+    {canManage && <div className="form-toolbar" aria-label="Registrar evento reproductivo">
+      {([['HEAT','Celo'],['SERVICE','Servicio'],['PREGNANCY','Preñez'],
+        ['BIRTH','Parto'],['LOSS','Pérdida']] as const).map(([id,label])=><button
+          key={id} type="button" className={activeForm===id?'active':''}
+          aria-pressed={activeForm===id} onClick={()=>setActiveForm(activeForm===id?null:id)}>
+          {label}</button>)}
+    </div>}
+    {canManage && activeForm && <div className="reproduction-forms">
+      <form className="group-new-form" onSubmit={heat} hidden={activeForm!=='HEAT'}>
         <h3>Registrar celo</h3>
         <label><span>Vaca *</span><select name="cowId" required defaultValue="">
           <option value="" disabled>Selecciona la vaca</option>
@@ -184,7 +192,7 @@ export function ReproductionPanel({ accessToken, canManage }: {
         <button className="primary-button compact" disabled={busy || !females.length}>Guardar celo</button>
       </form>
 
-      <form className="group-new-form" onSubmit={pregnancy}>
+      <form className="group-new-form" onSubmit={pregnancy} hidden={activeForm!=='PREGNANCY'}>
         <h3>Confirmar preñez</h3>
         <label><span>Vaca *</span><select name="cowId" required value={cowId}
           onChange={(event) => setCowId(event.target.value)}>
@@ -227,7 +235,7 @@ export function ReproductionPanel({ accessToken, canManage }: {
           Confirmar preñez</button>
       </form>
 
-      <form className="group-new-form" onSubmit={reproductiveService}>
+      <form className="group-new-form" onSubmit={reproductiveService} hidden={activeForm!=='SERVICE'}>
         <h3>Inseminación o transferencia</h3>
         <label><span>Receptora *</span><select name="cowId" required defaultValue="">
           <option value="" disabled>Selecciona la vaca</option>
@@ -261,7 +269,7 @@ export function ReproductionPanel({ accessToken, canManage }: {
         <button className="primary-button compact" disabled={busy || !females.length}>Guardar servicio</button>
       </form>
 
-      <form className="group-new-form" onSubmit={birth}>
+      <form className="group-new-form" onSubmit={birth} hidden={activeForm!=='BIRTH'}>
         <h3>Registrar parto</h3>
         <label><span>Preñez confirmada *</span><select name="pregnancyId" required defaultValue="">
           <option value="" disabled>Selecciona una preñez</option>
@@ -287,7 +295,7 @@ export function ReproductionPanel({ accessToken, canManage }: {
           Registrar parto y crías</button>
       </form>
 
-      <form className="group-new-form" onSubmit={loss}>
+      <form className="group-new-form" onSubmit={loss} hidden={activeForm!=='LOSS'}>
         <h3>Registrar pérdida de preñez</h3>
         <label><span>Preñez confirmada *</span><select name="pregnancyId" required defaultValue="">
           <option value="" disabled>Selecciona una preñez</option>

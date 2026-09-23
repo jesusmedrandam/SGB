@@ -88,14 +88,14 @@ export function AuthScreen(props: Props) {
 
   return <main className="login-layout">
     <section className="login-intro">
-      <Brand />
+      <div className="auth-logo-surface"><img src="/branding/logo-sgb-full.png" alt="Sistema de Gestión Bovina" /></div>
       <div className="intro-copy">
-        <span className="eyebrow">SGB 2.0</span>
-        <h1>Tu finca, organizada y disponible donde estés.</h1>
-        <p>Una nueva base preparada para trabajar por propiedad, por rol y con funcionamiento sin conexión.</p>
+        <span className="eyebrow">Sistema de Gestión Bovina</span>
+        <h1>La información de tu finca, organizada y disponible.</h1>
+        <p>Animales, grupos, potreros, corrales, reproducción y producción en un mismo sistema.</p>
       </div>
       <div className="intro-points">
-        <span>Seguridad y auditoría</span><span>Acceso por propiedad</span><span>Base para trabajo offline</span>
+        <span>Acceso por roles y permisos</span><span>Información por propiedad</span><span>Diseño adaptable a celular y computador</span>
       </div>
     </section>
 
