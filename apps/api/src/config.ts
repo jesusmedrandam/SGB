@@ -24,6 +24,9 @@ const schema = z.object({
   EMAIL_VERIFICATION_RESEND_SECONDS: z.coerce.number().int().min(30).max(3600).default(60),
   INVITATION_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),
   BREVO_API_KEY: optionalEnvironmentValue(z.string().trim().min(20)),
+  CLOUDINARY_CLOUD_NAME: optionalEnvironmentValue(z.string().trim().regex(/^[a-zA-Z0-9_-]+$/)),
+  CLOUDINARY_API_KEY: optionalEnvironmentValue(z.string().trim().min(1)),
+  CLOUDINARY_API_SECRET: optionalEnvironmentValue(z.string().trim().min(1)),
   BREVO_SENDER_EMAIL: optionalEnvironmentValue(z.email()),
   BREVO_SENDER_NAME: z.string().trim().min(1).max(120).default('SGB'),
   EMAIL_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(30000).default(10000),
@@ -32,6 +35,11 @@ const schema = z.object({
   COOKIE_SAME_SITE: z.enum(['strict', 'lax', 'none']).default('lax'),
   EXPOSE_AUTH_TOKENS: z.stringbool().optional(),
 }).superRefine((value, context) => {
+  const cloudinary = [value.CLOUDINARY_CLOUD_NAME, value.CLOUDINARY_API_KEY, value.CLOUDINARY_API_SECRET];
+  if (cloudinary.some(Boolean) && !cloudinary.every(Boolean)) {
+    context.addIssue({ code: 'custom', path: ['CLOUDINARY_CLOUD_NAME'],
+      message: 'Configura juntos CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY y CLOUDINARY_API_SECRET.' });
+  }
   if (Boolean(value.BREVO_API_KEY) !== Boolean(value.BREVO_SENDER_EMAIL)) {
     context.addIssue({
       code: 'custom',

@@ -1,16 +1,30 @@
 # Política multimedia
 
+## Configuración operativa
+
+Activa el módulo `MULTIMEDIA` en la cuenta y la propiedad. Configura
+`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` y `CLOUDINARY_API_SECRET` en la
+API; ninguna clave se envía al navegador. El servidor necesita `ffmpeg` y
+`ffprobe` instalados para transcodificar videos. La API usa Cloudinary para
+almacenar el resultado y conserva en PostgreSQL el identificador, hash,
+tamaño, cuenta y relaciones. No hay que pegar SQL manualmente: la migración
+`0021_multimedia_access.sql` se ejecuta con las demás migraciones.
+
+La galería permite cargar y quitar adjuntos. Al quitar la última relación,
+el objeto entra en papelera y sigue consumiendo cuota durante 30 días. La
+eliminación definitiva de objetos vencidos requiere el trabajador de purga,
+que todavía está pendiente. Tampoco se ha conectado una cola de cargas offline
+para el cliente nativo.
+
 ## Registros disponibles para adjuntos
 
 Los identificadores de celos, servicios reproductivos, preñeces, partos,
 pérdidas, lactancias, ordeños, producción de tanque, movimientos, jornadas sanitarias,
 condiciones de salud, limpiezas y actividades animales son estables y tienen
-su tipo en `media_entity_type_catalog`. La API de carga debe verificar en
-servidor que el registro indicado pertenezca a la misma cuenta y propiedad
-del archivo antes de insertar `media_attachment`, y conservar los adjuntos
-al cerrar o cancelar registros históricos. La inscripción del tipo no habilita
-todavía la carga de archivos: se implementará con la validación y cuotas de
-esta política.
+su tipo en `media_entity_type_catalog`. La API `/media` comprueba cuenta,
+propiedad, módulo y permisos antes de insertar `media_attachment` y conserva
+adjuntos al cerrar o cancelar registros históricos. La galería muestra archivos
+de la propiedad activa.
 
 ## Estrategia híbrida
 
@@ -36,7 +50,7 @@ archivos desde clientes antiguos o manipulados.
 - Antes de borrar EXIF se aplica la orientación correcta de la cámara.
 - La versión de carga usa WebP con calidad inicial 82; JPEG es el respaldo.
 - El lado mayor queda limitado a 2560 píxeles.
-- El archivo procesado no puede superar 5 MiB.
+- El archivo procesado no puede superar 5 MiB; la entrada admite hasta 20 MiB.
 - El servidor genera miniaturas de 512 píxeles y no conserva el archivo bruto
   recibido de la cámara.
 - Se eliminan EXIF, GPS, IPTC, XMP, modelo del teléfono y nombre original.
@@ -48,7 +62,8 @@ son campos propios del sistema; no se recuperan silenciosamente desde EXIF.
 
 - La aplicación nativa genera MP4 con H.264 y audio AAC.
 - La calidad predeterminada es 720p, adecuada para consulta móvil y offline.
-- La duración inicial máxima es 5 minutos y el archivo procesado, 120 MiB.
+- La duración inicial máxima es 5 minutos; se admiten hasta 120 MiB de entrada
+  y hasta 95 MiB para el MP4 procesado.
 - Se normaliza la orientación y se eliminan ubicación, dispositivo y metadatos
   del contenedor.
 - El proceso puede pausarse por batería baja y reanudarse mediante el trabajo en

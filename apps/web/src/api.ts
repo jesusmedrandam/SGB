@@ -988,3 +988,27 @@ export function updateAdministrativeModule(
     body: JSON.stringify({ enabled }),
   });
 }
+
+export interface MediaItem {
+  id:string;entity_type:string;entity_id:string;relation_code:string;
+  kind:'IMAGE'|'VIDEO';byteSize:number;created_at:string;url:string;thumbnailUrl:string|null;
+}
+export interface MediaUsage {storedBytes:number;reservedBytes:number;limitBytes:number}
+export function getMedia(accessToken:string){return request<MediaItem[]>('/media',{
+  headers:bearer(accessToken)});}
+export function getMediaUsage(accessToken:string){return request<MediaUsage>('/media/usage',{
+  headers:bearer(accessToken)});}
+export function deleteMedia(accessToken:string,id:string){return request<void>(`/media/${id}`,{
+  method:'DELETE',headers:bearer(accessToken)});}
+export async function uploadMedia(accessToken:string,entityType:string,entityId:string,file:File){
+  let response:Response;
+  try{response=await fetch(`${API_URL}/media?${new URLSearchParams({entityType,entityId})}`,{
+    method:'POST',credentials:'include',headers:{authorization:`Bearer ${accessToken}`,
+      'content-type':file.type||'application/octet-stream',
+      'x-media-kind':file.type.startsWith('video/')?'VIDEO':'IMAGE'},body:file});}
+  catch{throw new ApiRequestError('No fue posible enviar el archivo.',0,'NETWORK_ERROR');}
+  const body=await response.json() as ApiEnvelope<{id:string}>|ApiErrorEnvelope;
+  if(!response.ok)throw new ApiRequestError((body as ApiErrorEnvelope).error?.message||
+    'No se pudo cargar el archivo.',response.status,(body as ApiErrorEnvelope).error?.code||'UPLOAD_FAILED');
+  return (body as ApiEnvelope<{id:string}>).data;
+}

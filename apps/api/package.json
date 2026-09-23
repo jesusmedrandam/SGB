@@ -9,19 +9,21 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test dist/security/password.test.js dist/security/tokens.test.js",
-    "test:integration": "npm run build && node --test --test-concurrency=1 dist/modules/auth/auth.integration.test.js dist/modules/reproduction/reproduction.integration.test.js dist/modules/movements/movements.integration.test.js dist/modules/health/health.integration.test.js dist/modules/cleanings/cleanings.integration.test.js dist/modules/activities/activities.integration.test.js",
+    "test:integration": "npm run build && node --test --test-concurrency=1 dist/modules/auth/auth.integration.test.js dist/modules/reproduction/reproduction.integration.test.js dist/modules/movements/movements.integration.test.js dist/modules/health/health.integration.test.js dist/modules/cleanings/cleanings.integration.test.js dist/modules/activities/activities.integration.test.js dist/modules/media/media.integration.test.js",
     "migrate": "npm run build && node dist/scripts/migrate.js",
     "bootstrap:superadmin": "npm run build && node dist/scripts/bootstrap-superadmin.js",
     "start": "node dist/server.js"
   },
   "dependencies": {
     "@sgb/contracts": "2.0.0-alpha.1",
+    "cloudinary": "^2.11.0",
     "cors": "2.8.6",
     "dotenv": "18.0.2",
     "express": "5.2.1",
     "express-rate-limit": "^8.7.0",
     "helmet": "8.3.0",
     "pg": "8.23.0",
+    "sharp": "^0.35.4",
     "zod": "4.6.5"
   },
   "devDependencies": {

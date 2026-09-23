@@ -390,3 +390,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+.media-panel .movement-form { margin-bottom: 1.5rem; }
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(220px,1fr)); gap: 1rem; }
+.media-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.media-card img,.media-card video { display: block; width: 100%; height: 190px; object-fit: cover; background: var(--surface-soft); }
+.media-card>div { padding: .85rem; display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .8rem; }
+.media-card strong { flex: 1 1 100%; }
+.media-card small { color: var(--muted); }
+.media-card button { margin-left: auto; color: var(--danger); background: none; border: 0; cursor: pointer; }
