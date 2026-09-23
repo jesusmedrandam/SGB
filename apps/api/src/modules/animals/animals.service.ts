@@ -17,19 +17,24 @@ interface AnimalRow {
   initial_weight_unit_code: string | null;
   availability_status_code: string;
   version: string;
+  brands: Array<{ id: string; name: string }>;
 }
 
 const animalFields = `id, name, ear_tag_code, sex, species_code,
   birth_date::text AS birth_date, entry_date::text AS entry_date,
   initial_weight::text AS initial_weight, initial_weight_unit_code,
-  availability_status_code, version::text AS version`;
+  availability_status_code, version::text AS version,
+  COALESCE((SELECT json_agg(json_build_object('id', b.id, 'name', b.name)
+       ORDER BY lower(b.name), b.id)
+     FROM animal_brand_assignment aba JOIN livestock_brand b ON b.id = aba.brand_id
+     WHERE aba.animal_id = animal.id AND aba.ended_at IS NULL), '[]'::json) AS brands`;
 
 function animal(row: AnimalRow) {
   return { id: row.id, name: row.name, earTagCode: row.ear_tag_code, sex: row.sex,
     speciesCode: row.species_code, birthDate: row.birth_date, entryDate: row.entry_date,
     initialWeight: row.initial_weight === null ? null : Number(row.initial_weight),
     initialWeightUnitCode: row.initial_weight_unit_code,
-    availabilityStatusCode: row.availability_status_code, version: Number(row.version) };
+    availabilityStatusCode: row.availability_status_code, version: Number(row.version), brands: row.brands };
 }
 
 interface SelectionRow { catalog_code: 'BREEDS' | 'COLORS'; id: string; name: string }
@@ -61,7 +66,11 @@ export async function listAnimals(context: PropertyContext, page: number, search
     `SELECT ${animalFields} FROM animal
      WHERE property_id = $1 AND record_status = 'CURRENT'
        AND ($2 = '' OR strpos(lower(name), lower($2)) > 0
-            OR strpos(lower(coalesce(ear_tag_code::text, '')), lower($2)) > 0)
+            OR strpos(lower(coalesce(ear_tag_code::text, '')), lower($2)) > 0
+            OR EXISTS (SELECT 1 FROM animal_brand_assignment aba
+                 JOIN livestock_brand b ON b.id = aba.brand_id
+                 WHERE aba.animal_id = animal.id AND aba.ended_at IS NULL
+                   AND strpos(lower(b.name), lower($2)) > 0))
      ORDER BY lower(name), id LIMIT 41 OFFSET $3`,
     [context.propertyId, search, (page - 1) * 40],
   );
@@ -115,6 +124,28 @@ async function insertSelections(client: PoolClient, auth: AuthState, context: Pr
   }
 }
 
+async function validateBrands(client: PoolClient, context: PropertyContext, ids: string[]) {
+  if (!ids.length) return;
+  const result = await client.query<{ id: string }>(
+    `SELECT id FROM livestock_brand WHERE id = ANY($1::uuid[]) AND property_id = $2 AND active
+     FOR SHARE`, [ids, context.propertyId],
+  );
+  if (result.rows.length !== ids.length) {
+    throw invalidRequest('INVALID_ANIMAL_BRANDS', 'Elige marquillas activas de esta propiedad.');
+  }
+}
+
+async function insertBrands(client: PoolClient, auth: AuthState, context: PropertyContext,
+  animalId: string, ids: string[]) {
+  for (const brandId of ids) {
+    await client.query(
+      `INSERT INTO animal_brand_assignment(animal_id, property_id, brand_id, assigned_by)
+       VALUES($1,$2,$3,$4)`,
+      [animalId, context.propertyId, brandId, auth.userId],
+    );
+  }
+}
+
 async function accessForCreate(client: PoolClient, auth: AuthState, context: PropertyContext) {
   const result = await client.query<{ account_id: string; today: string }>(
     `SELECT p.account_id, to_char((now() AT TIME ZONE p.timezone)::date, 'YYYY-MM-DD') AS today
@@ -163,6 +194,8 @@ export async function createAnimal(auth: AuthState, context: PropertyContext,
       const selection = { breedId: input.breedId ?? null, colorIds: input.colorIds ?? [] };
       await validateSelections(client, context, 'BOVINE', selection);
       await insertSelections(client, auth, context, result.rows[0]!.id, selection);
+      await validateBrands(client, context, input.brandIds ?? []);
+      await insertBrands(client, auth, context, result.rows[0]!.id, input.brandIds ?? []);
       const created = await readAnimal(client, context, result.rows[0]!.id);
       await client.query(
         `INSERT INTO audit_event(actor_user_id, property_id, active_role_id, action,
@@ -176,13 +209,62 @@ export async function createAnimal(auth: AuthState, context: PropertyContext,
   } catch (error) {
     const databaseError = error as { code?: string; constraint?: string };
     if (databaseError.code === '23505' && databaseError.constraint === 'animal_tag_per_property_unique') {
-      throw conflict('ANIMAL_TAG_TAKEN', 'Ya existe un animal con esa marquilla en la propiedad.');
+      throw conflict('ANIMAL_TAG_TAKEN', 'Ya existe un animal con ese arete individual en la propiedad.');
     }
     if (databaseError.code === 'P0001') {
       throw conflict('ANIMAL_LIMIT_REACHED', 'Se alcanzó el límite de animales gestionados de la cuenta.');
     }
     throw error;
   }
+}
+
+export async function updateAnimalBrands(auth: AuthState, context: PropertyContext,
+  id: string, brandIds: string[], expectedVersion: number, metadata: RequestMetadata) {
+  return inTransaction(async (client) => {
+    const grant = await client.query(
+      `SELECT 1 FROM property p
+       JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
+       JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'
+       JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = p.id
+       JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = p.id AND pr.active
+       JOIN role_permission rp ON rp.role_id = pr.id AND rp.permission_code = 'ANIMAL_UPDATE'
+       WHERE p.id = $1 AND pr.id = $3 AND p.deleted_at IS NULL AND p.status = 'ACTIVE'
+       FOR SHARE OF p, pm, pr`,
+      [context.propertyId, auth.userId, context.roleId],
+    );
+    if (!grant.rowCount) throw forbidden('ANIMAL_UPDATE_DENIED', 'El rol activo no permite modificar este animal.');
+    const locked = await client.query<{ version: string }>(
+      `SELECT version::text AS version FROM animal
+       WHERE id = $1 AND property_id = $2 AND record_status = 'CURRENT' FOR UPDATE`,
+      [id, context.propertyId],
+    );
+    if (!locked.rows[0]) throw new ApiError(404, 'ANIMAL_NOT_FOUND', 'El animal no está disponible en esta propiedad.');
+    if (Number(locked.rows[0].version) !== expectedVersion) {
+      throw conflict('ANIMAL_VERSION_CONFLICT', 'El animal cambió. Actualiza su ficha antes de guardar.');
+    }
+    const before = await readAnimal(client, context, id);
+    const old = new Set(before.brands.map((brand) => brand.id));
+    const desired = new Set(brandIds);
+    if (old.size === desired.size && [...desired].every((brand) => old.has(brand))) return before;
+    await validateBrands(client, context, brandIds.filter((brand) => !old.has(brand)));
+    await client.query(
+      `UPDATE animal_brand_assignment SET ended_at = now(), ended_by = $3
+       WHERE animal_id = $1 AND property_id = $2 AND ended_at IS NULL
+         AND NOT (brand_id = ANY($4::uuid[]))`,
+      [id, context.propertyId, auth.userId, brandIds],
+    );
+    await insertBrands(client, auth, context, id, brandIds.filter((brand) => !old.has(brand)));
+    await client.query(`UPDATE animal SET updated_by = $2 WHERE id = $1`, [id, auth.userId]);
+    const after = await readAnimal(client, context, id);
+    await client.query(
+      `INSERT INTO audit_event(actor_user_id, property_id, active_role_id, action, entity_type,
+         entity_id, before_data, after_data, ip_address, user_agent)
+       VALUES($1,$2,$3,'ANIMAL_BRANDS_UPDATED','ANIMAL',$4,$5::jsonb,$6::jsonb,$7,$8)`,
+      [auth.userId, context.propertyId, context.roleId, id, JSON.stringify(before),
+        JSON.stringify(after), metadata.ipAddress, metadata.userAgent],
+    );
+    return after;
+  });
 }
 
 export async function updateAnimalCatalogs(auth: AuthState, context: PropertyContext,

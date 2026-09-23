@@ -172,6 +172,7 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
         <AnimalPanel key={`${activeProperty.id}:${activeRole.id}`} accessToken={session.accessToken}
           canCreate={activeRole.permissions.includes('ANIMAL_CREATE')}
           canUpdate={activeRole.permissions.includes('ANIMAL_UPDATE')}
+          canManageBrands={activeRole.permissions.includes('CATALOG_MANAGE')}
           canViewCatalogs={activeRole.permissions.includes('CATALOG_VIEW')} />}
     </main>
   </div>;

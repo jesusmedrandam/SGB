@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { pool } from '../../database/pool.js';
-import { createAnimal, getAnimal, listAnimals, updateAnimalCatalogs } from '../animals/animals.service.js';
+import { createAnimal, getAnimal, listAnimals, updateAnimalBrands, updateAnimalCatalogs } from '../animals/animals.service.js';
+import { createBrand, listBrands, setBrandActive } from '../animals/brands.service.js';
 import {
   createCatalogItem, getCatalogReference, listCatalogItems, setCatalogItemActive,
 } from '../catalogs/catalogs.service.js';
@@ -112,16 +113,56 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       enabledSpecies: new Set(ownerProperty.enabledSpecies),
     };
 
+    const brand = await createBrand(ownerAuth, ownerContext, `M7L-${suffix}`, metadata);
+    assert.equal((await listBrands(ownerContext))[0]?.id, brand.id);
+    await assert.rejects(
+      () => createBrand(ownerAuth, ownerContext, `m7l-${suffix}`, metadata),
+      (error: { code?: string }) => error.code === 'BRAND_NAME_TAKEN',
+    );
     const animal = await createAnimal(ownerAuth, ownerContext, {
       name: 'Primera vaca', sex: 'FEMALE', speciesCode: 'BOVINE',
       earTagCode: `TAG-${suffix}`, birthDate: '2020-01-02', entryDate: '2021-01-03',
       initialWeight: 150.5, initialWeightUnitCode: 'KILOGRAM',
+      brandIds: [brand.id],
     }, metadata);
     assert.equal(animal.birthDate, '2020-01-02');
     assert.equal(animal.entryDate, '2021-01-03');
     assert.equal(animal.initialWeight, 150.5);
+    assert.deepEqual(animal.brands.map((entry) => entry.id), [brand.id]);
     assert.equal((await getAnimal(ownerContext, animal.id)).id, animal.id);
     assert.equal((await listAnimals(ownerContext, 1, 'tag-')).items[0]?.id, animal.id);
+    assert.equal((await listAnimals(ownerContext, 1, 'm7l-')).items[0]?.id, animal.id);
+    const anotherBrand = await createBrand(ownerAuth, ownerContext, `ABC-${suffix}`, metadata);
+    const withBrands = await updateAnimalBrands(ownerAuth, ownerContext, animal.id,
+      [brand.id, anotherBrand.id], animal.version, metadata);
+    assert.equal(withBrands.brands.length, 2);
+    await assert.rejects(
+      () => updateAnimalBrands(ownerAuth, ownerContext, animal.id,
+        [brand.id], animal.version, metadata),
+      (error: { code?: string }) => error.code === 'ANIMAL_VERSION_CONFLICT',
+    );
+    await setBrandActive(ownerAuth, ownerContext, brand.id, false, metadata);
+    assert.equal((await getAnimal(ownerContext, animal.id)).brands.length, 2);
+    await assert.rejects(
+      () => createAnimal(ownerAuth, ownerContext, {
+        name: 'Otra vaca', sex: 'FEMALE', speciesCode: 'BOVINE', brandIds: [brand.id],
+      }, metadata),
+      (error: { code?: string }) => error.code === 'INVALID_ANIMAL_BRANDS',
+    );
+    await assert.rejects(
+      () => createAnimal(ownerAuth, ownerContext, {
+        name: 'Marquilla inexistente', sex: 'FEMALE', speciesCode: 'BOVINE', brandIds: [randomUUID()],
+      }, metadata),
+      (error: { code?: string }) => error.code === 'INVALID_ANIMAL_BRANDS',
+    );
+    const fewerBrands = await updateAnimalBrands(ownerAuth, ownerContext, animal.id,
+      [anotherBrand.id], withBrands.version, metadata);
+    assert.deepEqual(fewerBrands.brands.map((entry) => entry.id), [anotherBrand.id]);
+    const brandHistory = await pool.query<{ ended_at: Date | null }>(
+      `SELECT ended_at FROM animal_brand_assignment WHERE animal_id = $1 AND brand_id = $2`,
+      [animal.id, brand.id],
+    );
+    assert.ok(brandHistory.rows[0]?.ended_at);
     await assert.rejects(
       () => createAnimal(ownerAuth, ownerContext, {
         name: 'Duplicada', sex: 'FEMALE', speciesCode: 'BOVINE', earTagCode: `tag-${suffix}`,

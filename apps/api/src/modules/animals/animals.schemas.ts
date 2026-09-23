@@ -12,6 +12,13 @@ const catalogSelectionSchema = z.object({
     'No se puede seleccionar el mismo color dos veces.'),
 });
 
+const brandIdsSchema = z.array(z.uuid()).max(12).refine((ids) => new Set(ids).size === ids.length,
+  'No se puede elegir dos veces la misma marquilla.');
+export const updateAnimalBrandsSchema = z.object({
+  brandIds: brandIdsSchema,
+  expectedVersion: z.number().int().positive(),
+});
+
 export const updateAnimalCatalogSchema = catalogSelectionSchema.extend({
   expectedVersion: z.number().int().positive(),
 });
@@ -31,6 +38,7 @@ export const createAnimalSchema = z.object({
   initialWeightUnitCode: z.string().regex(/^[A-Z_]{2,30}$/).optional(),
   breedId: z.uuid().nullable().optional(),
   colorIds: catalogSelectionSchema.shape.colorIds.optional(),
+  brandIds: brandIdsSchema.optional(),
 }).superRefine((value, ctx) => {
   if ((value.initialWeight === undefined) !== (value.initialWeightUnitCode === undefined)) {
     ctx.addIssue({ code: 'custom', path: ['initialWeight'],

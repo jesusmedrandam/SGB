@@ -77,7 +77,10 @@ export interface Animal {
   version: number;
   breed?: { id: string; name: string } | null;
   colors?: Array<{ id: string; name: string }>;
+  brands: Array<{ id: string; name: string }>;
 }
+
+export interface LivestockBrand { id: string; name: string; active: boolean }
 
 export interface AnimalList { items: Animal[]; page: number; hasMore: boolean }
 
@@ -334,6 +337,7 @@ export function createAnimal(accessToken: string, input: {
   earTagCode?: string; birthDate?: string; entryDate?: string;
   initialWeight?: number; initialWeightUnitCode?: string;
   breedId?: string | null; colorIds?: string[];
+  brandIds?: string[];
 }) {
   return request<Animal>('/animals', {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
@@ -344,6 +348,30 @@ export function updateAnimalCatalogs(accessToken: string, id: string, input: {
   breedId: string | null; colorIds: string[]; expectedVersion: number;
 }) {
   return request<Animal>(`/animals/${encodeURIComponent(id)}/catalogs`, {
+    method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+
+export function listBrands(accessToken: string) {
+  return request<LivestockBrand[]>('/animal-brands', { headers: bearer(accessToken) });
+}
+
+export function createBrand(accessToken: string, name: string) {
+  return request<LivestockBrand>('/animal-brands', {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name }),
+  });
+}
+
+export function setBrandActive(accessToken: string, id: string, active: boolean) {
+  return request<LivestockBrand>(`/animal-brands/${encodeURIComponent(id)}`, {
+    method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify({ active }),
+  });
+}
+
+export function updateAnimalBrands(accessToken: string, id: string, input: {
+  brandIds: string[]; expectedVersion: number;
+}) {
+  return request<Animal>(`/animals/${encodeURIComponent(id)}/brands`, {
     method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
   });
 }

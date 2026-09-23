@@ -12,20 +12,32 @@ estados y auditoría usan `timestamptz`; se guardan como instantes y se muestran
 en la zona horaria configurada para la propiedad.
 
 El primer flujo operativo de la API es `GET /animals`, `GET /animals/:id` y
-`POST /animals`. Se limita a la propiedad y rol activos; la búsqueda por nombre
-o marquilla se pagina de 40 en 40. El alta registra nombre, sexo y especie bovina
-obligatorios; marquilla, nacimiento, ingreso y peso inicial son opcionales.
+`POST /animals`. Se limita a la propiedad y rol activos; la búsqueda por nombre,
+arete individual o marquilla se pagina de 40 en 40. El alta registra nombre,
+sexo y especie bovina obligatorios; arete individual, marquillas elegidas,
+nacimiento, ingreso y peso inicial son opcionales.
 Si no se indica ingreso, se toma el día civil actual de la zona horaria de la
 finca, no el día UTC del servidor. No se admiten fechas futuras ni nacimiento
-posterior al ingreso. El servidor valida la unidad de peso, evita marquillas
-duplicadas, respeta el límite compartido por cuenta y audita cada creación.
+posterior al ingreso. El servidor valida la unidad de peso, evita aretes individuales
+duplicados, respeta el límite compartido por cuenta y audita cada creación.
 Raza y colores ya pueden elegirse al crear un animal. Solo se admiten opciones
 vigentes de la propiedad y especie; puede haber una raza y varios colores. La
 ficha conserva los nombres aunque después se desactiven en el catálogo. La
 edición de raza y colores usa la versión del animal y conserva las asignaciones
-anteriores como filas cerradas, con auditoría. La migración `0009` crea la tabla
-histórica y la aplica el migrador habitual; no se pega SQL manualmente. Los
-progenitores, propietarios y multimedia se incorporarán en flujos posteriores.
+anteriores como filas cerradas, con auditoría. La migración `0009` crea esa tabla histórica.
+
+Las marquillas o fierros son registros independientes de la propiedad, creados en
+`POST /animal-brands` con permiso `CATALOG_MANAGE`. `GET /animal-brands` las lista
+para su selección; `PATCH /animal-brands/:id` permite activarlas o desactivarlas.
+Al registrar un animal se envían sus identificadores en `brandIds`, nunca texto
+libre como marquilla. Se pueden elegir varias, incluso para animales distintos;
+el arete `earTagCode` sigue siendo el identificador individual. Las asignaciones
+se pueden modificar en `PATCH /animals/:id/brands` con la versión del animal:
+se conserva el historial y una marquilla desactivada sigue visible en la ficha,
+pero no se admite para nuevas asignaciones. La migración `0010` crea estas tablas;
+el migrador habitual la aplica, sin pegar SQL manualmente. La carga de imágenes
+de fierros se incorporará con el flujo multimedia, todavía no operativo.
+Los progenitores y propietarios se incorporarán en flujos posteriores.
 
 ## Estado frente a ciclo del registro
 

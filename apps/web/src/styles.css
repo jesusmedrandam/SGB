@@ -258,6 +258,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .catalog-create label { flex: 1; min-width: 0; display: grid; gap: 7px; }
 .catalog-create label span { font-size: .76rem; font-weight: 760; }
 .animal-panel > .section-heading p { margin: 7px 0 0; }
+.animal-brand-manager { margin: 18px 0; padding: 18px; border: 1px solid var(--border);
+  border-radius: 16px; background: var(--surface); }
+.animal-brand-manager h3 { margin: 0 0 6px; }
+.animal-brand-manager p { margin: 0 0 12px; }
+.animal-brand-list { display: grid; gap: 8px; }
+.animal-brand-row { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 8px 0; border-top: 1px solid var(--border); }
 .animal-create { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 18px 0;
   padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
 .animal-create label, .animal-search label { display: grid; gap: 7px; min-width: 0; }

@@ -2,8 +2,8 @@ import { Router, type Request } from 'express';
 import { asyncHandler } from '../../core/async-handler.js';
 import { authenticate, requirePermission, requirePropertyContext } from '../auth/auth.middleware.js';
 import type { RequestMetadata } from '../auth/auth.types.js';
-import { animalIdSchema, animalListSchema, createAnimalSchema, updateAnimalCatalogSchema } from './animals.schemas.js';
-import { createAnimal, getAnimal, listAnimals, updateAnimalCatalogs } from './animals.service.js';
+import { animalIdSchema, animalListSchema, createAnimalSchema, updateAnimalBrandsSchema, updateAnimalCatalogSchema } from './animals.schemas.js';
+import { createAnimal, getAnimal, listAnimals, updateAnimalBrands, updateAnimalCatalogs } from './animals.service.js';
 
 const metadata = (request: Request): RequestMetadata => ({
   ipAddress: request.ip || null, userAgent: request.header('user-agent')?.slice(0, 1000) ?? null,
@@ -30,5 +30,12 @@ animalsRouter.patch('/:id/catalogs', requirePermission('ANIMAL_UPDATE'), asyncHa
   const { breedId, colorIds, expectedVersion } = updateAnimalCatalogSchema.parse(request.body);
   response.json({ ok: true, data: await updateAnimalCatalogs(
     request.auth!, request.propertyContext!, id, { breedId, colorIds }, expectedVersion, metadata(request),
+  ) });
+}));
+animalsRouter.patch('/:id/brands', requirePermission('ANIMAL_UPDATE'), asyncHandler(async (request, response) => {
+  const { id } = animalIdSchema.parse(request.params);
+  const { brandIds, expectedVersion } = updateAnimalBrandsSchema.parse(request.body);
+  response.json({ ok: true, data: await updateAnimalBrands(
+    request.auth!, request.propertyContext!, id, brandIds, expectedVersion, metadata(request),
   ) });
 }));
