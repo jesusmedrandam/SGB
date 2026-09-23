@@ -86,6 +86,26 @@ Por ello, cambiar manualmente identificadores en una solicitud no concede acceso
 La creación, revocación y aceptación de invitaciones, así como los cambios de
 estado de las membresías, quedan registrados en auditoría.
 
+## Crear propiedades y configurar módulos
+
+El propietario o un administrador con el permiso `PROPERTY_CREATE` puede crear
+otra propiedad dentro de su cuenta mientras quede cupo. El límite inicial es de
+una propiedad; el superadministrador puede aumentarlo. El creador selecciona
+una propiedad y un rol activos antes de hacerlo. La nueva propiedad queda a
+nombre del propietario de la cuenta y, si la creó un administrador, ambos
+obtienen acceso: el propietario como propietario y el creador como administrador.
+La operación crea roles, permisos, membresías, especies y módulos en una sola
+transacción y cambia la sesión del creador a la nueva propiedad.
+
+Una persona que se registró como colaboradora puede crear también su propia
+cuenta y primera propiedad. Sigue conservando sus otras membresías; solo puede
+poseer una cuenta administrativa. La operación queda registrada en auditoría.
+
+Cada propiedad puede desactivar módulos de forma individual. Solo se permite
+activar un módulo si está habilitado para toda la cuenta. El núcleo ganadero
+permanece activo. Cada cambio vuelve a comprobar el permiso `MODULE_MANAGE` y
+queda auditado; desactivar un módulo conserva los datos históricos.
+
 ## Verificación de correo
 
 SGB envía el enlace de activación mediante la API transaccional de Brevo. En el
@@ -119,6 +139,10 @@ producción y nunca sustituye el envío de correo.
 | `POST` | `/property-team/invitations` | Crea y envía una invitación |
 | `DELETE` | `/property-team/invitations/:id` | Revoca una invitación pendiente |
 | `PATCH` | `/property-team/members/:id/status` | Suspende, reactiva o finaliza una membresía |
+| `POST` | `/my-account` | Un colaborador crea su cuenta y primera propiedad |
+| `GET` | `/property-settings` | Consulta módulos y cupo de la propiedad activa |
+| `POST` | `/property-settings/properties` | Crea otra propiedad en la cuenta activa |
+| `PUT` | `/property-settings/modules/:code` | Configura un módulo de la propiedad activa |
 
 Las migraciones se ejecutan con un bloqueo asesor de PostgreSQL y conservan el
 checksum de cada archivo. Dos despliegues no pueden migrar simultáneamente y un

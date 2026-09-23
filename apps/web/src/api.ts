@@ -36,6 +36,17 @@ export interface SessionOverview {
   activeContext: ActiveContext | null;
   properties: PropertyAccess[];
   enabledUserModules: string[];
+  ownedAccount: null | { id: string; name: string; status: string; maxProperties: number; usedProperties: number };
+}
+
+export interface PropertySettings {
+  account: { id: string; name: string; maxProperties: number; usedProperties: number };
+  canCreate: boolean;
+  canManageModules: boolean;
+  modules: Array<{
+    code: string; name: string; isCore: boolean; accountEnabled: boolean;
+    propertyEnabled: boolean; enabled: boolean;
+  }>;
 }
 
 export interface RegistrationResult {
@@ -267,6 +278,30 @@ const bearer = (accessToken: string) => ({ authorization: `Bearer ${accessToken}
 
 export function getPropertyTeam(accessToken: string) {
   return request<PropertyTeam>('/property-team', { headers: bearer(accessToken) });
+}
+
+export function getPropertySettings(accessToken: string) {
+  return request<PropertySettings>('/property-settings', { headers: bearer(accessToken) });
+}
+
+export function createAccountProperty(accessToken: string, name: string) {
+  return request<{ accountId: string; propertyId: string; roleId: string }>('/property-settings/properties', {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name }),
+  });
+}
+
+export function createOwnAccount(accessToken: string, name: string) {
+  return request<{ accountId: string; propertyId: string; roleId: string }>('/my-account', {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name }),
+  });
+}
+
+export function updatePropertyModule(accessToken: string, moduleCode: string, enabled: boolean) {
+  return request<{ code: string; enabled: boolean }>(
+    `/property-settings/modules/${encodeURIComponent(moduleCode)}`, {
+      method: 'PUT', headers: bearer(accessToken), body: JSON.stringify({ enabled }),
+    },
+  );
 }
 
 export function createPropertyInvitation(accessToken: string, input: {

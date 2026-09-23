@@ -17,6 +17,12 @@ import {
   updatePropertyMembershipStatus,
 } from '../collaboration/collaboration.service.js';
 import {
+  createAccountProperty,
+  createOwnAccount,
+  getPropertySettings,
+  updatePropertyModule,
+} from '../properties/properties.service.js';
+import {
   getSessionOverview,
   login,
   logout,
@@ -178,6 +184,22 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     assert.equal(collaboratorMembership.payment?.amount, 520);
     assert.equal(acceptedTeam.quota.used, 1);
 
+    const collaboratorOwned = await createOwnAccount(activeCollaboratorAuth, `Mi finca ${suffix}`, metadata);
+    assert.ok(collaboratorOwned.accountId);
+    assert.notEqual(collaboratorOwned.accountId, accountId);
+    const collaboratorOwnOverview = await getSessionOverview({
+      ...activeCollaboratorAuth,
+      activePropertyId: collaboratorOwned.propertyId,
+      activeRoleId: collaboratorOwned.roleId,
+    });
+    assert.equal(collaboratorOwnOverview.properties.length, 2);
+    assert.equal(collaboratorOwnOverview.ownedAccount?.id, collaboratorOwned.accountId);
+    assert.equal(collaboratorOwnOverview.properties.find((item) => item.id === collaboratorOwned.propertyId)?.isOwner, true);
+    await assert.rejects(
+      () => createOwnAccount(activeCollaboratorAuth, `Duplicada ${suffix}`, metadata),
+      (error: { code?: string }) => error.code === 'ACCOUNT_ALREADY_EXISTS',
+    );
+
     await updatePropertyMembershipStatus(ownerAuth, ownerContext, collaboratorMembership.id, 'SUSPENDED', metadata);
     assert.equal((await getSessionOverview(activeCollaboratorAuth)).properties.length, 0);
     assert.equal((await getPropertyTeam(ownerAuth, ownerContext)).quota.used, 1);
@@ -208,6 +230,27 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     await updateAccount(platformAuth, accountId, { maxProperties: 3 }, metadata);
     await updateAccountQuota(platformAuth, accountId, 'MANAGED_ANIMALS', 150, metadata);
     await updateAccountModule(platformAuth, accountId, 'PRODUCTION', false, metadata);
+
+    const sourceSettings = await getPropertySettings(ownerContext);
+    assert.equal(sourceSettings.account.usedProperties, 1);
+    assert.equal(sourceSettings.modules.find((item) => item.code === 'PRODUCTION')?.accountEnabled, false);
+    await assert.rejects(
+      () => updatePropertyModule(ownerAuth, ownerContext, 'PRODUCTION', true, metadata),
+      (error: { code?: string }) => error.code === 'ACCOUNT_MODULE_DISABLED',
+    );
+    const nextProperty = await createAccountProperty(ownerAuth, ownerContext, `Segunda ${suffix}`, metadata);
+    assert.equal(nextProperty.accountId, accountId);
+    const secondContext = { ...ownerContext, propertyId: nextProperty.propertyId, roleId: nextProperty.roleId };
+    await updatePropertyModule(ownerAuth, secondContext, 'WEIGHING', false, metadata);
+    const secondSettings = await getPropertySettings(secondContext);
+    assert.equal(secondSettings.modules.find((item) => item.code === 'WEIGHING')?.enabled, false);
+    assert.equal((await getPropertySettings(ownerContext)).modules.find((item) => item.code === 'WEIGHING')?.enabled, true);
+    const thirdProperty = await createAccountProperty(ownerAuth, ownerContext, `Tercera ${suffix}`, metadata);
+    assert.ok(thirdProperty.propertyId);
+    await assert.rejects(
+      () => createAccountProperty(ownerAuth, ownerContext, `Cuarta ${suffix}`, metadata),
+      (error: { code?: string }) => error.code === 'PROPERTY_LIMIT_REACHED',
+    );
 
     await updateAccount(platformAuth, accountId, { status: 'SUSPENDED' }, metadata);
     const suspendedOverview = await getSessionOverview({
@@ -246,6 +289,9 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         'PROPERTY_INVITATION_CREATED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
+        'PROPERTY_CREATED',
+        'PROPERTY_MODULE_UPDATED',
+        'PROPERTY_CREATED',
         'AUTH_LOGOUT',
       ],
     );

@@ -765,6 +765,15 @@ export async function getSessionOverview(auth: AuthState) {
     [auth.userId],
   );
 
+  const ownedAccount = await pool.query<{ id: string; name: string; status: string; max_properties: number; used: string }>(
+    `SELECT aa.id, aa.name, aa.status, aa.max_properties,
+            (SELECT count(*)::text FROM property p
+              WHERE p.account_id = aa.id AND p.deleted_at IS NULL AND p.status <> 'ARCHIVED') AS used
+       FROM administrative_account aa WHERE aa.owner_user_id = $1`,
+    [auth.userId],
+  );
+  const owned = ownedAccount.rows[0];
+
   return {
     user: {
       id: auth.userId,
@@ -777,5 +786,9 @@ export async function getSessionOverview(auth: AuthState) {
       : null,
     properties: [...properties.values()],
     enabledUserModules: userModules.rows.map((row) => row.module_code),
+    ownedAccount: owned ? {
+      id: owned.id, name: owned.name, status: owned.status,
+      maxProperties: owned.max_properties, usedProperties: Number(owned.used),
+    } : null,
   };
 }

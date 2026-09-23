@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import {
   ApiRequestError,
   acceptInvitation,
   changeContext,
+  createOwnAccount,
   getInvitationPreview,
   getSessionOverview,
   login,
@@ -19,6 +20,7 @@ import {
 import { AuthScreen, type VerificationState } from './AuthScreen';
 import { Brand } from './Brand';
 import { PropertyTeamPanel } from './PropertyTeamPanel';
+import { PropertySettingsPanel } from './PropertySettingsPanel';
 import { SuperadminPanel } from './SuperadminPanel';
 
 type Theme = 'light' | 'dark';
@@ -50,7 +52,8 @@ function errorMessage(error: unknown): string {
     : 'Ocurrió un error inesperado. Inténtalo nuevamente.';
 }
 
-function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLogout, onContextChange }: {
+function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLogout, onContextChange,
+  onPropertyCreated, onSettingsChanged, onOwnAccountCreated }: {
   session: AppSession;
   busy: boolean;
   error: string | null;
@@ -58,17 +61,34 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
   onAcceptInvitation: () => Promise<void>;
   onLogout: () => Promise<void>;
   onContextChange: (propertyId: string, roleId: string) => Promise<void>;
+  onPropertyCreated: (propertyId: string, roleId: string) => Promise<void>;
+  onSettingsChanged: () => Promise<void>;
+  onOwnAccountCreated: (name: string) => Promise<void>;
 }) {
   const { overview } = session;
   const activeProperty = overview.properties.find((item) => item.id === overview.activeContext?.propertyId);
   const [propertyId, setPropertyId] = useState(overview.activeContext?.propertyId || overview.properties[0]?.id || '');
   const property = overview.properties.find((item) => item.id === propertyId);
   const [roleId, setRoleId] = useState(overview.activeContext?.roleId || property?.roles[0]?.id || '');
+  const [showOwnAccount, setShowOwnAccount] = useState(false);
   const activeRole = activeProperty?.roles.find((role) => role.id === overview.activeContext?.roleId);
 
   useEffect(() => {
     if (!property?.roles.some((role) => role.id === roleId)) setRoleId(property?.roles[0]?.id || '');
   }, [property, roleId]);
+
+  useEffect(() => {
+    if (overview.activeContext) {
+      setPropertyId(overview.activeContext.propertyId);
+      setRoleId(overview.activeContext.roleId);
+    }
+  }, [overview.activeContext?.propertyId, overview.activeContext?.roleId]);
+
+  async function createOwn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = String(new FormData(event.currentTarget).get('name') || '').trim();
+    await onOwnAccountCreated(name);
+  }
 
   return <div className="app-shell">
     <header className="topbar">
@@ -99,6 +119,18 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
         </button>
       </section>}
 
+      {!overview.user.isSuperadmin && !overview.ownedAccount && <section className="context-card">
+        <div><span className="eyebrow">Tu cuenta</span><h2>Propiedad propia</h2>
+          <p className="muted">Puedes administrar tu propia finca y seguir colaborando en las demás.</p></div>
+        {showOwnAccount ? <form className="new-property-form" onSubmit={createOwn}>
+          <label><span>Nombre de la propiedad</span><input name="name" minLength={2} maxLength={160}
+            placeholder="Ej. La Fortuna" required disabled={busy} /></label>
+          <button className="primary-button compact" type="submit" disabled={busy}>
+            {busy ? 'Creando…' : 'Crear mi propiedad'}</button>
+        </form> : <button className="primary-button compact" type="button"
+          onClick={() => setShowOwnAccount(true)}>Crear propiedad propia</button>}
+      </section>}
+
       {!overview.user.isSuperadmin && overview.properties.length > 0 && <section className="context-card">
         <div><span className="eyebrow">Contexto activo</span><h2>Propiedad y rol</h2>
           <p className="muted">Cada operación se limita a la combinación seleccionada.</p></div>
@@ -124,6 +156,9 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
       </section>}
       {!overview.user.isSuperadmin && activeRole?.permissions.includes('MEMBERSHIP_VIEW')
         && <PropertyTeamPanel key={`${activeProperty?.id}:${activeRole.id}`} accessToken={session.accessToken} />}
+      {!overview.user.isSuperadmin && activeRole?.permissions.includes('MODULE_VIEW') &&
+        <PropertySettingsPanel key={`${activeProperty?.id}:${activeRole.id}`} accessToken={session.accessToken}
+          onPropertyCreated={onPropertyCreated} onSettingsChanged={onSettingsChanged} />}
     </main>
   </div>;
 }
@@ -285,6 +320,28 @@ export function App() {
     finally { setBusy(false); }
   }
 
+  async function handleOwnAccountCreated(name: string) {
+    if (!session) return;
+    setBusy(true); setError(null);
+    try {
+      const created = await createOwnAccount(session.accessToken, name);
+      await handlePropertyCreated(created.propertyId, created.roleId);
+    } catch (failure) { setError(errorMessage(failure)); }
+    finally { setBusy(false); }
+  }
+
+  async function handlePropertyCreated(propertyId: string, roleId: string) {
+    if (!session) return;
+    const overview = await getSessionOverview(session.accessToken);
+    setSession({ ...session, activeContext: { propertyId, roleId }, overview });
+  }
+
+  async function handleSettingsChanged() {
+    if (!session) return;
+    const overview = await getSessionOverview(session.accessToken);
+    setSession({ ...session, overview });
+  }
+
   return <>
     <div className="theme-corner"><button className="icon-button" type="button"
       onClick={() => setTheme((value) => value === 'dark' ? 'light' : 'dark')}
@@ -292,7 +349,9 @@ export function App() {
     {initializing ? <main className="loading-screen"><Brand /><span className="spinner large" />
       <p>Restaurando sesión segura…</p></main>
       : session ? <Dashboard session={session} busy={busy} error={error} invitation={invitation}
-        onAcceptInvitation={handleAcceptInvitation} onLogout={handleLogout} onContextChange={handleContextChange} />
+        onAcceptInvitation={handleAcceptInvitation} onLogout={handleLogout} onContextChange={handleContextChange}
+        onPropertyCreated={handlePropertyCreated} onSettingsChanged={handleSettingsChanged}
+        onOwnAccountCreated={handleOwnAccountCreated} />
         : <AuthScreen busy={busy} error={error} pendingRegistration={pendingRegistration}
           verificationState={verificationState} verificationMessage={verificationMessage}
           resendAccepted={resendAccepted} invitationToken={invitationToken} invitation={invitation}

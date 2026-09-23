@@ -236,6 +236,19 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .team-actions { display: flex; align-items: center; gap: 5px; }
 .team-actions button { border: 0; border-radius: 9px; padding: 8px; color: var(--primary); background: transparent; font-size: .74rem; font-weight: 780; }
 .danger-text { color: var(--danger) !important; }
+.new-property-form { display: flex; align-items: end; gap: 12px; min-width: 0; }
+.new-property-form label { display: grid; gap: 7px; flex: 1; min-width: 0; }
+.new-property-form label > span { font-size: .82rem; font-weight: 760; }
+.new-property-form button { flex: 0 0 auto; }
+.property-settings-panel > .section-heading p { margin: 7px 0 0; }
+.property-module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.property-module-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; padding: 15px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.property-module-row > div { display: grid; gap: 4px; min-width: 0; }
+.property-module-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.property-module-row small { color: var(--muted); font-size: .75rem; }
+.property-module-toggle input { width: 22px; min-width: 22px; min-height: 22px; accent-color: var(--primary); }
+.property-module-toggle input:disabled { cursor: not-allowed; }
+.property-settings-panel > .new-property-form { max-width: 650px; margin: 16px 0 22px; }
 
 @media (max-width: 900px) {
   .login-layout { grid-template-columns: 1fr; }
@@ -273,6 +286,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
   .quota-row { grid-template-columns: 1fr 1fr; }
   .quota-row > div:first-child { grid-column: 1 / -1; }
   .module-switches { grid-template-columns: 1fr; }
+  .property-module-grid { grid-template-columns: 1fr; }
+  .new-property-form { align-items: stretch; flex-direction: column; }
+  .new-property-form button { width: 100%; }
   .property-row { align-items: start; flex-direction: column; }
   .property-row > span { text-align: left; }
   .team-row { grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; padding: 14px; }
