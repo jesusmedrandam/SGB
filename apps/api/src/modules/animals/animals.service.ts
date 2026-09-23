@@ -140,7 +140,7 @@ async function validateSelections(client: PoolClient, context: PropertyContext, 
   if (byId.size !== ids.length
     || requested.some(({ id, code }) => !existing.has(id) && byId.get(id) !== code)) {
     throw invalidRequest('INVALID_ANIMAL_CATALOG_SELECTION',
-      'Selecciona una raza y colores activos de la propiedad y especie del animal.');
+      'Selecciona razas y colores activos de esta cuenta y especie del animal.');
   }
 }
 

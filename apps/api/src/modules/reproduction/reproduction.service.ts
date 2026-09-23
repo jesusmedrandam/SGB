@@ -119,16 +119,14 @@ async function eligibleAnimal(client: PoolClient, context: PropertyContext, id: 
 
 async function femalePolicy(client: PoolClient, cowId: string, eventOn: string,
   action: 'HEAT' | 'PREGNANCY', config: ReproductionSettingInput, isFalse = false) {
-  const [lastBirth, lastLoss, activePregnancy] = await Promise.all([
-    client.query<{ occurred_on: string }>(
-      `SELECT occurred_on::text FROM reproduction_birth WHERE mother_id = $1
-       AND occurred_on <= $2::date ORDER BY occurred_on DESC LIMIT 1`, [cowId, eventOn]),
-    client.query<{ occurred_on: string }>(
-      `SELECT occurred_on::text FROM reproduction_loss WHERE cow_id = $1
-       AND occurred_on <= $2::date ORDER BY occurred_on DESC LIMIT 1`, [cowId, eventOn]),
-    client.query('SELECT 1 FROM reproduction_pregnancy WHERE cow_id = $1 AND status = \'CONFIRMED\' LIMIT 1',
-      [cowId]),
-  ]);
+  const lastBirth = await client.query<{ occurred_on: string }>(
+    `SELECT occurred_on::text FROM reproduction_birth WHERE mother_id = $1
+     AND occurred_on <= $2::date ORDER BY occurred_on DESC LIMIT 1`, [cowId, eventOn]);
+  const lastLoss = await client.query<{ occurred_on: string }>(
+    `SELECT occurred_on::text FROM reproduction_loss WHERE cow_id = $1
+     AND occurred_on <= $2::date ORDER BY occurred_on DESC LIMIT 1`, [cowId, eventOn]);
+  const activePregnancy = await client.query(
+    `SELECT 1 FROM reproduction_pregnancy WHERE cow_id = $1 AND status = 'CONFIRMED' LIMIT 1`, [cowId]);
   if (action === 'HEAT' && activePregnancy.rowCount && !isFalse)
     throw conflict('PREGNANCY_CONFIRMED', 'La vaca tiene una preñez confirmada; marca falso el celo aparente.');
   if (action === 'HEAT' && isFalse && !config.allowFalseHeatInPregnancy)

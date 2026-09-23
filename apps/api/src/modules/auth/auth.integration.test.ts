@@ -584,6 +584,9 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     const nextProperty = await createAccountProperty(ownerAuth, ownerContext, `Segunda ${suffix}`, metadata);
     assert.equal(nextProperty.accountId, accountId);
     const secondContext = { ...ownerContext, propertyId: nextProperty.propertyId, roleId: nextProperty.roleId };
+    assert.equal((await listCatalogItems(secondContext, 'BREEDS'))
+      .find((entry) => entry.id === breed.id)?.active, false);
+    await setCatalogItemActive(ownerAuth, secondContext, 'BREEDS', breed.id, true, metadata);
     await assert.rejects(
       () => createGroup(ownerAuth, secondContext,
         { name: `Grupo ajeno ${suffix}`, locationId: pastureA.id }, metadata),
