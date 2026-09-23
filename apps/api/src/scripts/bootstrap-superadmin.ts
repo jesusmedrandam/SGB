@@ -35,6 +35,11 @@ try {
       [input.BOOTSTRAP_SUPERADMIN_EMAIL, passwordHash, input.BOOTSTRAP_SUPERADMIN_NAME],
     );
     await client.query(
+      `INSERT INTO user_module(user_id, module_code, enabled, configured_by)
+       SELECT $1, code, true, $1 FROM module_catalog WHERE scope = 'USER'`,
+      [inserted.rows[0]!.id],
+    );
+    await client.query(
       `INSERT INTO audit_event(
          actor_user_id, action, entity_type, entity_id, superadmin_access, after_data
        ) VALUES($1,'SUPERADMIN_BOOTSTRAPPED','APP_USER',$2,true,$3)`,

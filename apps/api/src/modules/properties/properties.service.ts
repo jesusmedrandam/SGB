@@ -84,7 +84,6 @@ async function activateSession(client: PoolClient, auth: AuthState, propertyId: 
 }
 
 export async function createOwnAccount(auth: AuthState, name: string, metadata: RequestMetadata) {
-  if (auth.isSuperadmin) throw forbidden('ACCOUNT_OWNER_REQUIRED', 'Usa una cuenta de usuario para crear propiedades.');
   return inTransaction(async (client) => {
     const user = await client.query(
       `SELECT id FROM app_user WHERE id = $1 AND status = 'ACTIVE' AND deleted_at IS NULL FOR UPDATE`,
@@ -95,6 +94,14 @@ export async function createOwnAccount(auth: AuthState, name: string, metadata: 
       `SELECT id FROM administrative_account WHERE owner_user_id = $1`, [auth.userId],
     );
     if (existing.rowCount) throw conflict('ACCOUNT_ALREADY_EXISTS', 'Ya tienes una cuenta administrativa.');
+    // Accounts created through bootstrap have not gone through public registration.
+    // Seed their personal modules without changing settings already chosen by other users.
+    await client.query(
+      `INSERT INTO user_module(user_id, module_code, enabled, configured_by)
+       SELECT $1, code, true, $1 FROM module_catalog WHERE scope = 'USER'
+       ON CONFLICT (user_id, module_code) DO NOTHING`,
+      [auth.userId],
+    );
     const account = await client.query<{ id: string }>(
       `INSERT INTO administrative_account(owner_user_id, name) VALUES($1,$2) RETURNING id`,
       [auth.userId, name],

@@ -106,7 +106,9 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
       <section className="welcome-card">
         <div><span className="eyebrow">Panel principal</span><h1>Hola, {overview.user.displayName.split(' ')[0]}</h1>
           <p>{overview.user.isSuperadmin
-            ? 'Desde aquí administrarás las cuentas, los módulos y la seguridad general de SGB.'
+            ? activeProperty
+              ? `Administras la plataforma y trabajas en ${activeProperty.name}.`
+              : 'Desde aquí administrarás las cuentas, los módulos y la seguridad general de SGB.'
             : `Trabajando en ${activeProperty?.name || 'tu espacio de SGB'}.`}</p></div>
         <div className="access-badge"><span>✓</span><div><strong>Acceso verificado</strong><small>{overview.user.email}</small></div></div>
       </section>
@@ -120,7 +122,7 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
         </button>
       </section>}
 
-      {!overview.user.isSuperadmin && !overview.ownedAccount && <section className="context-card">
+      {!overview.ownedAccount && <section className="context-card">
         <div><span className="eyebrow">Tu cuenta</span><h2>Propiedad propia</h2>
           <p className="muted">Puedes administrar tu propia finca y seguir colaborando en las demás.</p></div>
         {showOwnAccount ? <form className="new-property-form" onSubmit={createOwn}>
@@ -132,7 +134,7 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
           onClick={() => setShowOwnAccount(true)}>Crear propiedad propia</button>}
       </section>}
 
-      {!overview.user.isSuperadmin && overview.properties.length > 0 && <section className="context-card">
+      {overview.properties.length > 0 && <section className="context-card">
         <div><span className="eyebrow">Contexto activo</span><h2>Propiedad y rol</h2>
           <p className="muted">Cada operación se limita a la combinación seleccionada.</p></div>
         <div className="context-controls">
@@ -146,21 +148,23 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
       </section>}
 
       <section className="summary-grid">
-        <article><span>Tipo de acceso</span><strong>{overview.user.isSuperadmin ? 'Global' : 'Por propiedad'}</strong></article>
+        <article><span>Tipo de acceso</span><strong>{overview.user.isSuperadmin
+          ? overview.properties.length ? 'Global y por propiedad' : 'Global' : 'Por propiedad'}</strong></article>
         <article><span>Propiedades disponibles</span><strong>{overview.properties.length}</strong></article>
         <article><span>Sesión</span><strong>Protegida</strong></article>
       </section>
 
-      {overview.user.isSuperadmin ? <SuperadminPanel accessToken={session.accessToken} /> : <section className="section-block">
+      {overview.user.isSuperadmin && <SuperadminPanel accessToken={session.accessToken} />}
+      {activeProperty && activeRole && <section className="section-block">
         <div className="section-heading"><div><span className="eyebrow">Acceso disponible</span><h2>Módulos habilitados</h2></div></div>
         <div className="module-list">{(activeProperty?.enabledModules || []).map((module) => <span key={module}>{module}</span>)}</div>
       </section>}
-      {!overview.user.isSuperadmin && activeRole?.permissions.includes('MEMBERSHIP_VIEW')
+      {activeProperty && activeRole?.permissions.includes('MEMBERSHIP_VIEW')
         && <PropertyTeamPanel key={`${activeProperty?.id}:${activeRole.id}`} accessToken={session.accessToken} />}
-      {!overview.user.isSuperadmin && activeRole?.permissions.includes('MODULE_VIEW') &&
+      {activeProperty && activeRole?.permissions.includes('MODULE_VIEW') &&
         <PropertySettingsPanel key={`${activeProperty?.id}:${activeRole.id}`} accessToken={session.accessToken}
           onPropertyCreated={onPropertyCreated} onSettingsChanged={onSettingsChanged} />}
-      {!overview.user.isSuperadmin && activeRole?.permissions.includes('CATALOG_VIEW') &&
+      {activeProperty && activeRole?.permissions.includes('CATALOG_VIEW') &&
         <CatalogPanel key={`${activeProperty?.id}:${activeRole.id}`} accessToken={session.accessToken}
           canManage={activeRole.permissions.includes('CATALOG_MANAGE')} />}
     </main>

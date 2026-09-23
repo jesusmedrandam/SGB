@@ -42,6 +42,14 @@ El comando exige las variables `BOOTSTRAP_SUPERADMIN_EMAIL`,
 superadministrador no modifica nada. Las variables deben retirarse del servicio
 después de ejecutar el comando.
 
+El superadministrador también puede crear su propia cuenta y primera propiedad
+desde «Crear propiedad propia». Conservará el panel global de la plataforma;
+para trabajar en una finca selecciona una propiedad y un rol como cualquier
+otro usuario. Puede crear propiedades adicionales dentro del límite de su
+cuenta. No recibe automáticamente membresías en las propiedades ajenas desde
+el selector. Este cambio usa las tablas y reglas existentes: no necesita una
+migración SQL manual ni volver a ejecutar el bootstrap.
+
 ## Propiedad y rol activos
 
 Una sesión puede tener una propiedad y un rol activos. Ambos valores se validan

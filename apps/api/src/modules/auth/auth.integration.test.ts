@@ -248,10 +248,18 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     }>(
       `SELECT id, email::text, display_name
          FROM app_user
-        WHERE is_superadmin AND deleted_at IS NULL`,
+         WHERE is_superadmin AND deleted_at IS NULL`,
+    );
+    const superadminSession = await pool.query<{ id: string }>(
+      `INSERT INTO user_session(
+         user_id, refresh_token_hash, access_token_hash, device_id,
+         access_expires_at, expires_at
+       ) VALUES($1,$2,$3,$4,now() + interval '15 minutes',now() + interval '1 day')
+       RETURNING id`,
+      [superadmin.rows[0]!.id, `test-refresh-${suffix}`, `test-access-${suffix}`, `superadmin-${suffix}`],
     );
     const platformAuth = {
-      sessionId: randomUUID(),
+      sessionId: superadminSession.rows[0]!.id,
       userId: superadmin.rows[0]!.id,
       email: superadmin.rows[0]!.email,
       displayName: superadmin.rows[0]!.display_name,
@@ -262,6 +270,52 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
 
     const platform = await getPlatformOverview(platformAuth, metadata);
     assert.ok(platform.accounts.some((account) => account.id === accountId));
+
+    const superadminProperty = await createOwnAccount(platformAuth, `Finca admin ${suffix}`, metadata);
+    assert.notEqual(superadminProperty.accountId, accountId);
+    const superadminSessionContext = await pool.query<{
+      active_property_id: string; active_role_id: string;
+    }>(
+      `SELECT active_property_id, active_role_id FROM user_session WHERE id = $1`,
+      [platformAuth.sessionId],
+    );
+    assert.equal(superadminSessionContext.rows[0]?.active_property_id, superadminProperty.propertyId);
+    assert.equal(superadminSessionContext.rows[0]?.active_role_id, superadminProperty.roleId);
+    const superadminPropertyAuth = {
+      ...platformAuth,
+      activePropertyId: superadminProperty.propertyId,
+      activeRoleId: superadminProperty.roleId,
+    };
+    const superadminOverview = await getSessionOverview(superadminPropertyAuth);
+    assert.equal(superadminOverview.user.isSuperadmin, true);
+    assert.equal(superadminOverview.ownedAccount?.id, superadminProperty.accountId);
+    assert.equal(superadminOverview.properties[0]?.roles[0]?.code, 'OWNER');
+    assert.ok(superadminOverview.enabledUserModules.includes('PERSONAL_FINANCE'));
+    assert.ok((await getPlatformOverview(superadminPropertyAuth, metadata)).accounts.some(
+      (item) => item.id === accountId,
+    ));
+    await assert.rejects(
+      () => createOwnAccount(superadminPropertyAuth, `Otra cuenta ${suffix}`, metadata),
+      (error: { code?: string }) => error.code === 'ACCOUNT_ALREADY_EXISTS',
+    );
+    await updateAccount(superadminPropertyAuth, superadminProperty.accountId,
+      { maxProperties: 2 }, metadata);
+    const superadminRole = superadminOverview.properties[0]!.roles[0]!;
+    const secondSuperadminProperty = await createAccountProperty(superadminPropertyAuth, {
+      propertyId: superadminProperty.propertyId,
+      propertyName: `Finca admin ${suffix}`,
+      roleId: superadminRole.id,
+      roleCode: superadminRole.code,
+      roleName: superadminRole.name,
+      permissions: new Set(superadminRole.permissions),
+      enabledModules: new Set(superadminOverview.properties[0]!.enabledModules),
+      enabledSpecies: new Set(superadminOverview.properties[0]!.enabledSpecies),
+    }, `Segunda finca admin ${suffix}`, metadata);
+    assert.equal(secondSuperadminProperty.accountId, superadminProperty.accountId);
+    assert.equal((await getSessionOverview({ ...superadminPropertyAuth,
+      activePropertyId: secondSuperadminProperty.propertyId,
+      activeRoleId: secondSuperadminProperty.roleId,
+    })).properties.length, 2);
 
     await updateAccount(platformAuth, accountId, { maxProperties: 3 }, metadata);
     await updateAccountQuota(platformAuth, accountId, 'MANAGED_ANIMALS', 150, metadata);

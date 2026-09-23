@@ -5,6 +5,8 @@ Fecha de corte: 2026-09-21.
 ## Identidad y administración
 
 1. Existe un único rol de plataforma `SUPERADMIN`.
+   La persona superadministradora también puede poseer una cuenta y propiedades;
+   el rol global no reemplaza sus roles activos dentro de cada finca.
 2. Cualquier persona puede registrarse y crear inmediatamente su primera propiedad.
 3. Al crear su primera propiedad obtiene todos los módulos habilitados.
 4. Una cuenta nueva puede tener inicialmente una propiedad.
