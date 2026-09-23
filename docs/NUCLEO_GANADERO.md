@@ -25,6 +25,8 @@ vigentes de la propiedad y especie; puede haber una raza y varios colores. La
 ficha conserva los nombres aunque después se desactiven en el catálogo. La
 edición de raza y colores usa la versión del animal y conserva las asignaciones
 anteriores como filas cerradas, con auditoría. La migración `0009` crea esa tabla histórica.
+La descripción del animal es opcional (hasta 5000 caracteres), se muestra en la
+ficha y se edita con control de versión y auditoría.
 
 Las marquillas o fierros son registros independientes de la propiedad, creados en
 `POST /animal-brands` con permiso `CATALOG_MANAGE`. `GET /animal-brands` las lista
@@ -74,7 +76,25 @@ cerrados son inmutables.
 
 Una asignación de grupo a ubicación también es temporal. Un grupo solo puede
 ocupar una ubicación a la vez y una ubicación solo puede tener un grupo abierto.
-Los movimientos de grupo se aplicarán como lotes atómicos e idempotentes.
+`GET/POST /groups` crea y consulta grupos de la propiedad; también admite nombre,
+descripción y ubicación inicial opcional. `PATCH /groups/:id` edita sus datos;
+`PATCH /groups/:id/state` archiva un grupo vacío cerrando su ubicación. Los
+potreros y corrales se crean mediante `POST /locations` y se listan con
+`GET /locations`, siempre dentro de la propiedad activa.
+
+Los módulos **Potreros**, **Corrales** y **Movimientos** deben estar habilitados
+en la cuenta y en la propiedad para asignar un grupo a una ubicación. Cada
+potrero o corral solo se crea si su módulo respectivo está habilitado. Al
+desactivar módulos, las posiciones e intervalos existentes siguen visibles;
+queda impedido asignar nuevas ubicaciones. La migración `0011` agrega los dos
+módulos de ubicaciones y prepara las cuentas existentes sin SQL manual.
+
+`POST /groups/:id/animals` asigna un animal al grupo. Si el grupo tiene ubicación,
+el animal la hereda; sus intervalos anteriores se cierran en la misma transacción.
+`PATCH /groups/:id/location` mueve al grupo completo entre ubicaciones o lo deja
+sin ubicación, cambiando también los intervalos de todos sus animales de forma
+atómica y con auditoría. Los movimientos más amplios, borradores y sincronización
+offline se incorporarán en la fase de operaciones.
 
 La vista de ocupación cuenta exclusivamente animales con registro actual y
 estado activo o inactivo. Desaparecidos, animales que salieron, muertos,

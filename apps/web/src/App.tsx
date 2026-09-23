@@ -20,6 +20,7 @@ import {
 import { AuthScreen, type VerificationState } from './AuthScreen';
 import { AnimalPanel } from './AnimalPanel';
 import { Brand } from './Brand';
+import { GroupPanel } from './GroupPanel';
 import { CatalogPanel } from './CatalogPanel';
 import { PropertyTeamPanel } from './PropertyTeamPanel';
 import { PropertySettingsPanel } from './PropertySettingsPanel';
@@ -174,6 +175,14 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
           canUpdate={activeRole.permissions.includes('ANIMAL_UPDATE')}
           canManageBrands={activeRole.permissions.includes('CATALOG_MANAGE')}
           canViewCatalogs={activeRole.permissions.includes('CATALOG_VIEW')} />}
+      {activeProperty && activeRole?.permissions.includes('GROUP_VIEW') &&
+        <GroupPanel key={`groups:${activeProperty.id}:${activeRole.id}`} accessToken={session.accessToken}
+          modules={activeProperty.enabledModules}
+          canManage={activeRole.permissions.includes('GROUP_MANAGE')}
+          canViewLocations={activeRole.permissions.includes('LOCATION_VIEW')}
+          canManageLocations={activeRole.permissions.includes('LOCATION_MANAGE')}
+          canAssignAnimals={activeRole.permissions.includes('ANIMAL_VIEW')
+            && activeRole.permissions.includes('ANIMAL_UPDATE')} />}
     </main>
   </div>;
 }

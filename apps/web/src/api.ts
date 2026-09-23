@@ -66,6 +66,7 @@ export interface CatalogReference {
 export interface Animal {
   id: string;
   name: string;
+  description: string | null;
   earTagCode: string | null;
   sex: 'FEMALE' | 'MALE';
   speciesCode: 'BOVINE';
@@ -80,11 +81,23 @@ export interface Animal {
   brands: Array<{ id: string; name: string }>;
   mother?: { animalId: string | null; name: string } | null;
   father?: { animalId: string | null; name: string } | null;
+  group?: { id: string; name: string } | null;
+  location?: { id: string; name: string; kind: 'PASTURE' | 'CORRAL' } | null;
 }
 
 export interface LivestockBrand { id: string; name: string; active: boolean }
 
 export interface AnimalList { items: Animal[]; page: number; hasMore: boolean }
+
+export interface LivestockGroup {
+  id: string; name: string; description: string | null; active: boolean;
+  version: number; animalCount: number;
+  location: { id: string; name: string; kind: 'PASTURE' | 'CORRAL' } | null;
+}
+export interface PhysicalLocation {
+  id: string; name: string; kind: 'PASTURE' | 'CORRAL'; description: string | null;
+  active: boolean; group: { id: string; name: string } | null;
+}
 
 export interface RegistrationResult {
   userId: string;
@@ -336,12 +349,77 @@ export function getAnimal(accessToken: string, id: string) {
 
 export function createAnimal(accessToken: string, input: {
   name: string; sex: Animal['sex']; speciesCode: 'BOVINE';
+  description?: string | null;
   earTagCode?: string; birthDate?: string; entryDate?: string;
   initialWeight?: number; initialWeightUnitCode?: string;
   breedId?: string | null; colorIds?: string[];
   brandIds?: string[];
 }) {
   return request<Animal>('/animals', {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+
+export function updateAnimalDescription(accessToken: string, id: string, input: {
+  description: string | null; expectedVersion: number;
+}) {
+  return request<Animal>(`/animals/${encodeURIComponent(id)}/description`, {
+    method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+
+export function listGroups(accessToken: string) {
+  return request<LivestockGroup[]>('/groups', { headers: bearer(accessToken) });
+}
+
+export function createGroup(accessToken: string, input: {
+  name: string; description: string | null; locationId: string | null;
+}) {
+  return request<LivestockGroup>('/groups', {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+
+export function updateGroup(accessToken: string, id: string, input: {
+  name: string; description: string | null; expectedVersion: number;
+}) {
+  return request<LivestockGroup>(`/groups/${encodeURIComponent(id)}`, {
+    method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+
+export function setGroupState(accessToken: string, id: string, input: {
+  active: boolean; expectedVersion: number;
+}) {
+  return request<LivestockGroup>(`/groups/${encodeURIComponent(id)}/state`, {
+    method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+
+export function setGroupLocation(accessToken: string, id: string, input: {
+  locationId: string | null; expectedVersion: number;
+}) {
+  return request<LivestockGroup>(`/groups/${encodeURIComponent(id)}/location`, {
+    method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+
+export function assignAnimalToGroup(accessToken: string, id: string, input: {
+  animalId: string; expectedAnimalVersion: number;
+}) {
+  return request<Animal>(`/groups/${encodeURIComponent(id)}/animals`, {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+
+export function listLocations(accessToken: string) {
+  return request<PhysicalLocation[]>('/locations', { headers: bearer(accessToken) });
+}
+
+export function createLocation(accessToken: string, input: {
+  kind: 'PASTURE' | 'CORRAL'; name: string; description: string | null;
+}) {
+  return request<PhysicalLocation>('/locations', {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
   });
 }

@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
 export const animalIdSchema = z.object({ id: z.uuid() });
+export const updateAnimalDescriptionSchema = z.object({
+  description: z.string().trim().max(5000).nullable(),
+  expectedVersion: z.number().int().positive(),
+});
 export const animalListSchema = z.object({
   page: z.coerce.number().int().min(1).max(10000).default(1),
   search: z.string().trim().max(80).default(''),
@@ -37,6 +41,7 @@ export type AnimalCatalogSelection = z.infer<typeof catalogSelectionSchema>;
 
 export const createAnimalSchema = z.object({
   name: z.string().trim().min(1).max(160),
+  description: z.string().trim().max(5000).nullable().optional(),
   sex: z.enum(['FEMALE', 'MALE']),
   speciesCode: z.literal('BOVINE'),
   earTagCode: z.string().trim().min(1).max(80).optional(),

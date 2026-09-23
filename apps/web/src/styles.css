@@ -268,6 +268,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .animal-create { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 18px 0;
   padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
 .animal-create label, .animal-search label { display: grid; gap: 7px; min-width: 0; }
+.animal-full-width { grid-column: 1 / -1; }
 .animal-create label span, .animal-search label span { font-size: .78rem; font-weight: 760; }
 .animal-create label small { color: var(--muted); font-size: .71rem; }
 .animal-create > button { align-self: end; }
@@ -283,6 +284,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .animal-pages { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 16px 0; }
 .animal-detail { margin-top: 20px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; }
 .animal-detail h3 { margin: 0 0 12px; }
+.animal-description { white-space: pre-wrap; color: var(--muted); margin: 0 0 18px; }
 .animal-detail dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
 .animal-detail dt { color: var(--muted); font-size: .75rem; }
 .animal-detail dd { margin: 3px 0 0; font-weight: 750; }
@@ -305,6 +307,26 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .animal-parent-field label { display: grid; gap: 6px; min-width: 0; }
 .animal-parent-field label span { font-size: .78rem; font-weight: 760; }
 .animal-parent-field small { color: var(--muted); }
+.group-panel > .section-heading p { margin: 7px 0 0; }
+.group-locations, .group-new-form, .group-card { margin-top: 16px; padding: 16px;
+  border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+.group-locations h3, .group-new-form h3, .group-panel > h3 { margin: 0 0 12px; }
+.group-new-form, .group-inline-form { display: grid; grid-template-columns: repeat(2,minmax(0,1fr));
+  align-items: end; gap: 12px; }
+.group-new-form h3, .group-new-form .group-description { grid-column: 1 / -1; }
+.group-new-form label, .group-inline-form label, .group-animal-search { display: grid; min-width: 0; gap: 6px; }
+.group-new-form label span, .group-inline-form label span, .group-animal-search span {
+  font-size: .78rem; font-weight: 760; }
+.group-new-form > button, .group-inline-form > button { justify-self: start; }
+.group-location-list, .group-card-list { display: grid; gap: 10px; }
+.group-location-item { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  border-top: 1px solid var(--border); padding-top: 10px; }
+.group-location-item small, .group-card small { color: var(--muted); }
+.group-animal-search { max-width: 420px; margin: 16px 0; }
+.group-card-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.group-card-heading h4 { margin: 0; }
+.group-card-heading p { margin: 5px 0; white-space: pre-wrap; }
+.group-inline-form { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
 
 @media (max-width: 900px) {
   .login-layout { grid-template-columns: 1fr; }
@@ -346,6 +368,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
   .catalog-grid { grid-template-columns: 1fr; }
   .catalog-create { flex-direction: column; align-items: stretch; }
   .animal-create, .animal-detail dl, .animal-parent-grid { grid-template-columns: 1fr; }
+  .group-new-form, .group-inline-form { grid-template-columns: 1fr; }
   .animal-search { flex-direction: column; align-items: stretch; }
   .new-property-form { align-items: stretch; flex-direction: column; }
   .new-property-form button { width: 100%; }

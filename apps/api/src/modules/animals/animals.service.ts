@@ -8,6 +8,7 @@ import type { AnimalCatalogSelection, CreateAnimalInput } from './animals.schema
 interface AnimalRow {
   id: string;
   name: string;
+  description: string | null;
   ear_tag_code: string | null;
   sex: 'FEMALE' | 'MALE';
   species_code: string;
@@ -20,7 +21,7 @@ interface AnimalRow {
   brands: Array<{ id: string; name: string }>;
 }
 
-const animalFields = `id, name, ear_tag_code, sex, species_code,
+const animalFields = `id, name, description, ear_tag_code, sex, species_code,
   birth_date::text AS birth_date, entry_date::text AS entry_date,
   initial_weight::text AS initial_weight, initial_weight_unit_code,
   availability_status_code, version::text AS version,
@@ -30,7 +31,8 @@ const animalFields = `id, name, ear_tag_code, sex, species_code,
      WHERE aba.animal_id = animal.id AND aba.ended_at IS NULL), '[]'::json) AS brands`;
 
 function animal(row: AnimalRow) {
-  return { id: row.id, name: row.name, earTagCode: row.ear_tag_code, sex: row.sex,
+  return { id: row.id, name: row.name, description: row.description,
+    earTagCode: row.ear_tag_code, sex: row.sex,
     speciesCode: row.species_code, birthDate: row.birth_date, entryDate: row.entry_date,
     initialWeight: row.initial_weight === null ? null : Number(row.initial_weight),
     initialWeightUnitCode: row.initial_weight_unit_code,
@@ -68,8 +70,20 @@ export async function readAnimal(client: PoolClient, context: PropertyContext, i
     const row = parents.rows.find((entry) => entry.role === role);
     return row ? { animalId: row.parent_animal_id, name: row.name ?? row.reported_parent_name! } : null;
   };
+  const position = await client.query<{
+    group_id: string | null; group_name: string | null;
+    location_id: string | null; location_name: string | null; location_kind: 'PASTURE' | 'CORRAL' | null;
+  }>(
+    `SELECT group_id, group_name, location_id, location_name, location_kind
+     FROM animal_current_position WHERE animal_id = $1 AND property_id = $2`,
+    [id, context.propertyId],
+  );
+  const place = position.rows[0];
   return { ...animal(result.rows[0]),
     mother: parent('MOTHER'), father: parent('FATHER'),
+    group: place?.group_id ? { id: place.group_id, name: place.group_name! } : null,
+    location: place?.location_id ? { id: place.location_id,
+      name: place.location_name!, kind: place.location_kind! } : null,
     breed: breed ? { id: breed.id, name: breed.name } : null,
     colors: choices.rows.filter((choice) => choice.catalog_code === 'COLORS')
       .map((choice) => ({ id: choice.id, name: choice.name })) };
@@ -197,11 +211,12 @@ export async function createAnimal(auth: AuthState, context: PropertyContext,
         if (!unit.rowCount) throw invalidRequest('INVALID_WEIGHT_UNIT', 'La unidad no admite pesajes de animales.');
       }
       const result = await client.query<AnimalRow>(
-        `INSERT INTO animal(account_id, property_id, species_code, name, sex, ear_tag_code,
+        `INSERT INTO animal(account_id, property_id, species_code, name, description, sex, ear_tag_code,
            birth_date, entry_date, initial_weight, initial_weight_unit_code, created_by, updated_by)
-         VALUES($1,$2,'BOVINE',$3,$4,$5,$6,$7,$8,$9,$10,$10)
+         VALUES($1,$2,'BOVINE',$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)
          RETURNING ${animalFields}`,
-        [accountId, context.propertyId, input.name, input.sex, input.earTagCode ?? null,
+        [accountId, context.propertyId, input.name, input.description || null,
+          input.sex, input.earTagCode ?? null,
           input.birthDate ?? null, entryDate, input.initialWeight ?? null,
           input.initialWeightUnitCode ?? null, auth.userId],
       );

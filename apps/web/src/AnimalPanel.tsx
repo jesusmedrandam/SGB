@@ -1,7 +1,8 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import {
   ApiRequestError, createAnimal, createBrand, getAnimal, getAnimals, listBrands,
-  listCatalogItems, setBrandActive, updateAnimalBrands, updateAnimalCatalogs, updateAnimalParents,
+  listCatalogItems, setBrandActive, updateAnimalBrands, updateAnimalCatalogs,
+  updateAnimalDescription, updateAnimalParents,
   type Animal, type AnimalList, type CatalogItem, type LivestockBrand, type ParentSelection,
 } from './api';
 
@@ -184,6 +185,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     try {
       const created = await createAnimal(accessToken, {
         name: String(data.get('name') || '').trim(),
+        description: String(data.get('description') || '').trim() || null,
         sex: String(data.get('sex')) as Animal['sex'],
         speciesCode: 'BOVINE',
         ...(earTagCode ? { earTagCode } : {}),
@@ -279,6 +281,22 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     } finally { setBusy(false); }
   }
 
+  async function changeDescription(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const description = String(new FormData(event.currentTarget).get('description') || '').trim() || null;
+    setBusy(true); setError(null);
+    try {
+      setSelected(await updateAnimalDescription(accessToken, selected.id,
+        { description, expectedVersion: selected.version }));
+    } catch (failure) {
+      setError(message(failure));
+      if (failure instanceof ApiRequestError && failure.code === 'ANIMAL_VERSION_CONFLICT') {
+        try { setSelected(await getAnimal(accessToken, selected.id)); } catch { /* conserva el error original */ }
+      }
+    } finally { setBusy(false); }
+  }
+
   return <section className="section-block animal-panel">
     <div className="section-heading"><div><span className="eyebrow">Núcleo ganadero</span><h2>Animales</h2>
       <p className="muted">Registros de la propiedad activa.</p></div>
@@ -307,6 +325,8 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     </div>
     {showCreate && <form className="animal-create" onSubmit={(event) => void create(event)}>
       <label><span>Nombre *</span><input name="name" maxLength={160} required disabled={busy} /></label>
+      <label className="animal-full-width"><span>Descripción</span>
+        <textarea name="description" maxLength={5000} rows={3} disabled={busy} /></label>
       <label><span>Sexo *</span><select name="sex" required disabled={busy} defaultValue="">
         <option value="" disabled>Selecciona</option><option value="FEMALE">Hembra</option>
         <option value="MALE">Macho</option></select></label>
@@ -348,7 +368,12 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       </div>}
     </>}
     {selected && <div className="animal-detail"><h3>{selected.name}</h3>
+      <p className="animal-description">{selected.description || 'Sin descripción.'}</p>
       <dl><div><dt>Arete individual</dt><dd>{selected.earTagCode || 'No registrado'}</dd></div>
+        <div><dt>Grupo</dt><dd>{selected.group?.name || 'Sin grupo'}</dd></div>
+        <div><dt>Ubicación</dt><dd>{selected.location
+          ? `${selected.location.kind === 'PASTURE' ? 'Potrero' : 'Corral'}: ${selected.location.name}`
+          : 'Sin ubicación'}</dd></div>
         <div><dt>Marquillas</dt><dd>{selected.brands.map((brand) => brand.name).join(', ') || 'No registradas'}</dd></div>
         <div><dt>Sexo</dt><dd>{selected.sex === 'FEMALE' ? 'Hembra' : 'Macho'}</dd></div>
         <div><dt>Nacimiento</dt><dd>{selected.birthDate || 'No registrado'}</dd></div>
@@ -360,6 +385,14 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         <div><dt>Colores</dt><dd>{selected.colors?.map((color) => color.name).join(', ') || 'No registrados'}</dd></div></dl>
       <dl className="animal-parent-summary"><div><dt>Madre</dt><dd>{selected.mother?.name || 'No registrada'}</dd></div>
         <div><dt>Padre</dt><dd>{selected.father?.name || 'No registrado'}</dd></div></dl>
+      {canUpdate && <form className="animal-catalog-edit" key={`description:${selected.id}:${selected.version}`}
+        onSubmit={(event) => void changeDescription(event)}>
+        <h4>Descripción</h4>
+        <label><span>Notas del animal</span><textarea name="description" maxLength={5000}
+          rows={4} defaultValue={selected.description || ''} disabled={busy} /></label>
+        <button className="primary-button compact" type="submit" disabled={busy}>
+          {busy ? 'Guardando…' : 'Guardar descripción'}</button>
+      </form>}
       {canUpdate && choices && <form className="animal-catalog-edit" key={`${selected.id}:${selected.version}`}
         onSubmit={(event) => void changeCatalogs(event)}>
         <h4>Raza y colores</h4><CatalogFields choices={choices} selected={selected} />

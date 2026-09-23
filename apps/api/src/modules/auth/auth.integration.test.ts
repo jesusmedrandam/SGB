@@ -5,6 +5,9 @@ import { pool } from '../../database/pool.js';
 import { createAnimal, getAnimal, listAnimals, updateAnimalBrands, updateAnimalCatalogs } from '../animals/animals.service.js';
 import { createBrand, listBrands, setBrandActive } from '../animals/brands.service.js';
 import { updateAnimalParents } from '../animals/parents.service.js';
+import { updateAnimalDescription } from '../animals/description.service.js';
+import { assignAnimalToGroup, createGroup, createLocation, listGroups,
+  listLocations, setGroupLocation, setGroupState, updateGroup } from '../groups/groups.service.js';
 import {
   createCatalogItem, getCatalogReference, listCatalogItems, setCatalogItemActive,
 } from '../catalogs/catalogs.service.js';
@@ -122,6 +125,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     );
     const animal = await createAnimal(ownerAuth, ownerContext, {
       name: 'Primera vaca', sex: 'FEMALE', speciesCode: 'BOVINE',
+      description: 'Vaca mansa del ordeño',
       earTagCode: `TAG-${suffix}`, birthDate: '2020-01-02', entryDate: '2021-01-03',
       initialWeight: 150.5, initialWeightUnitCode: 'KILOGRAM',
       brandIds: [brand.id],
@@ -129,6 +133,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     assert.equal(animal.birthDate, '2020-01-02');
     assert.equal(animal.entryDate, '2021-01-03');
     assert.equal(animal.initialWeight, 150.5);
+    assert.equal(animal.description, 'Vaca mansa del ordeño');
     assert.deepEqual(animal.brands.map((entry) => entry.id), [brand.id]);
     assert.equal((await getAnimal(ownerContext, animal.id)).id, animal.id);
     assert.equal((await listAnimals(ownerContext, 1, 'tag-')).items[0]?.id, animal.id);
@@ -272,6 +277,83 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       [animal.id, decorated.id],
     );
     assert.ok(parentHistory.rows[0]?.removed_at);
+
+    const described = await updateAnimalDescription(ownerAuth, ownerContext, animal.id,
+      { description: 'Vaca de prueba\nCon observaciones', expectedVersion: reported.version }, metadata);
+    assert.equal(described.description, 'Vaca de prueba\nCon observaciones');
+    assert.equal((await getAnimal(ownerContext, animal.id)).description, described.description);
+    await assert.rejects(
+      () => updateAnimalDescription(ownerAuth, ownerContext, animal.id,
+        { description: 'Versión anterior', expectedVersion: reported.version }, metadata),
+      (error: { code?: string }) => error.code === 'ANIMAL_VERSION_CONFLICT',
+    );
+
+    const pastureA = await createLocation(ownerAuth, ownerContext,
+      { kind: 'PASTURE', name: `Chivera ${suffix}` }, metadata);
+    const pastureB = await createLocation(ownerAuth, ownerContext,
+      { kind: 'PASTURE', name: `Retaco ${suffix}` }, metadata);
+    const corral = await createLocation(ownerAuth, ownerContext,
+      { kind: 'CORRAL', name: `Corral ${suffix}` }, metadata);
+    const firstGroup = await createGroup(ownerAuth, ownerContext,
+      { name: `Paridas ${suffix}`, description: 'Vacas con crías', locationId: pastureA.id }, metadata);
+    assert.equal(firstGroup.location?.id, pastureA.id);
+    await assert.rejects(
+      () => createGroup(ownerAuth, ownerContext,
+        { name: `Solteras ${suffix}`, locationId: pastureA.id }, metadata),
+      (error: { code?: string }) => error.code === 'GROUP_LOCATION_CONFLICT',
+    );
+    const secondGroup = await createGroup(ownerAuth, ownerContext,
+      { name: `Solteras ${suffix}` }, metadata);
+    const renamed = await updateGroup(ownerAuth, ownerContext, secondGroup.id,
+      { name: `Solteras ${suffix}`, description: 'Grupo sin ubicación',
+        expectedVersion: secondGroup.version }, metadata);
+    assert.equal(renamed.description, 'Grupo sin ubicación');
+    const grouped = await assignAnimalToGroup(ownerAuth, ownerContext, firstGroup.id,
+      { animalId: animal.id, expectedAnimalVersion: described.version }, metadata);
+    assert.equal(grouped.group?.id, firstGroup.id);
+    assert.equal(grouped.location?.id, pastureA.id);
+    assert.equal((await listGroups(ownerContext)).find((entry) => entry.id === firstGroup.id)?.animalCount, 1);
+    const moved = await setGroupLocation(ownerAuth, ownerContext, firstGroup.id,
+      { locationId: pastureB.id, expectedVersion: firstGroup.version }, metadata);
+    assert.equal((await getAnimal(ownerContext, animal.id)).location?.id, pastureB.id);
+    await assert.rejects(
+      () => setGroupLocation(ownerAuth, ownerContext, firstGroup.id,
+        { locationId: corral.id, expectedVersion: firstGroup.version }, metadata),
+      (error: { code?: string }) => error.code === 'GROUP_VERSION_CONFLICT',
+    );
+    const afterMove = await getAnimal(ownerContext, animal.id);
+    assert.equal(afterMove.version, grouped.version + 1);
+    const regrouped = await assignAnimalToGroup(ownerAuth, ownerContext, renamed.id,
+      { animalId: animal.id, expectedAnimalVersion: afterMove.version }, metadata);
+    assert.equal(regrouped.group?.id, renamed.id);
+    assert.equal(regrouped.location, null);
+    const archived = await setGroupState(ownerAuth, ownerContext, moved.id,
+      { active: false, expectedVersion: moved.version }, metadata);
+    assert.equal(archived.active, false);
+    assert.equal((await listLocations(ownerContext)).find((place) => place.id === pastureB.id)?.group, null);
+    const placed = await setGroupLocation(ownerAuth, ownerContext, renamed.id,
+      { locationId: corral.id, expectedVersion: renamed.version }, metadata);
+    assert.equal((await getAnimal(ownerContext, animal.id)).location?.kind, 'CORRAL');
+    await assert.rejects(
+      () => setGroupState(ownerAuth, ownerContext, placed.id,
+        { active: false, expectedVersion: placed.version }, metadata),
+      (error: { code?: string }) => error.code === 'GROUP_HAS_ANIMALS',
+    );
+    await updatePropertyModule(ownerAuth, ownerContext, 'MOVEMENTS', false, metadata);
+    await assert.rejects(
+      () => setGroupLocation(ownerAuth, ownerContext, placed.id,
+        { locationId: pastureB.id, expectedVersion: placed.version }, metadata),
+      (error: { code?: string }) => error.code === 'LOCATION_MODULES_DISABLED',
+    );
+    const withoutLocation = await createGroup(ownerAuth, ownerContext,
+      { name: `Sin potrero ${suffix}` }, metadata);
+    assert.equal(withoutLocation.location, null);
+    await updatePropertyModule(ownerAuth, ownerContext, 'MOVEMENTS', true, metadata);
+    const locationHistory = await pool.query<{ ended_at: Date | null }>(
+      `SELECT ended_at FROM group_location_assignment WHERE group_id = $1 AND location_id = $2`,
+      [firstGroup.id, pastureA.id],
+    );
+    assert.ok(locationHistory.rows[0]?.ended_at);
 
     const initialTeam = await getPropertyTeam(ownerAuth, ownerContext);
     const operatorRole = initialTeam.assignableRoles.find((role) => role.code === 'OPERATOR');
@@ -484,6 +566,11 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     assert.equal(nextProperty.accountId, accountId);
     const secondContext = { ...ownerContext, propertyId: nextProperty.propertyId, roleId: nextProperty.roleId };
     await assert.rejects(
+      () => createGroup(ownerAuth, secondContext,
+        { name: `Grupo ajeno ${suffix}`, locationId: pastureA.id }, metadata),
+      (error: { code?: string }) => error.code === 'LOCATION_UNAVAILABLE',
+    );
+    await assert.rejects(
       () => createAnimal(ownerAuth, secondContext, {
         name: 'Color ajeno', sex: 'MALE', speciesCode: 'BOVINE', colorIds: [color.id],
       }, metadata),
@@ -564,6 +651,21 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         'ANIMAL_CATALOGS_UPDATED',
         'ANIMAL_PARENTS_UPDATED',
         'ANIMAL_PARENTS_UPDATED',
+        'ANIMAL_DESCRIPTION_UPDATED',
+        'LOCATION_CREATED',
+        'LOCATION_CREATED',
+        'LOCATION_CREATED',
+        'GROUP_CREATED',
+        'GROUP_CREATED',
+        'GROUP_UPDATED',
+        'ANIMAL_GROUP_CHANGED',
+        'GROUP_LOCATION_CHANGED',
+        'ANIMAL_GROUP_CHANGED',
+        'GROUP_STATE_CHANGED',
+        'GROUP_LOCATION_CHANGED',
+        'PROPERTY_MODULE_UPDATED',
+        'GROUP_CREATED',
+        'PROPERTY_MODULE_UPDATED',
         'PROPERTY_INVITATION_CREATED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',

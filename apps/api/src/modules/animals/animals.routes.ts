@@ -2,9 +2,10 @@ import { Router, type Request } from 'express';
 import { asyncHandler } from '../../core/async-handler.js';
 import { authenticate, requirePermission, requirePropertyContext } from '../auth/auth.middleware.js';
 import type { RequestMetadata } from '../auth/auth.types.js';
-import { animalIdSchema, animalListSchema, createAnimalSchema, updateAnimalBrandsSchema, updateAnimalCatalogSchema, updateAnimalParentsSchema } from './animals.schemas.js';
+import { animalIdSchema, animalListSchema, createAnimalSchema, updateAnimalBrandsSchema, updateAnimalCatalogSchema, updateAnimalDescriptionSchema, updateAnimalParentsSchema } from './animals.schemas.js';
 import { createAnimal, getAnimal, listAnimals, updateAnimalBrands, updateAnimalCatalogs } from './animals.service.js';
 import { updateAnimalParents } from './parents.service.js';
+import { updateAnimalDescription } from './description.service.js';
 
 const metadata = (request: Request): RequestMetadata => ({
   ipAddress: request.ip || null, userAgent: request.header('user-agent')?.slice(0, 1000) ?? null,
@@ -44,6 +45,13 @@ animalsRouter.patch('/:id/parents', requirePermission('ANIMAL_UPDATE'), asyncHan
   const { id } = animalIdSchema.parse(request.params);
   const input = updateAnimalParentsSchema.parse(request.body);
   response.json({ ok: true, data: await updateAnimalParents(
+    request.auth!, request.propertyContext!, id, input, metadata(request),
+  ) });
+}));
+animalsRouter.patch('/:id/description', requirePermission('ANIMAL_UPDATE'), asyncHandler(async (request, response) => {
+  const { id } = animalIdSchema.parse(request.params);
+  const input = updateAnimalDescriptionSchema.parse(request.body);
+  response.json({ ok: true, data: await updateAnimalDescription(
     request.auth!, request.propertyContext!, id, input, metadata(request),
   ) });
 }));
