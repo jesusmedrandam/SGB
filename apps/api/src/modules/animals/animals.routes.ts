@@ -6,6 +6,8 @@ import { animalIdSchema, animalListSchema, createAnimalSchema, updateAnimalBrand
 import { createAnimal, getAnimal, listAnimals, updateAnimalBrands, updateAnimalCatalogs } from './animals.service.js';
 import { updateAnimalParents } from './parents.service.js';
 import { updateAnimalDescription } from './description.service.js';
+import { setAnimalOwners } from './owners.service.js';
+import { z } from 'zod';
 
 const metadata = (request: Request): RequestMetadata => ({
   ipAddress: request.ip || null, userAgent: request.header('user-agent')?.slice(0, 1000) ?? null,
@@ -29,9 +31,9 @@ animalsRouter.post('/', requirePermission('ANIMAL_CREATE'), asyncHandler(async (
 }));
 animalsRouter.patch('/:id/catalogs', requirePermission('ANIMAL_UPDATE'), asyncHandler(async (request, response) => {
   const { id } = animalIdSchema.parse(request.params);
-  const { breedId, colorIds, expectedVersion } = updateAnimalCatalogSchema.parse(request.body);
+  const { breedId, breedIds, colorIds, expectedVersion } = updateAnimalCatalogSchema.parse(request.body);
   response.json({ ok: true, data: await updateAnimalCatalogs(
-    request.auth!, request.propertyContext!, id, { breedId, colorIds }, expectedVersion, metadata(request),
+    request.auth!, request.propertyContext!, id, { breedId, breedIds, colorIds }, expectedVersion, metadata(request),
   ) });
 }));
 animalsRouter.patch('/:id/brands', requirePermission('ANIMAL_UPDATE'), asyncHandler(async (request, response) => {
@@ -54,4 +56,17 @@ animalsRouter.patch('/:id/description', requirePermission('ANIMAL_UPDATE'), asyn
   response.json({ ok: true, data: await updateAnimalDescription(
     request.auth!, request.propertyContext!, id, input, metadata(request),
   ) });
+}));
+
+animalsRouter.put('/:id/owners', requirePermission('ANIMAL_UPDATE'), asyncHandler(async (request, response) => {
+  const { id } = animalIdSchema.parse(request.params);
+  const { owners, expectedVersion } = z.object({ expectedVersion: z.number().int().positive(),
+    owners: z.array(z.object({ partyId: z.uuid(), percent: z.number().positive().max(100),
+      isPrimary: z.boolean() })).min(1).max(30)
+      .refine((entries) => new Set(entries.map((entry) => entry.partyId)).size === entries.length)
+      .refine((entries) => entries.filter((entry) => entry.isPrimary).length === 1)
+      .refine((entries) => Math.abs(entries.reduce((sum, entry) => sum + entry.percent, 0) - 100) < 0.001),
+  }).parse(request.body);
+  response.json({ ok: true, data: await setAnimalOwners(request.auth!, request.propertyContext!,
+    id, owners, expectedVersion, metadata(request)) });
 }));

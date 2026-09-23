@@ -2,8 +2,9 @@ import { type FormEvent, useEffect, useState } from 'react';
 import {
   ApiRequestError, createAnimal, createBrand, getAnimal, getAnimals, listBrands,
   listCatalogItems, setBrandActive, updateAnimalBrands, updateAnimalCatalogs,
+  listOwners, listAccountUsers, createOwner, updateBrandOwners, updateAnimalOwners,
   updateAnimalDescription, updateAnimalParents,
-  type Animal, type AnimalList, type CatalogItem, type LivestockBrand, type ParentSelection,
+  type Animal, type AnimalList, type CatalogItem, type LivestockBrand, type LivestockOwner, type ParentSelection,
 } from './api';
 
 interface AnimalChoices { BREEDS: CatalogItem[]; COLORS: CatalogItem[] }
@@ -16,15 +17,16 @@ async function loadAnimalChoices(accessToken: string): Promise<AnimalChoices> {
 }
 
 function CatalogFields({ choices, selected }: { choices: AnimalChoices; selected?: Animal | null }) {
-  const breed = selected?.breed;
+  const breeds = selected?.breeds || (selected?.breed ? [selected.breed] : []);
   const colors = selected?.colors || [];
   const availableBreed = choices.BREEDS.filter((entry) => entry.active &&
     (!entry.speciesCode || entry.speciesCode === 'BOVINE'));
   const availableColors = choices.COLORS.filter((entry) => entry.active &&
     (!entry.speciesCode || entry.speciesCode === 'BOVINE'));
-  if (breed && !availableBreed.some((entry) => entry.id === breed.id)) {
-    availableBreed.push({ id: breed.id, name: breed.name, catalogCode: 'BREEDS',
-      speciesCode: 'BOVINE', systemDefined: false, active: false });
+  for (const breed of breeds) {
+    if (!availableBreed.some((entry) => entry.id === breed.id))
+      availableBreed.push({ id: breed.id, name: breed.name, catalogCode: 'BREEDS',
+        speciesCode: 'BOVINE', systemDefined: false, active: false });
   }
   for (const color of colors) {
     if (!availableColors.some((entry) => entry.id === color.id)) {
@@ -33,12 +35,13 @@ function CatalogFields({ choices, selected }: { choices: AnimalChoices; selected
     }
   }
   return <>
-    <label><span>Raza</span><select name="breedId" defaultValue={breed?.id || ''}>
-      <option value="">Sin raza registrada</option>
-      {availableBreed.map((entry) => <option key={entry.id} value={entry.id}>
-        {entry.name}{entry.active ? '' : ' (inactiva)'}
-      </option>)}
-    </select></label>
+    <fieldset className="animal-colors"><legend>Razas</legend>
+      {availableBreed.map((entry) => <label key={entry.id}>
+        <input type="checkbox" name="breedIds" value={entry.id}
+          defaultChecked={breeds.some((breed) => breed.id === entry.id)} />
+        <span>{entry.name}{entry.active ? '' : ' (inactiva)'}</span>
+      </label>)}
+    </fieldset>
     <fieldset className="animal-colors"><legend>Colores</legend>
       {availableColors.length === 0 && <small>No hay colores disponibles en esta finca.</small>}
       {availableColors.map((entry) => <label key={entry.id}>
@@ -50,10 +53,36 @@ function CatalogFields({ choices, selected }: { choices: AnimalChoices; selected
   </>;
 }
 
+function OwnerFields({ owners, selected }: { owners: LivestockOwner[]; selected?: Animal | null }) {
+  const available = owners.filter((owner) => owner.active || selected?.owners?.some((entry) => entry.id === owner.id));
+  return <fieldset className="animal-colors"><legend>Propietarios (total 100%)</legend>
+    {available.map((owner) => <div key={owner.id} className="group-inline-form">
+      <label><input type="checkbox" name="ownerIds" value={owner.id}
+        defaultChecked={selected?.owners?.some((entry) => entry.id === owner.id)} /> {owner.name}</label>
+      <label><span>Porcentaje</span><input type="number" name={`percent:${owner.id}`}
+        min="0.01" max="100" step="0.01"
+        defaultValue={selected?.owners?.find((entry) => entry.id === owner.id)?.percent ?? ''} /></label>
+      <label><input type="radio" name="primary" value={owner.id}
+        defaultChecked={selected?.owners?.find((entry) => entry.id === owner.id)?.isPrimary} /> Principal</label>
+    </div>)}
+    <small>Selecciona al menos uno; indica porcentajes que sumen 100% y uno principal.</small>
+  </fieldset>;
+}
+function ownerInput(data: FormData) {
+  const ids = data.getAll('ownerIds').map(String);
+  if (!ids.length) throw new Error('Selecciona al menos un propietario.');
+  const owners = ids.map((partyId) => ({ partyId,
+    percent: Number(data.get(`percent:${partyId}`)), isPrimary: data.get('primary') === partyId }));
+  if (owners.filter((owner) => owner.isPrimary).length !== 1 ||
+    Math.abs(owners.reduce((sum, owner) => sum + owner.percent, 0) - 100) > 0.001)
+    throw new Error('Indica un propietario principal y porcentajes que sumen 100%.');
+  return owners;
+}
+
 function BrandFields({ brands, selected }: { brands: LivestockBrand[]; selected?: Animal | null }) {
   const chosen = selected?.brands ?? [];
   const available = brands.filter((brand) => brand.active || chosen.some((entry) => entry.id === brand.id));
-  return <fieldset className="animal-colors"><legend>Marquillas de la propiedad</legend>
+  return <fieldset className="animal-colors"><legend>Marquillas de la cuenta</legend>
     {available.length === 0 && <small>Registra primero una marquilla en la sección Marquillas.</small>}
     {available.map((brand) => <label key={brand.id}>
       <input type="checkbox" name="brandIds" value={brand.id}
@@ -128,6 +157,8 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
   const [error, setError] = useState<string | null>(null);
   const [choices, setChoices] = useState<AnimalChoices | null>(null);
   const [brands, setBrands] = useState<LivestockBrand[] | null>(null);
+  const [owners, setOwners] = useState<LivestockOwner[]>([]);
+  const [accountUsers, setAccountUsers] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
     let active = true;
@@ -148,6 +179,11 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
 
   useEffect(() => {
     let active = true;
+    void listOwners(accessToken).then((value) => { if (active) setOwners(value); })
+      .catch((failure) => { if (active) setError(message(failure)); });
+    if (canManageBrands) void listAccountUsers(accessToken).then((value) => {
+      if (active) setAccountUsers(value);
+    }).catch((failure) => { if (active) setError(message(failure)); });
     void listBrands(accessToken).then((value) => { if (active) setBrands(value); })
       .catch((failure) => { if (active) setError(message(failure)); });
     return () => { active = false; };
@@ -178,9 +214,12 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     const earTagCode = optional('earTagCode');
     const birthDate = optional('birthDate');
     const entryDate = optional('entryDate');
-    const breedId = optional('breedId');
+    const breedIds = data.getAll('breedIds').map(String);
     const colorIds = data.getAll('colorIds').map(String);
     const brandIds = data.getAll('brandIds').map(String);
+    let animalOwners: ReturnType<typeof ownerInput>;
+    try { animalOwners = ownerInput(data); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : 'Propietarios inválidos.'); return; }
     setBusy(true); setError(null);
     try {
       const created = await createAnimal(accessToken, {
@@ -192,8 +231,8 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         ...(birthDate ? { birthDate } : {}),
         ...(entryDate ? { entryDate } : {}),
         ...(weight ? { initialWeight: Number(weight), initialWeightUnitCode: String(data.get('weightUnit')) } : {}),
-        ...(choices ? { breedId: breedId ?? null, colorIds } : {}),
-        brandIds,
+        ...(choices ? { breedIds, colorIds } : {}),
+        brandIds, owners: animalOwners,
       });
       setSelected(created); setShowCreate(false); setSearchInput(''); setSearch(''); setPage(1);
       setRevision((value) => value + 1);
@@ -208,7 +247,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     setBusy(true); setError(null);
     try {
       setSelected(await updateAnimalCatalogs(accessToken, selected.id, {
-        breedId: String(data.get('breedId') || '') || null,
+        breedIds: data.getAll('breedIds').map(String),
         colorIds: data.getAll('colorIds').map(String),
         expectedVersion: selected.version,
       }));
@@ -220,13 +259,47 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     } finally { setBusy(false); }
   }
 
+  async function addOwner(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const kind = String(data.get('kind'));
+    setBusy(true); setError(null);
+    try {
+      await createOwner(accessToken, kind === 'USER'
+        ? { kind: 'USER', userId: String(data.get('userId')) }
+        : { kind: kind as 'EXTERNAL_PERSON' | 'ORGANIZATION', name: String(data.get('name')).trim() });
+      setOwners(await listOwners(accessToken)); form.reset();
+    } catch (failure) { setError(message(failure)); } finally { setBusy(false); }
+  }
+  async function changeBrandOwners(event: FormEvent<HTMLFormElement>, id: string) {
+    event.preventDefault(); setBusy(true); setError(null);
+    try {
+      await updateBrandOwners(accessToken, id, new FormData(event.currentTarget).getAll('ownerIds').map(String));
+      setBrands(await listBrands(accessToken));
+    } catch (failure) { setError(message(failure)); } finally { setBusy(false); }
+  }
+  async function changeOwners(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (!selected) return;
+    const data = new FormData(event.currentTarget);
+    let ownersInput: ReturnType<typeof ownerInput>;
+    try { ownersInput = ownerInput(data); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : 'Propietarios inválidos.'); return; }
+    setBusy(true); setError(null);
+    try { setSelected(await updateAnimalOwners(accessToken, selected.id,
+      { owners: ownersInput, expectedVersion: selected.version })); }
+    catch (failure) { setError(message(failure)); } finally { setBusy(false); }
+  }
   async function addBrand(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    const name = String(new FormData(form).get('name') || '').trim();
+    const data = new FormData(form);
+    const name = String(data.get('name') || '').trim();
+    const ownerIds = data.getAll('ownerIds').map(String);
+    if (!ownerIds.length) { setError('Selecciona al menos un propietario para la marquilla.'); return; }
     setBusy(true); setError(null);
     try {
-      await createBrand(accessToken, name);
+      await createBrand(accessToken, name, ownerIds);
       setBrands(await listBrands(accessToken));
       form.reset();
     } catch (failure) { setError(message(failure)); }
@@ -308,17 +381,52 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     </div>
     {error && <div className="form-error admin-error" role="alert">{error}</div>}
     <div className="animal-brand-manager">
+      <h3>Propietarios de la cuenta</h3>
+      {canManageBrands && <>
+        <form className="catalog-create" onSubmit={(event) => void addOwner(event)}>
+          <label><span>Tipo</span><select name="kind" defaultValue="EXTERNAL_PERSON">
+            <option value="EXTERNAL_PERSON">Persona externa</option>
+            <option value="ORGANIZATION">Organización</option>
+          </select></label>
+          <label><span>Nombre</span><input name="name" required maxLength={160} /></label>
+          <button className="secondary-button compact" disabled={busy}>Agregar propietario</button>
+        </form>
+        {accountUsers.length > 0 && <form className="catalog-create"
+          onSubmit={(event) => void addOwner(event)}>
+          <input type="hidden" name="kind" value="USER" />
+          <label><span>Usuario de la cuenta</span><select name="userId">
+            {accountUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}
+          </select></label>
+          <button className="secondary-button compact" disabled={busy}>Agregar usuario propietario</button>
+        </form>}
+      </>}
+      <p className="muted">{owners.filter((owner) => owner.active).map((owner) => owner.name).join(', ')
+        || 'Sin propietarios registrados.'}</p>
+    </div>
+    <div className="animal-brand-manager">
       <h3>Marquillas</h3>
       <p className="muted">Regístralas aquí y después elígelas en los animales. El arete individual se registra aparte.</p>
       {canManageBrands && <form className="catalog-create" onSubmit={(event) => void addBrand(event)}>
         <label><span>Nombre o código de la marquilla</span>
           <input name="name" required maxLength={160} disabled={busy} placeholder="Ej. M7L" /></label>
-        <button className="secondary-button compact" type="submit" disabled={busy}>Agregar marquilla</button>
+        {owners.filter((owner) => owner.active).map((owner) => <label key={owner.id}>
+          <input type="checkbox" name="ownerIds" value={owner.id} /> {owner.name}
+        </label>)}
+        <button className="secondary-button compact" type="submit" disabled={busy || !owners.length}>
+          Agregar marquilla</button>
       </form>}
       {brands === null ? <p className="muted">Cargando marquillas…</p>
         : brands.length === 0 ? <p className="muted">Todavía no hay marquillas registradas.</p>
           : <div className="animal-brand-list">{brands.map((brand) =>
             <div key={brand.id} className="animal-brand-row"><span>{brand.name}{brand.active ? '' : ' · Inactiva'}</span>
+              {canManageBrands && <form className="animal-colors" onSubmit={(event) => void changeBrandOwners(event, brand.id)}>
+                <strong>Propietarios de esta marquilla</strong>
+                {owners.filter((owner) => owner.active).map((owner) => <label key={owner.id}>
+                  <input type="checkbox" name="ownerIds" value={owner.id}
+                    defaultChecked={brand.owner_ids?.includes(owner.id)} /> {owner.name}
+                </label>)}
+                <button className="secondary-button compact" disabled={busy}>Guardar propietarios</button>
+              </form>}
               {canManageBrands && <button className="secondary-button compact" type="button"
                 disabled={busy} onClick={() => void changeBrandState(brand)}>
                 {brand.active ? 'Desactivar' : 'Activar'}</button>}</div>)}</div>}
@@ -338,8 +446,9 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         max="999999999" step="0.001" disabled={busy} /></label>
       <label><span>Unidad de peso</span><select name="weightUnit" disabled={busy} defaultValue="KILOGRAM">
         <option value="KILOGRAM">kg</option><option value="POUND">lb</option>
-        <option value="GRAM">g</option></select></label>
+</select></label>
       {choices && <CatalogFields choices={choices} />}
+      <OwnerFields owners={owners} />
       {brands && <BrandFields brands={brands} />}
       <button className="primary-button compact" type="submit" disabled={busy || brands === null}>
         {busy ? 'Guardando…' : 'Registrar animal'}</button>
@@ -374,6 +483,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         <div><dt>Ubicación</dt><dd>{selected.location
           ? `${selected.location.kind === 'PASTURE' ? 'Potrero' : 'Corral'}: ${selected.location.name}`
           : 'Sin ubicación'}</dd></div>
+        <div><dt>Propietarios</dt><dd>{selected.owners?.map((owner) => `${owner.name} (${owner.percent}%)`).join(', ') || 'No registrados'}</dd></div>
         <div><dt>Marquillas</dt><dd>{selected.brands.map((brand) => brand.name).join(', ') || 'No registradas'}</dd></div>
         <div><dt>Sexo</dt><dd>{selected.sex === 'FEMALE' ? 'Hembra' : 'Macho'}</dd></div>
         <div><dt>Nacimiento</dt><dd>{selected.birthDate || 'No registrado'}</dd></div>
@@ -381,7 +491,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         <div><dt>Peso inicial</dt><dd>{selected.initialWeight === null ? 'No registrado'
           : `${selected.initialWeight} ${selected.initialWeightUnitCode === 'POUND' ? 'lb'
             : selected.initialWeightUnitCode === 'GRAM' ? 'g' : 'kg'}`}</dd></div>
-        <div><dt>Raza</dt><dd>{selected.breed?.name || 'No registrada'}</dd></div>
+        <div><dt>Razas</dt><dd>{selected.breeds?.map((breed) => breed.name).join(', ') || 'No registradas'}</dd></div>
         <div><dt>Colores</dt><dd>{selected.colors?.map((color) => color.name).join(', ') || 'No registrados'}</dd></div></dl>
       <dl className="animal-parent-summary"><div><dt>Madre</dt><dd>{selected.mother?.name || 'No registrada'}</dd></div>
         <div><dt>Padre</dt><dd>{selected.father?.name || 'No registrado'}</dd></div></dl>
@@ -392,6 +502,12 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
           rows={4} defaultValue={selected.description || ''} disabled={busy} /></label>
         <button className="primary-button compact" type="submit" disabled={busy}>
           {busy ? 'Guardando…' : 'Guardar descripción'}</button>
+      </form>}
+      {canUpdate && <form className="animal-catalog-edit" key={`owners:${selected.id}:${selected.version}`}
+        onSubmit={(event) => void changeOwners(event)}>
+        <h4>Propietarios y participación</h4>
+        <OwnerFields owners={owners} selected={selected} />
+        <button className="primary-button compact" disabled={busy}>Guardar propietarios</button>
       </form>}
       {canUpdate && choices && <form className="animal-catalog-edit" key={`${selected.id}:${selected.version}`}
         onSubmit={(event) => void changeCatalogs(event)}>

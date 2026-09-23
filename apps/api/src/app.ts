@@ -9,6 +9,7 @@ import { requestId } from './middleware/request-id.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { animalsRouter } from './modules/animals/animals.routes.js';
 import { brandsRouter } from './modules/animals/brands.routes.js';
+import { ownersRouter } from './modules/animals/owners.routes.js';
 import { groupsRouter, locationsRouter } from './modules/groups/groups.routes.js';
 import { catalogsRouter } from './modules/catalogs/catalogs.routes.js';
 import { invitationRouter, propertyTeamRouter } from './modules/collaboration/collaboration.routes.js';
@@ -36,6 +37,7 @@ app.get('/health/ready', asyncHandler(async (_request, response) => {
 app.use('/auth', authRouter);
 app.use('/animals', animalsRouter);
 app.use('/animal-brands', brandsRouter);
+app.use('/owners', ownersRouter);
 app.use('/groups', groupsRouter);
 app.use('/locations', locationsRouter);
 app.use('/invitations', invitationRouter);

@@ -14,6 +14,11 @@ interface GroupRow {
 }
 interface LocationRow {
   id: string; kind: Kind; name: string; description: string | null; active: boolean;
+  version: string; area_value: string | null; area_unit_code: string | null;
+  pasture_use: string | null; capacity_estimate: number | null; water_available: boolean | null;
+  last_rest_date: string | null; floor_material: string | null; covered: boolean | null;
+  grasses: Array<{ name: string; percent: number | null; area: number | null;
+    areaUnitCode: string | null; sowingDate: string | null; notes: string | null }>;
   group_id: string | null; group_name: string | null;
 }
 
@@ -33,6 +38,11 @@ const group = (row: GroupRow) => ({
 });
 const location = (row: LocationRow) => ({
   id: row.id, name: row.name, kind: row.kind, description: row.description, active: row.active,
+  version: Number(row.version), area: row.area_value === null ? null : Number(row.area_value),
+  areaUnitCode: row.area_unit_code, pastureUse: row.pasture_use,
+  capacityEstimate: row.capacity_estimate, waterAvailable: row.water_available,
+  lastRestDate: row.last_rest_date, floorMaterial: row.floor_material, covered: row.covered,
+  grasses: row.grasses,
   group: row.group_id ? { id: row.group_id, name: row.group_name! } : null,
 });
 
@@ -53,13 +63,20 @@ export async function listGroups(context: PropertyContext) {
   return result.rows.map(group);
 }
 
+const locationFields = `pl.id, pl.kind, pl.name, pl.description, pl.active, pl.version::text,
+  pl.area_value::text, pl.area_unit_code, pl.pasture_use, pl.capacity_estimate,
+  pl.water_available, pl.last_rest_date::text, pl.floor_material, pl.covered,
+  lg.id AS group_id, lg.name AS group_name,
+  COALESCE((SELECT json_agg(json_build_object('name', pg.name, 'percent', pg.estimated_percent,
+    'area', pg.area_value, 'areaUnitCode', pg.area_unit_code, 'sowingDate', pg.sowing_date,
+    'notes', pg.notes) ORDER BY pg.name) FROM pasture_grass pg WHERE pg.location_id = pl.id), '[]'::json) AS grasses`;
+const locationJoins = `FROM physical_location pl
+  LEFT JOIN group_location_assignment gla ON gla.location_id = pl.id AND gla.ended_at IS NULL
+  LEFT JOIN livestock_group lg ON lg.id = gla.group_id`;
+
 export async function listLocations(context: PropertyContext) {
   const result = await pool.query<LocationRow>(
-    `SELECT pl.id, pl.kind, pl.name, pl.description, pl.active,
-      lg.id AS group_id, lg.name AS group_name
-     FROM physical_location pl
-     LEFT JOIN group_location_assignment gla ON gla.location_id = pl.id AND gla.ended_at IS NULL
-     LEFT JOIN livestock_group lg ON lg.id = gla.group_id
+    `SELECT ${locationFields} ${locationJoins}
      WHERE pl.property_id = $1 ORDER BY pl.active DESC, pl.kind, lower(pl.name), pl.id`,
     [context.propertyId],
   );
@@ -134,26 +151,79 @@ async function lockLocation(client: PoolClient, propertyId: string, locationId: 
   return result.rows[0];
 }
 
+type LocationInput = {
+  name: string; description?: string | null | undefined; kind: Kind;
+  area?: number | null | undefined; areaUnitCode?: string | null | undefined;
+  pastureUse?: string | null | undefined; capacityEstimate?: number | null | undefined;
+  waterAvailable?: boolean | null | undefined; lastRestDate?: string | null | undefined;
+  floorMaterial?: string | null | undefined; covered?: boolean | null | undefined;
+  grasses?: Array<{ name: string; percent?: number | null | undefined;
+    area?: number | null | undefined; areaUnitCode?: string | null | undefined;
+    sowingDate?: string | null | undefined; notes?: string | null | undefined }> | undefined;
+};
+async function saveGrasses(client: PoolClient, locationId: string, input: LocationInput) {
+  await client.query('DELETE FROM pasture_grass WHERE location_id = $1', [locationId]);
+  for (const grass of input.grasses ?? []) await client.query(
+    `INSERT INTO pasture_grass(location_id, name, estimated_percent, area_value, area_unit_code,
+      sowing_date, notes) VALUES($1,$2,$3,$4,$5,$6,$7)`,
+    [locationId, grass.name, grass.percent ?? null, grass.area ?? null,
+      grass.areaUnitCode ?? null, grass.sowingDate ?? null, grass.notes ?? null]);
+}
+async function locationById(client: PoolClient, propertyId: string, id: string) {
+  const result = await client.query<LocationRow>(
+    `SELECT ${locationFields} ${locationJoins} WHERE pl.property_id = $1 AND pl.id = $2`,
+    [propertyId, id]);
+  if (!result.rows[0]) throw invalidRequest('LOCATION_UNAVAILABLE', 'La ubicación no pertenece a esta propiedad.');
+  return location(result.rows[0]);
+}
 export async function createLocation(auth: AuthState, context: PropertyContext,
-  input: { name: string; description?: string | null | undefined; kind: Kind }, metadata: RequestMetadata) {
+  input: LocationInput, metadata: RequestMetadata) {
   try {
     return await inTransaction(async (client) => {
       const accountId = await access(client, auth, context, 'LOCATION_MANAGE');
       await requireModules(client, context, [input.kind === 'PASTURE' ? 'PASTURES' : 'CORRALS']);
       const inserted = await client.query<{ id: string }>(
         `INSERT INTO physical_location(account_id, property_id, kind, name, description,
-           created_by, updated_by) VALUES($1,$2,$3,$4,$5,$6,$6) RETURNING id`,
-        [accountId, context.propertyId, input.kind, input.name, input.description || null, auth.userId],
-      );
-      const created = (await client.query<LocationRow>(
-        `SELECT pl.id, pl.kind, pl.name, pl.description, pl.active,
-           NULL::uuid AS group_id, NULL::varchar AS group_name
-         FROM physical_location pl WHERE pl.id = $1`, [inserted.rows[0]!.id],
-      )).rows[0]!;
-      const response = location(created);
+          area_value, area_unit_code, pasture_use, capacity_estimate, water_available,
+          last_rest_date, floor_material, covered, created_by, updated_by)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14) RETURNING id`,
+        [accountId, context.propertyId, input.kind, input.name, input.description || null,
+          input.area ?? null, input.areaUnitCode ?? null, input.pastureUse ?? null,
+          input.capacityEstimate ?? null, input.waterAvailable ?? null,
+          input.lastRestDate ?? null, input.floorMaterial ?? null, input.covered ?? null, auth.userId]);
+      await saveGrasses(client, inserted.rows[0]!.id, input);
+      const response = await locationById(client, context.propertyId, inserted.rows[0]!.id);
       await audit(client, auth, context, metadata, 'LOCATION_CREATED', 'PHYSICAL_LOCATION',
         response.id, null, response);
       return response;
+    });
+  } catch (error) { return translate(error); }
+}
+export async function updateLocation(auth: AuthState, context: PropertyContext, id: string,
+  input: LocationInput & { expectedVersion: number }, metadata: RequestMetadata) {
+  try {
+    return await inTransaction(async (client) => {
+      await access(client, auth, context, 'LOCATION_MANAGE');
+      await requireModules(client, context, [input.kind === 'PASTURE' ? 'PASTURES' : 'CORRALS']);
+      const locked = await client.query<{ version: string; kind: Kind }>(
+        `SELECT version::text, kind FROM physical_location WHERE id = $1 AND property_id = $2 FOR UPDATE`,
+        [id, context.propertyId]);
+      if (!locked.rows[0]) throw invalidRequest('LOCATION_UNAVAILABLE', 'La ubicación no pertenece a esta propiedad.');
+      if (locked.rows[0].kind !== input.kind) throw invalidRequest('LOCATION_KIND_FIXED', 'El tipo de ubicación no puede cambiarse.');
+      if (Number(locked.rows[0].version) !== input.expectedVersion)
+        throw conflict('LOCATION_VERSION_CONFLICT', 'La ubicación cambió. Actualiza la pantalla.');
+      const before = await locationById(client, context.propertyId, id);
+      await client.query(`UPDATE physical_location SET name = $2, description = $3,
+        area_value = $4, area_unit_code = $5, pasture_use = $6, capacity_estimate = $7,
+        water_available = $8, last_rest_date = $9, floor_material = $10, covered = $11,
+        updated_by = $12 WHERE id = $1`,
+        [id, input.name, input.description ?? null, input.area ?? null, input.areaUnitCode ?? null,
+          input.pastureUse ?? null, input.capacityEstimate ?? null, input.waterAvailable ?? null,
+          input.lastRestDate ?? null, input.floorMaterial ?? null, input.covered ?? null, auth.userId]);
+      await saveGrasses(client, id, input);
+      const after = await locationById(client, context.propertyId, id);
+      await audit(client, auth, context, metadata, 'LOCATION_UPDATED', 'PHYSICAL_LOCATION', id, before, after);
+      return after;
     });
   } catch (error) { return translate(error); }
 }

@@ -3,9 +3,9 @@ import { asyncHandler } from '../../core/async-handler.js';
 import { authenticate, requirePermission, requirePropertyContext } from '../auth/auth.middleware.js';
 import type { RequestMetadata } from '../auth/auth.types.js';
 import { assignAnimalSchema, createGroupSchema, createLocationSchema,
-  groupLocationSchema, groupStateSchema, idSchema, updateGroupSchema } from './groups.schemas.js';
+  groupLocationSchema, groupStateSchema, idSchema, updateGroupSchema, updateLocationSchema } from './groups.schemas.js';
 import { assignAnimalToGroup, createGroup, createLocation, listGroups, listLocations,
-  setGroupLocation, setGroupState, updateGroup } from './groups.service.js';
+  setGroupLocation, setGroupState, updateGroup, updateLocation } from './groups.service.js';
 
 const metadata = (request: Request): RequestMetadata => ({
   ipAddress: request.ip || null, userAgent: request.header('user-agent')?.slice(0, 1000) ?? null,
@@ -57,4 +57,11 @@ locationsRouter.post('/', requirePermission('LOCATION_MANAGE'), asyncHandler(asy
   const input = createLocationSchema.parse(request.body);
   response.status(201).json({ ok: true, data: await createLocation(
     request.auth!, request.propertyContext!, input, metadata(request)) });
+}));
+
+locationsRouter.patch('/:id', requirePermission('LOCATION_MANAGE'), asyncHandler(async (request, response) => {
+  const { id } = idSchema.parse(request.params);
+  const input = updateLocationSchema.parse(request.body);
+  response.json({ ok: true, data: await updateLocation(request.auth!, request.propertyContext!,
+    id, input, metadata(request)) });
 }));

@@ -56,7 +56,8 @@ export async function readAnimal(client: PoolClient, context: PropertyContext, i
       ORDER BY aca.catalog_code, lower(ci.name), ci.id`,
     [id, context.propertyId],
   );
-  const breed = choices.rows.find((choice) => choice.catalog_code === 'BREEDS');
+  const breeds = choices.rows.filter((choice) => choice.catalog_code === 'BREEDS')
+    .map((choice) => ({ id: choice.id, name: choice.name }));
   const parents = await client.query<{
     role: 'MOTHER' | 'FATHER'; parent_animal_id: string | null;
     reported_parent_name: string | null; name: string | null;
@@ -84,7 +85,13 @@ export async function readAnimal(client: PoolClient, context: PropertyContext, i
     group: place?.group_id ? { id: place.group_id, name: place.group_name! } : null,
     location: place?.location_id ? { id: place.location_id,
       name: place.location_name!, kind: place.location_kind! } : null,
-    breed: breed ? { id: breed.id, name: breed.name } : null,
+    breed: breeds[0] ?? null, breeds,
+    owners: (await client.query<{ id: string; name: string; percent: string; is_primary: boolean }>(
+      `SELECT pp.id, pp.display_name AS name, ao.ownership_percent::text AS percent, ao.is_primary
+       FROM animal_ownership ao JOIN property_party pp ON pp.id = ao.party_id
+       WHERE ao.animal_id = $1 AND ao.valid_until IS NULL ORDER BY ao.is_primary DESC, lower(pp.display_name)`,
+      [id])).rows.map((owner) => ({ id: owner.id, name: owner.name,
+      percent: Number(owner.percent), isPrimary: owner.is_primary })),
     colors: choices.rows.filter((choice) => choice.catalog_code === 'COLORS')
       .map((choice) => ({ id: choice.id, name: choice.name })) };
 }
@@ -112,7 +119,8 @@ export async function getAnimal(context: PropertyContext, id: string) {
 async function validateSelections(client: PoolClient, context: PropertyContext, speciesCode: string,
   selection: AnimalCatalogSelection, existing: ReadonlyMap<string, 'BREEDS' | 'COLORS'> = new Map()) {
   const requested = [
-    ...(selection.breedId ? [{ id: selection.breedId, code: 'BREEDS' }] : []),
+    ...(selection.breedIds ?? (selection.breedId ? [selection.breedId] : []))
+      .map((id) => ({ id, code: 'BREEDS' })),
     ...selection.colorIds.map((id) => ({ id, code: 'COLORS' })),
   ];
   if (requested.some(({ id, code }) => existing.has(id) && existing.get(id) !== code)) {
@@ -123,7 +131,7 @@ async function validateSelections(client: PoolClient, context: PropertyContext, 
   const result = await client.query<{ id: string; catalog_code: string }>(
     `SELECT ci.id, ci.catalog_code FROM governed_catalog_item ci
      WHERE ci.id = ANY($1::uuid[]) AND ci.active AND ci.deleted_at IS NULL
-       AND (ci.system_defined OR ci.property_id = $2)
+       AND (ci.system_defined OR ci.account_id = (SELECT account_id FROM property WHERE id = $2))
        AND (ci.species_code IS NULL OR ci.species_code = $3)
      FOR SHARE OF ci`,
     [ids, context.propertyId, speciesCode],
@@ -139,7 +147,8 @@ async function validateSelections(client: PoolClient, context: PropertyContext, 
 async function insertSelections(client: PoolClient, auth: AuthState, context: PropertyContext,
   animalId: string, selection: AnimalCatalogSelection, existing: ReadonlySet<string> = new Set()) {
   const choices = [
-    ...(selection.breedId ? [{ code: 'BREEDS', id: selection.breedId }] : []),
+    ...(selection.breedIds ?? (selection.breedId ? [selection.breedId] : []))
+      .map((id) => ({ code: 'BREEDS', id })),
     ...selection.colorIds.map((id) => ({ code: 'COLORS', id })),
   ].filter(({ id }) => !existing.has(id));
   for (const choice of choices) {
@@ -155,11 +164,11 @@ async function insertSelections(client: PoolClient, auth: AuthState, context: Pr
 async function validateBrands(client: PoolClient, context: PropertyContext, ids: string[]) {
   if (!ids.length) return;
   const result = await client.query<{ id: string }>(
-    `SELECT id FROM livestock_brand WHERE id = ANY($1::uuid[]) AND property_id = $2 AND active
+    `SELECT id FROM livestock_brand WHERE id = ANY($1::uuid[]) AND account_id = (SELECT account_id FROM property WHERE id = $2) AND active
      FOR SHARE`, [ids, context.propertyId],
   );
   if (result.rows.length !== ids.length) {
-    throw invalidRequest('INVALID_ANIMAL_BRANDS', 'Elige marquillas activas de esta propiedad.');
+    throw invalidRequest('INVALID_ANIMAL_BRANDS', 'Elige marquillas activas de esta cuenta.');
   }
 }
 
@@ -220,11 +229,24 @@ export async function createAnimal(auth: AuthState, context: PropertyContext,
           input.birthDate ?? null, entryDate, input.initialWeight ?? null,
           input.initialWeightUnitCode ?? null, auth.userId],
       );
-      const selection = { breedId: input.breedId ?? null, colorIds: input.colorIds ?? [] };
+      const selection = { breedId: input.breedId ?? null, breedIds: input.breedIds, colorIds: input.colorIds ?? [] };
       await validateSelections(client, context, 'BOVINE', selection);
       await insertSelections(client, auth, context, result.rows[0]!.id, selection);
       await validateBrands(client, context, input.brandIds ?? []);
       await insertBrands(client, auth, context, result.rows[0]!.id, input.brandIds ?? []);
+      if (input.owners?.length) {
+        const validOwners = await client.query<{ id: string }>(
+          `SELECT id FROM property_party WHERE id = ANY($1::uuid[]) AND account_id = $2
+           AND active AND deleted_at IS NULL FOR SHARE`,
+          [input.owners.map((owner) => owner.partyId), accountId]);
+        if (validOwners.rows.length !== input.owners.length)
+          throw invalidRequest('OWNER_UNAVAILABLE', 'Selecciona propietarios activos de esta cuenta.');
+        for (const owner of input.owners) await client.query(
+          `INSERT INTO animal_ownership(property_id, account_id, animal_id, party_id,
+            ownership_percent, is_primary, created_by) VALUES($1,$2,$3,$4,$5,$6,$7)`,
+          [context.propertyId, accountId, result.rows[0]!.id, owner.partyId,
+            owner.percent, owner.isPrimary, auth.userId]);
+      }
       const created = await readAnimal(client, context, result.rows[0]!.id);
       await client.query(
         `INSERT INTO audit_event(actor_user_id, property_id, active_role_id, action,
@@ -322,12 +344,12 @@ export async function updateAnimalCatalogs(auth: AuthState, context: PropertyCon
     }
     const before = await readAnimal(client, context, id);
     const currentChoices = new Map<string, 'BREEDS' | 'COLORS'>([
-      ...(before.breed ? [[before.breed.id, 'BREEDS' as const] as const] : []),
+      ...before.breeds.map((breed) => [breed.id, 'BREEDS' as const] as const),
       ...before.colors.map((color) => [color.id, 'COLORS' as const] as const),
     ]);
     const currentIds = new Set(currentChoices.keys());
     const desiredIds = new Set([
-      ...(selection.breedId ? [selection.breedId] : []), ...selection.colorIds,
+      ...(selection.breedIds ?? (selection.breedId ? [selection.breedId] : [])), ...selection.colorIds,
     ]);
     await validateSelections(client, context, locked.rows[0].species_code, selection, currentChoices);
     if (currentIds.size === desiredIds.size && [...desiredIds].every((choice) => currentIds.has(choice))) {

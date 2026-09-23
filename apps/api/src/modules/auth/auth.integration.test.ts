@@ -4,10 +4,11 @@ import test from 'node:test';
 import { pool } from '../../database/pool.js';
 import { createAnimal, getAnimal, listAnimals, updateAnimalBrands, updateAnimalCatalogs } from '../animals/animals.service.js';
 import { createBrand, listBrands, setBrandActive } from '../animals/brands.service.js';
+import { createOwner, listOwners, setAnimalOwners, setBrandOwners } from '../animals/owners.service.js';
 import { updateAnimalParents } from '../animals/parents.service.js';
 import { updateAnimalDescription } from '../animals/description.service.js';
 import { assignAnimalToGroup, createGroup, createLocation, listGroups,
-  listLocations, setGroupLocation, setGroupState, updateGroup } from '../groups/groups.service.js';
+  listLocations, setGroupLocation, setGroupState, updateGroup, updateLocation } from '../groups/groups.service.js';
 import {
   createCatalogItem, getCatalogReference, listCatalogItems, setCatalogItemActive,
 } from '../catalogs/catalogs.service.js';
@@ -203,7 +204,12 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     const reference = await getCatalogReference(ownerContext);
     assert.ok(reference.species.some((species) => species.code === 'BOVINE'));
     assert.ok(reference.units.some((unit) => unit.contextCode === 'ANIMAL_WEIGHT' && unit.code === 'KILOGRAM'));
-    assert.ok(reference.units.every((unit) => unit.contextCode !== 'ANIMAL_WEIGHT' || unit.code !== 'HECTARE'));
+    assert.ok(reference.units.every((unit) => unit.contextCode !== 'ANIMAL_WEIGHT' || !['HECTARE', 'GRAM'].includes(unit.code)));
+    assert.ok((await listCatalogItems(ownerContext, 'COLORS')).some((item) => item.name === 'Blanco' && item.systemDefined));
+    await assert.rejects(() => createAnimal(ownerAuth, ownerContext, {
+      name: 'Peso en gramos', sex: 'MALE', speciesCode: 'BOVINE',
+      initialWeight: 100, initialWeightUnitCode: 'GRAM',
+    }, metadata), (error: { code?: string }) => error.code === 'INVALID_WEIGHT_UNIT');
     const breed = await createCatalogItem(ownerAuth, ownerContext, 'BREEDS',
       { name: `Raza ${suffix}`, speciesCode: 'BOVINE' }, metadata);
     const color = await createCatalogItem(ownerAuth, ownerContext, 'COLORS',
@@ -211,13 +217,14 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     assert.equal((await listCatalogItems(ownerContext, 'BREEDS')).find((row) => row.id === breed.id)?.active, true);
     await assert.rejects(
       () => createCatalogItem(ownerAuth, ownerContext, 'BREEDS', { name: `Raza ${suffix}` }, metadata),
-      (error: { code?: string }) => error.code === '23505',
+      (error: { code?: string }) => error.code === 'CATALOG_NAME_TAKEN',
     );
     const decorated = await createAnimal(ownerAuth, ownerContext, {
       name: 'Vaca con colores', sex: 'FEMALE', speciesCode: 'BOVINE',
       breedId: breed.id, colorIds: [color.id],
     }, metadata);
     assert.equal(decorated.breed?.id, breed.id);
+    assert.deepEqual(decorated.breeds.map((entry) => entry.id), [breed.id]);
     assert.deepEqual(decorated.colors.map((entry) => entry.id), [color.id]);
     await assert.rejects(
       () => createAnimal(ownerAuth, ownerContext, {
@@ -289,7 +296,19 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     );
 
     const pastureA = await createLocation(ownerAuth, ownerContext,
-      { kind: 'PASTURE', name: `Chivera ${suffix}` }, metadata);
+      { kind: 'PASTURE', name: `Chivera ${suffix}`, area: 2.5, areaUnitCode: 'HECTARE',
+        pastureUse: 'PASTOREO', capacityEstimate: 12, waterAvailable: true,
+        lastRestDate: '2026-01-01', grasses: [
+          { name: 'Brachiaria', percent: 60, area: 1.5, areaUnitCode: 'HECTARE' },
+          { name: 'Estrella', percent: 40 },
+        ] }, metadata);
+    assert.equal(pastureA.grasses.length, 2);
+    const updatedPasture = await updateLocation(ownerAuth, ownerContext, pastureA.id,
+      { kind: 'PASTURE', name: pastureA.name, area: 3, areaUnitCode: 'HECTARE',
+        pastureUse: 'MIXTO', capacityEstimate: 14, waterAvailable: true,
+        grasses: [{ name: 'Brachiaria', percent: 100 }], expectedVersion: pastureA.version }, metadata);
+    assert.equal(updatedPasture.grasses.length, 1);
+    assert.equal(updatedPasture.capacityEstimate, 14);
     const pastureB = await createLocation(ownerAuth, ownerContext,
       { kind: 'PASTURE', name: `Retaco ${suffix}` }, metadata);
     const corral = await createLocation(ownerAuth, ownerContext,
@@ -570,12 +589,15 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         { name: `Grupo ajeno ${suffix}`, locationId: pastureA.id }, metadata),
       (error: { code?: string }) => error.code === 'LOCATION_UNAVAILABLE',
     );
-    await assert.rejects(
-      () => createAnimal(ownerAuth, secondContext, {
-        name: 'Color ajeno', sex: 'MALE', speciesCode: 'BOVINE', colorIds: [color.id],
-      }, metadata),
-      (error: { code?: string }) => error.code === 'INVALID_ANIMAL_CATALOG_SELECTION',
-    );
+    const sharedCatalogAnimal = await createAnimal(ownerAuth, secondContext, {
+      name: 'Color compartido', sex: 'MALE', speciesCode: 'BOVINE', colorIds: [color.id],
+      breedIds: [breed.id, (await listCatalogItems(secondContext, 'BREEDS'))
+        .find((entry) => entry.name === 'Brahman')!.id],
+      brandIds: [anotherBrand.id],
+    }, metadata);
+    assert.equal(sharedCatalogAnimal.breeds.length, 2);
+    assert.deepEqual(sharedCatalogAnimal.colors.map((entry) => entry.id), [color.id]);
+    assert.equal(sharedCatalogAnimal.brands[0]?.id, anotherBrand.id);
     await assert.rejects(
       () => getAnimal(secondContext, animal.id),
       (error: { code?: string }) => error.code === 'ANIMAL_NOT_FOUND',
@@ -587,12 +609,34 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
        FROM property WHERE id = $1`, [nextProperty.propertyId],
     );
     assert.equal(secondAnimal.entryDate, localToday.rows[0]?.today);
+    const ownerOne = await createOwner(ownerAuth, ownerContext,
+      { kind: 'USER', userId: ownerAuth.userId }, metadata);
+    const ownerTwo = await createOwner(ownerAuth, secondContext,
+      { kind: 'EXTERNAL_PERSON', name: `Propietario ${suffix}` }, metadata);
+    assert.ok((await listOwners(secondContext)).some((row) => row.id === ownerOne.id));
+    await setBrandOwners(ownerAuth, secondContext, anotherBrand.id, [ownerOne.id, ownerTwo.id], metadata);
+    assert.equal((await listBrands(ownerContext)).find((row) => row.id === anotherBrand.id)?.owner_ids?.length, 2);
+    const otherAccountContext = { ...ownerContext,
+      propertyId: superadminProperty.propertyId, roleId: superadminRole.id };
+    assert.equal((await listOwners(otherAccountContext)).some((row) => row.id === ownerOne.id), false);
+    assert.equal((await listBrands(otherAccountContext)).some((row) => row.id === anotherBrand.id), false);
+    assert.equal((await listCatalogItems(otherAccountContext, 'BREEDS')).some((row) => row.id === breed.id), false);
+    assert.ok((await listCatalogItems(otherAccountContext, 'BREEDS')).some((row) => row.name === 'Brahman'));
+    const owned = await setAnimalOwners(ownerAuth, secondContext, secondAnimal.id, [
+      { partyId: ownerOne.id, percent: 60, isPrimary: true },
+      { partyId: ownerTwo.id, percent: 40, isPrimary: false },
+    ], secondAnimal.version, metadata);
+    assert.equal(owned.owners.length, 2);
+    assert.equal(owned.owners.reduce((sum, row) => sum + row.percent, 0), 100);
+    await assert.rejects(() => setAnimalOwners(ownerAuth, secondContext, secondAnimal.id,
+      [{ partyId: ownerOne.id, percent: 100, isPrimary: true }], secondAnimal.version, metadata),
+      (error: { code?: string }) => error.code === 'ANIMAL_VERSION_CONFLICT');
+
     assert.equal((await listAnimals(ownerContext, 1, '')).items.some((row) => row.id === secondAnimal.id), false);
-    assert.equal((await listCatalogItems(secondContext, 'BREEDS')).some((row) => row.id === breed.id), false);
-    await assert.rejects(
-      () => setCatalogItemActive(ownerAuth, secondContext, 'COLORS', color.id, false, metadata),
-      (error: { code?: string }) => error.code === 'CATALOG_ITEM_UNAVAILABLE',
-    );
+    assert.equal((await listCatalogItems(secondContext, 'BREEDS')).some((row) => row.id === breed.id), true);
+    assert.equal((await listBrands(secondContext)).some((row) => row.id === anotherBrand.id), true);
+    await setCatalogItemActive(ownerAuth, secondContext, 'COLORS', color.id, false, metadata);
+    assert.equal((await listCatalogItems(ownerContext, 'COLORS')).find((row) => row.id === color.id)?.active, false);
     await updatePropertyModule(ownerAuth, secondContext, 'WEIGHING', false, metadata);
     const secondSettings = await getPropertySettings(secondContext);
     assert.equal(secondSettings.modules.find((item) => item.code === 'WEIGHING')?.enabled, false);
@@ -653,6 +697,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         'ANIMAL_PARENTS_UPDATED',
         'ANIMAL_DESCRIPTION_UPDATED',
         'LOCATION_CREATED',
+        'LOCATION_UPDATED',
         'LOCATION_CREATED',
         'LOCATION_CREATED',
         'GROUP_CREATED',
@@ -671,6 +716,12 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
         'PROPERTY_CREATED',
         'ANIMAL_CREATED',
+        'ANIMAL_CREATED',
+        'CATALOG_ITEM_STATE_CHANGED',
+        'OWNER_CREATED',
+        'OWNER_CREATED',
+        'BRAND_OWNERS_UPDATED',
+        'ANIMAL_OWNERS_UPDATED',
         'PROPERTY_MODULE_UPDATED',
         'PROPERTY_CREATED',
         'AUTH_LOGOUT',

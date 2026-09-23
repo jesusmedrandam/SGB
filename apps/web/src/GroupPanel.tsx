@@ -1,14 +1,87 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import {
   ApiRequestError, assignAnimalToGroup, createGroup, createLocation, getAnimals,
-  listGroups, listLocations, setGroupLocation, setGroupState, updateGroup,
-  type Animal, type LivestockGroup, type PhysicalLocation,
+  listGroups, listLocations, setGroupLocation, setGroupState, updateGroup, updateLocation,
+  type Animal, type LivestockGroup, type PhysicalLocation, type LocationInput,
 } from './api';
 
 const label = (place: { kind: 'PASTURE' | 'CORRAL'; name: string }) =>
   `${place.kind === 'PASTURE' ? 'Potrero' : 'Corral'}: ${place.name}`;
 const message = (error: unknown) => error instanceof ApiRequestError
   ? error.message : 'No fue posible completar la operación.';
+function locationInput(data: FormData, kind: PhysicalLocation['kind']): LocationInput {
+  const optional = (key: string) => String(data.get(key) || '').trim() || null;
+  const number = (key: string) => optional(key) === null ? null : Number(optional(key));
+  const grasses = data.getAll('grassName').map(String).map((name, index) => ({
+    name: name.trim(), percent: data.getAll('grassPercent')[index]
+      ? Number(data.getAll('grassPercent')[index]) : null,
+    area: data.getAll('grassArea')[index] ? Number(data.getAll('grassArea')[index]) : null,
+    areaUnitCode: data.getAll('grassAreaUnit')[index]
+      ? String(data.getAll('grassAreaUnit')[index]) : null,
+    sowingDate: data.getAll('grassSowing')[index]
+      ? String(data.getAll('grassSowing')[index]) : null,
+    notes: data.getAll('grassNotes')[index]
+      ? String(data.getAll('grassNotes')[index]) : null,
+  })).filter((grass) => grass.name);
+  return { name: String(data.get('name') || '').trim(), description: optional('description'), kind,
+    area: number('area'), areaUnitCode: optional('areaUnitCode'),
+    capacityEstimate: number('capacityEstimate'), waterAvailable: data.get('waterAvailable') === 'on',
+    ...(kind === 'PASTURE' ? { pastureUse: optional('pastureUse'),
+      lastRestDate: optional('lastRestDate'), grasses } : {
+      floorMaterial: optional('floorMaterial'), covered: data.get('covered') === 'on' }),
+  };
+}
+function LocationFields({ place }: { place?: PhysicalLocation | undefined }) {
+  const [grassCount, setGrassCount] = useState(place?.grasses.length ?? 0);
+  const pasture = (place?.kind ?? 'PASTURE') === 'PASTURE';
+  return <>
+    <label><span>Área</span><input type="number" name="area" step="0.0001" min="0.0001"
+      defaultValue={place?.area ?? ''} /></label>
+    <label><span>Unidad de área</span><select name="areaUnitCode" defaultValue={place?.areaUnitCode ?? ''}>
+      <option value="">Sin área</option><option value="HECTARE">ha</option>
+      <option value="SQUARE_METER">m²</option>
+    </select></label>
+    <label><span>Capacidad estimada (animales)</span><input type="number" name="capacityEstimate"
+      min="0" step="1" defaultValue={place?.capacityEstimate ?? ''} /></label>
+    <label><span>Agua disponible</span><input type="checkbox" name="waterAvailable"
+      defaultChecked={place?.waterAvailable ?? false} /></label>
+    {pasture ? <>
+      <label><span>Tipo de uso</span><select name="pastureUse" defaultValue={place?.pastureUse ?? ''}>
+        <option value="">Sin especificar</option><option value="PASTOREO">Pastoreo</option>
+        <option value="CORTE">Corte</option><option value="MIXTO">Mixto</option>
+        <option value="DESCANSO">Descanso</option>
+      </select></label>
+      <label><span>Último descanso</span><input type="date" name="lastRestDate"
+        defaultValue={place?.lastRestDate ?? ''} /></label>
+      <fieldset className="animal-colors"><legend>Pastos</legend>
+        {Array.from({ length: grassCount }, (_, index) => <div key={index} className="group-inline-form">
+          <label><span>Pasto</span><input name="grassName" maxLength={160}
+            defaultValue={place?.grasses[index]?.name ?? ''} /></label>
+          <label><span>% estimado</span><input type="number" name="grassPercent" min="0"
+            max="100" step="0.01" defaultValue={place?.grasses[index]?.percent ?? ''} /></label>
+          <label><span>Área estimada</span><input type="number" name="grassArea" min="0.0001"
+            step="0.0001" defaultValue={place?.grasses[index]?.area ?? ''} /></label>
+          <label><span>Unidad</span><select name="grassAreaUnit"
+            defaultValue={place?.grasses[index]?.areaUnitCode ?? ''}>
+            <option value="">Sin área</option><option value="HECTARE">ha</option>
+            <option value="SQUARE_METER">m²</option>
+          </select></label>
+          <label><span>Siembra</span><input type="date" name="grassSowing"
+            defaultValue={place?.grasses[index]?.sowingDate ?? ''} /></label>
+          <label><span>Observaciones</span><input name="grassNotes" maxLength={300}
+            defaultValue={place?.grasses[index]?.notes ?? ''} /></label>
+        </div>)}
+        <button type="button" className="secondary-button compact"
+          onClick={() => setGrassCount((count) => Math.min(count + 1, 30))}>+ Pasto</button>
+      </fieldset>
+    </> : <>
+      <label><span>Material del piso</span><input name="floorMaterial" maxLength={100}
+        defaultValue={place?.floorMaterial ?? ''} /></label>
+      <label><span>Cubierto</span><input type="checkbox" name="covered"
+        defaultChecked={place?.covered ?? false} /></label>
+    </>}
+  </>;
+}
 
 export function GroupPanel({ accessToken, modules, canManage, canViewLocations,
   canManageLocations, canAssignAnimals }: {
@@ -19,12 +92,15 @@ export function GroupPanel({ accessToken, modules, canManage, canViewLocations,
   const [locations, setLocations] = useState<PhysicalLocation[]>([]);
   const [animals, setAnimals] = useState<Animal[]>([]);
   const [animalSearch, setAnimalSearch] = useState('');
+  const [newLocationKind, setNewLocationKind] = useState<PhysicalLocation['kind']>('PASTURE');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const canPlace = ['PASTURES', 'CORRALS', 'MOVEMENTS'].every((code) => modules.includes(code));
   const availableKinds = (['PASTURE', 'CORRAL'] as const).filter((kind) =>
     modules.includes(kind === 'PASTURE' ? 'PASTURES' : 'CORRALS'));
+  const locationKind = availableKinds.includes(newLocationKind)
+    ? newLocationKind : availableKinds[0] ?? 'PASTURE';
 
   useEffect(() => {
     let active = true;
@@ -72,13 +148,17 @@ export function GroupPanel({ accessToken, modules, canManage, canViewLocations,
     const form = event.currentTarget;
     const data = new FormData(form);
     void run(async () => {
-      await createLocation(accessToken, {
-        name: String(data.get('name')).trim(),
-        description: String(data.get('description') || '').trim() || null,
-        kind: String(data.get('kind')) as PhysicalLocation['kind'],
-      });
+      await createLocation(accessToken,
+        locationInput(data, String(data.get('kind')) as PhysicalLocation['kind']));
       form.reset();
     });
+  }
+
+  function editLocation(event: FormEvent<HTMLFormElement>, place: PhysicalLocation) {
+    event.preventDefault();
+    void run(() => updateLocation(accessToken, place.id, {
+      ...locationInput(new FormData(event.currentTarget), place.kind), expectedVersion: place.version,
+    }));
   }
 
   function editGroup(event: FormEvent<HTMLFormElement>, entry: LivestockGroup) {
@@ -119,19 +199,35 @@ export function GroupPanel({ accessToken, modules, canManage, canViewLocations,
       <h3>Potreros y corrales</h3>
       {canManageLocations && availableKinds.length > 0 &&
         <form className="group-new-form" onSubmit={addLocation}>
-          <label><span>Tipo</span><select name="kind" disabled={busy}>
+          <label><span>Tipo</span><select name="kind" disabled={busy} value={locationKind}
+              onChange={(event) => setNewLocationKind(event.target.value as PhysicalLocation['kind'])}>
             {availableKinds.map((kind) => <option key={kind} value={kind}>
               {kind === 'PASTURE' ? 'Potrero' : 'Corral'}</option>)}</select></label>
           <label><span>Nombre *</span><input name="name" required maxLength={160} disabled={busy} /></label>
           <label className="group-description"><span>Descripción</span>
             <textarea name="description" rows={2} maxLength={5000} disabled={busy} /></label>
+          <LocationFields key={locationKind} place={locationKind === 'CORRAL'
+            ? { kind: 'CORRAL' } as PhysicalLocation : undefined} />
           <button className="secondary-button compact" type="submit" disabled={busy}>Agregar ubicación</button>
         </form>}
       {locations.length === 0 ? <p className="muted">Todavía no hay potreros ni corrales.</p>
         : <div className="group-location-list">{locations.map((place) =>
           <div key={place.id} className="group-location-item"><strong>{label(place)}</strong>
             <small>{place.group ? `Grupo: ${place.group.name}` : 'Sin grupo'}
-              {place.active ? '' : ' · Inactivo'}</small></div>)}</div>}
+              {place.active ? '' : ' · Inactivo'}
+              {place.area ? ` · ${place.area} ${place.areaUnitCode === 'HECTARE' ? 'ha' : 'm²'}` : ''}
+              {place.capacityEstimate != null ? ` · Capacidad: ${place.capacityEstimate}` : ''}
+              {place.kind === 'PASTURE' && place.pastureUse ? ` · ${place.pastureUse}` : ''}</small>
+            {place.grasses.length > 0 && <small>Pastos: {place.grasses.map((grass) =>
+              `${grass.name}${grass.percent != null ? ` (${grass.percent}%)` : ''}`).join(', ')}</small>}
+            {canManageLocations && <form className="group-new-form"
+              key={`${place.id}:${place.version}`} onSubmit={(event) => editLocation(event, place)}>
+              <label><span>Nombre</span><input name="name" required defaultValue={place.name} /></label>
+              <label><span>Descripción</span><textarea name="description"
+                defaultValue={place.description ?? ''} /></label>
+              <LocationFields place={place} />
+              <button className="secondary-button compact" disabled={busy}>Guardar ubicación</button>
+            </form>}</div>)}</div>}
     </div>}
     {canManage && <form className="group-new-form" onSubmit={addGroup}>
       <h3>Nuevo grupo</h3>

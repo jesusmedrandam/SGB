@@ -77,6 +77,8 @@ export interface Animal {
   availabilityStatusCode: string;
   version: number;
   breed?: { id: string; name: string } | null;
+  breeds: Array<{ id: string; name: string }>;
+  owners: Array<{ id: string; name: string; percent: number; isPrimary: boolean }>;
   colors?: Array<{ id: string; name: string }>;
   brands: Array<{ id: string; name: string }>;
   mother?: { animalId: string | null; name: string } | null;
@@ -85,7 +87,8 @@ export interface Animal {
   location?: { id: string; name: string; kind: 'PASTURE' | 'CORRAL' } | null;
 }
 
-export interface LivestockBrand { id: string; name: string; active: boolean }
+export interface LivestockBrand { id: string; name: string; active: boolean; owner_ids?: string[] }
+export interface LivestockOwner { id: string; name: string; kind: string; active: boolean }
 
 export interface AnimalList { items: Animal[]; page: number; hasMore: boolean }
 
@@ -97,6 +100,11 @@ export interface LivestockGroup {
 export interface PhysicalLocation {
   id: string; name: string; kind: 'PASTURE' | 'CORRAL'; description: string | null;
   active: boolean; group: { id: string; name: string } | null;
+  version: number; area: number | null; areaUnitCode: string | null;
+  pastureUse: string | null; capacityEstimate: number | null; waterAvailable: boolean | null;
+  lastRestDate: string | null; floorMaterial: string | null; covered: boolean | null;
+  grasses: Array<{ name: string; percent: number | null; area: number | null;
+    areaUnitCode: string | null; sowingDate: string | null; notes: string | null }>;
 }
 
 export interface RegistrationResult {
@@ -352,8 +360,9 @@ export function createAnimal(accessToken: string, input: {
   description?: string | null;
   earTagCode?: string; birthDate?: string; entryDate?: string;
   initialWeight?: number; initialWeightUnitCode?: string;
-  breedId?: string | null; colorIds?: string[];
+  breedId?: string | null; breedIds?: string[]; colorIds?: string[];
   brandIds?: string[];
+  owners?: Array<{ partyId: string; percent: number; isPrimary: boolean }>;
 }) {
   return request<Animal>('/animals', {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
@@ -416,29 +425,66 @@ export function listLocations(accessToken: string) {
   return request<PhysicalLocation[]>('/locations', { headers: bearer(accessToken) });
 }
 
-export function createLocation(accessToken: string, input: {
+export interface LocationInput {
   kind: 'PASTURE' | 'CORRAL'; name: string; description: string | null;
-}) {
+  area?: number | null; areaUnitCode?: string | null; pastureUse?: string | null;
+  capacityEstimate?: number | null; waterAvailable?: boolean | null;
+  lastRestDate?: string | null; floorMaterial?: string | null; covered?: boolean | null;
+  grasses?: Array<{ name: string; percent?: number | null; area?: number | null;
+    areaUnitCode?: string | null; sowingDate?: string | null; notes?: string | null }>;
+}
+export function createLocation(accessToken: string, input: LocationInput) {
   return request<PhysicalLocation>('/locations', {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
   });
 }
 
+export function updateLocation(accessToken: string, id: string, input: LocationInput & { expectedVersion: number }) {
+  return request<PhysicalLocation>(`/locations/${encodeURIComponent(id)}`, {
+    method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+
 export function updateAnimalCatalogs(accessToken: string, id: string, input: {
-  breedId: string | null; colorIds: string[]; expectedVersion: number;
+  breedIds: string[]; colorIds: string[]; expectedVersion: number;
 }) {
   return request<Animal>(`/animals/${encodeURIComponent(id)}/catalogs`, {
     method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
   });
 }
 
+export function listOwners(accessToken: string) {
+  return request<LivestockOwner[]>('/owners', { headers: bearer(accessToken) });
+}
+export function listAccountUsers(accessToken: string) {
+  return request<Array<{ id: string; name: string }>>('/owners/users', { headers: bearer(accessToken) });
+}
+export function createOwner(accessToken: string, input:
+  { kind: 'USER'; userId: string } | { kind: 'EXTERNAL_PERSON' | 'ORGANIZATION'; name: string }) {
+  return request<LivestockOwner>('/owners', {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+export function updateBrandOwners(accessToken: string, id: string, ownerIds: string[]) {
+  return request<{ ownerIds: string[] }>(`/animal-brands/${encodeURIComponent(id)}/owners`, {
+    method: 'PUT', headers: bearer(accessToken), body: JSON.stringify({ ownerIds }),
+  });
+}
+export function updateAnimalOwners(accessToken: string, id: string, input: {
+  owners: Array<{ partyId: string; percent: number; isPrimary: boolean }>;
+  expectedVersion: number;
+}) {
+  return request<Animal>(`/animals/${encodeURIComponent(id)}/owners`, {
+    method: 'PUT', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
 export function listBrands(accessToken: string) {
   return request<LivestockBrand[]>('/animal-brands', { headers: bearer(accessToken) });
 }
 
-export function createBrand(accessToken: string, name: string) {
+export function createBrand(accessToken: string, name: string, ownerIds: string[]) {
   return request<LivestockBrand>('/animal-brands', {
-    method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name }),
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name, ownerIds }),
   });
 }
 

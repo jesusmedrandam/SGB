@@ -4,11 +4,13 @@ import { pool } from '../../database/pool.js';
 import { inTransaction } from '../../database/transaction.js';
 import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.types.js';
 
-interface BrandRow { id: string; name: string; active: boolean }
+interface BrandRow { id: string; name: string; active: boolean; owner_ids?: string[] }
 
 export async function listBrands(context: PropertyContext) {
   const result = await pool.query<BrandRow>(
-    `SELECT id, name, active FROM livestock_brand WHERE property_id = $1
+    `SELECT id, name, active, ARRAY(SELECT party_id FROM livestock_brand_owner
+       WHERE brand_id = livestock_brand.id ORDER BY party_id) AS owner_ids
+     FROM livestock_brand WHERE account_id = (SELECT account_id FROM property WHERE id = $1)
      ORDER BY lower(name), id`, [context.propertyId],
   );
   return result.rows;
@@ -42,15 +44,29 @@ async function audit(client: PoolClient, auth: AuthState, context: PropertyConte
 }
 
 export async function createBrand(auth: AuthState, context: PropertyContext,
-  name: string, metadata: RequestMetadata) {
+  name: string, metadata: RequestMetadata, ownerIds: string[] = []) {
   try {
     return await inTransaction(async (client) => {
       const accountId = await access(client, auth, context);
+      await client.query('SELECT id FROM administrative_account WHERE id = $1 FOR UPDATE', [accountId]);
+      const duplicate = await client.query(`SELECT 1 FROM livestock_brand
+        WHERE account_id = $1 AND lower(name) = lower($2) LIMIT 1`, [accountId, name]);
+      if (duplicate.rowCount) throw conflict('BRAND_NAME_TAKEN', 'Ya existe una marquilla con ese nombre en la cuenta.');
       const created = await client.query<BrandRow>(
         `INSERT INTO livestock_brand(account_id, property_id, name, created_by)
          VALUES($1,$2,$3,$4) RETURNING id, name, active`,
         [accountId, context.propertyId, name, auth.userId],
       );
+      if (ownerIds.length) {
+        const parties = await client.query<{ id: string }>(
+          `SELECT id FROM property_party WHERE id = ANY($1::uuid[]) AND account_id = $2
+           AND active AND deleted_at IS NULL FOR SHARE`, [ownerIds, accountId]);
+        if (parties.rows.length !== ownerIds.length)
+          throw new ApiError(400, 'OWNER_UNAVAILABLE', 'Selecciona propietarios activos de esta cuenta.');
+        for (const partyId of ownerIds) await client.query(
+          `INSERT INTO livestock_brand_owner(brand_id, party_id, account_id, created_by)
+           VALUES($1,$2,$3,$4)`, [created.rows[0]!.id, partyId, accountId, auth.userId]);
+      }
       await audit(client, auth, context, metadata, created.rows[0]!.id,
         'LIVESTOCK_BRAND_CREATED', null, created.rows[0]!);
       return created.rows[0]!;
@@ -67,12 +83,12 @@ export async function createBrand(auth: AuthState, context: PropertyContext,
 export async function setBrandActive(auth: AuthState, context: PropertyContext,
   id: string, active: boolean, metadata: RequestMetadata) {
   return inTransaction(async (client) => {
-    await access(client, auth, context);
+    const accountId = await access(client, auth, context);
     const current = await client.query<BrandRow>(
-      `SELECT id, name, active FROM livestock_brand WHERE id = $1 AND property_id = $2 FOR UPDATE`,
-      [id, context.propertyId],
+      `SELECT id, name, active FROM livestock_brand WHERE id = $1 AND account_id = $2 FOR UPDATE`,
+      [id, accountId],
     );
-    if (!current.rows[0]) throw new ApiError(404, 'BRAND_NOT_FOUND', 'La marquilla no está disponible en esta propiedad.');
+    if (!current.rows[0]) throw new ApiError(404, 'BRAND_NOT_FOUND', 'La marquilla no está disponible en esta cuenta.');
     if (current.rows[0].active === active) return current.rows[0];
     const updated = await client.query<BrandRow>(
       `UPDATE livestock_brand SET active = $2 WHERE id = $1 RETURNING id, name, active`, [id, active],

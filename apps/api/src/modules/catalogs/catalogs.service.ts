@@ -49,7 +49,7 @@ export async function listCatalogItems(context: PropertyContext, code: EditableC
      FROM governed_catalog_item ci
      JOIN catalog_definition cd ON cd.code = ci.catalog_code AND cd.active
      WHERE ci.catalog_code = $2 AND ci.deleted_at IS NULL
-       AND (ci.system_defined OR ci.property_id = $1)
+       AND (ci.system_defined OR ci.account_id = (SELECT account_id FROM property WHERE id = $1))
        AND (ci.species_code IS NULL OR EXISTS (
          SELECT 1 FROM effective_property_species eps
          WHERE eps.property_id = $1 AND eps.species_code = ci.species_code AND eps.enabled))
@@ -104,6 +104,11 @@ export async function createCatalogItem(auth: AuthState, context: PropertyContex
   return inTransaction(async (client) => {
     const speciesCode = input.speciesCode ?? null;
     const accountId = await ensureManageAccess(client, auth, context, code, speciesCode);
+    await client.query('SELECT id FROM administrative_account WHERE id = $1 FOR UPDATE', [accountId]);
+    const duplicate = await client.query(`SELECT 1 FROM governed_catalog_item
+       WHERE catalog_code = $1 AND lower(name) = lower($2) AND deleted_at IS NULL
+         AND (system_defined OR account_id = $3) LIMIT 1`, [code, input.name, accountId]);
+    if (duplicate.rowCount) throw conflict('CATALOG_NAME_TAKEN', 'Esta opción ya existe para la cuenta.');
     const result = await client.query<CatalogItemRow>(
       `INSERT INTO governed_catalog_item(catalog_code, account_id, property_id, species_code,
          name, created_by)
@@ -120,15 +125,15 @@ export async function createCatalogItem(auth: AuthState, context: PropertyContex
 export async function setCatalogItemActive(auth: AuthState, context: PropertyContext,
   code: EditableCatalogCode, id: string, active: boolean, metadata: RequestMetadata) {
   return inTransaction(async (client) => {
-    await ensureManageAccess(client, auth, context, code, null);
+    const accountId = await ensureManageAccess(client, auth, context, code, null);
     const current = await client.query<CatalogItemRow>(
       `SELECT id, catalog_code, name, species_code, system_defined, active
        FROM governed_catalog_item
-       WHERE id = $1 AND catalog_code = $2 AND property_id = $3 AND NOT system_defined AND deleted_at IS NULL
+       WHERE id = $1 AND catalog_code = $2 AND account_id = $3 AND NOT system_defined AND deleted_at IS NULL
        FOR UPDATE`,
-      [id, code, context.propertyId],
+      [id, code, accountId],
     );
-    if (!current.rows[0]) throw invalidRequest('CATALOG_ITEM_UNAVAILABLE', 'La opción no pertenece a esta propiedad.');
+    if (!current.rows[0]) throw invalidRequest('CATALOG_ITEM_UNAVAILABLE', 'La opción no pertenece a esta cuenta.');
     if (current.rows[0].active === active) return item(current.rows[0]);
     if (active && current.rows[0].species_code) {
       const species = await client.query(
