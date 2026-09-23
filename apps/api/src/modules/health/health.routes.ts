@@ -5,11 +5,28 @@ import type {RequestMetadata} from '../auth/auth.types.js';
 import {applyCampaign,cancelCampaign,createCampaign,createMedicine,listCampaigns,
   listHealthOptions,listMedicines,updateCampaign} from './health.service.js';
 import {campaignSchema,idSchema,medicineSchema} from './health.schemas.js';
+import {conditionSchema,resolutionSchema} from './health.schemas.js';
+import {createCondition,listConditions,resolveCondition,updateCondition} from './conditions.service.js';
 
 const metadata=(request:Request):RequestMetadata=>({ipAddress:request.ip||null,
   userAgent:request.header('user-agent')?.slice(0,1000)??null});
 export const healthRouter=Router();
 healthRouter.use(authenticate,requirePropertyContext,requireModule('HEALTH'));
+healthRouter.get('/conditions',requirePermission('HEALTH_VIEW'),asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await listConditions(request.propertyContext!)});
+}));
+healthRouter.post('/conditions',requirePermission('HEALTH_MANAGE'),asyncHandler(async(request,response)=>{
+  response.status(201).json({ok:true,data:await createCondition(request.auth!,request.propertyContext!,
+    conditionSchema.parse(request.body),metadata(request))});
+}));
+healthRouter.put('/conditions/:id',requirePermission('HEALTH_MANAGE'),asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await updateCondition(request.auth!,request.propertyContext!,
+    idSchema.parse(request.params).id,conditionSchema.parse(request.body),metadata(request))});
+}));
+healthRouter.post('/conditions/:id/resolve',requirePermission('HEALTH_MANAGE'),asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await resolveCondition(request.auth!,request.propertyContext!,
+    idSchema.parse(request.params).id,resolutionSchema.parse(request.body),metadata(request))});
+}));
 healthRouter.get('/medicines',requirePermission('HEALTH_VIEW'),asyncHandler(async(request,response)=>{
   response.json({ok:true,data:await listMedicines(request.propertyContext!)});
 }));

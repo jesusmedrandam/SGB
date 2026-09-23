@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-export type ShellIconName = 'home'|'animals'|'groups'|'reproduction'|'production'|'movements'|'health'|'catalogs'|
+export type ShellIconName = 'home'|'animals'|'groups'|'reproduction'|'production'|'movements'|'health'|'cleanings'|'catalogs'|
   'team'|'settings'|'admin'|'menu'|'close'|'moon'|'sun'|'logout'|'chevron';
 
 const shapes: Record<ShellIconName, ReactNode> = {
@@ -11,6 +11,7 @@ const shapes: Record<ShellIconName, ReactNode> = {
   production: <><path d="M12 2C10 6 5 10.5 5 15a7 7 0 0 0 14 0c0-4.5-5-9-7-13Z"/><path d="M9 16a3 3 0 0 0 3 3"/></>,
   movements: <><path d="m7 7-4 4 4 4M3 11h17m-3-4 4 4-4 4M21 11v7a2 2 0 0 1-2 2H5"/></>,
   health: <path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6V3Z"/>,
+  cleanings: <><path d="M3 19h18M6 19l2-11h8l2 11M9 8V4h6v4M10 13h4"/></>,
   catalogs: <><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></>,
   team: <><circle cx="8" cy="8" r="3"/><circle cx="17" cy="9" r="2"/><path d="M2 20v-2a6 6 0 0 1 12 0v2H2Zm13-6a4 4 0 0 1 7 3v3h-5"/></>,
   settings: <><circle cx="12" cy="12" r="3"/><path d="M10 2h4l.5 2.3 2 1.2 2.3-.7 2 3.4-1.7 1.7v2.2l1.7 1.7-2 3.4-2.3-.7-2 1.2L14 22h-4l-.5-2.3-2-1.2-2.3.7-2-3.4 1.7-1.7v-2.2L3.2 10l2-3.4 2.3.7 2-1.2L10 2Z"/></>,

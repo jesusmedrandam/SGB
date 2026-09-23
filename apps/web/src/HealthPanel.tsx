@@ -1,8 +1,9 @@
 import {type FormEvent,useEffect,useState} from 'react';
 import {ApiRequestError,applyHealthCampaign,cancelHealthCampaign,createHealthCampaign,
-  createHealthMedicine,getHealthCampaigns,getHealthMedicines,getHealthOptions,
+  createHealthMedicine,createHealthCondition,updateHealthCondition,resolveHealthCondition,
+  getHealthConditions,getHealthCampaigns,getHealthMedicines,getHealthOptions,
   updateHealthCampaign,type HealthCampaign,type HealthCampaignInput,
-  type HealthMedicine,type HealthOptions} from './api';
+  type HealthMedicine,type HealthOptions,type HealthCondition} from './api';
 
 const kinds={VACUNA:'Vacuna',DESPARASITACION:'Desparasitación',
   ENFERMEDAD:'Enfermedad',OTRO:'Otro tratamiento'};
@@ -16,10 +17,13 @@ export function HealthPanel({accessToken,canManage}:{accessToken:string;canManag
   const [medicines,setMedicines]=useState<HealthMedicine[]>([]);
   const [options,setOptions]=useState<HealthOptions|null>(null);
   const [campaigns,setCampaigns]=useState<HealthCampaign[]|null>(null);
+  const [conditions,setConditions]=useState<HealthCondition[]>([]);
   const [revision,setRevision]=useState(0);
   const [error,setError]=useState<string|null>(null);
   const [busy,setBusy]=useState(false);
   const [showMedicine,setShowMedicine]=useState(false);
+  const [showCondition,setShowCondition]=useState(false);
+  const [editingCondition,setEditingCondition]=useState<HealthCondition|null>(null);
   const [showCampaign,setShowCampaign]=useState(false);
   const [editing,setEditing]=useState<HealthCampaign|null>(null);
   const [medicineId,setMedicineId]=useState('');
@@ -27,11 +31,12 @@ export function HealthPanel({accessToken,canManage}:{accessToken:string;canManag
   const [groupId,setGroupId]=useState('');
   const [selected,setSelected]=useState<string[]>([]);
   const [doses,setDoses]=useState<Record<string,string>>({});
+  const [conditionIds,setConditionIds]=useState<Record<string,string>>({});
 
   useEffect(()=>{let active=true;
     void Promise.all([getHealthMedicines(accessToken),getHealthOptions(accessToken),
-      getHealthCampaigns(accessToken)]).then(([items,choices,records])=>{
-      if(active){setMedicines(items);setOptions(choices);setCampaigns(records);}
+      getHealthCampaigns(accessToken),getHealthConditions(accessToken)]).then(([items,choices,records,events])=>{
+      if(active){setMedicines(items);setOptions(choices);setCampaigns(records);setConditions(events);}
     }).catch((failure)=>{if(active)setError(message(failure));});
     return ()=>{active=false;};
   },[accessToken,revision]);
@@ -44,6 +49,8 @@ export function HealthPanel({accessToken,canManage}:{accessToken:string;canManag
     setMedicineId(record.medicineId);setMode(record.selectionMode);setGroupId(record.groupId??'');
     setSelected(record.animals.filter((animal)=>animal.selected).map((animal)=>animal.animalId));
     setDoses(Object.fromEntries(record.animals.map((animal)=>[animal.animalId,String(animal.dose)])));
+    setConditionIds(Object.fromEntries(record.animals.map((animal)=>[animal.animalId,
+      animal.conditionId??''])));
     window.scrollTo({top:0,behavior:'smooth'});
   }
   async function run(operation:()=>Promise<unknown>,done?:()=>void){setBusy(true);setError(null);
@@ -62,6 +69,15 @@ export function HealthPanel({accessToken,canManage}:{accessToken:string;canManag
       withdrawalMeatDays:Number(data.get('meatDays')),
     }),()=>setShowMedicine(false));
   }
+  function saveCondition(event:FormEvent<HTMLFormElement>){event.preventDefault();
+    const data=new FormData(event.currentTarget);
+    const input={animalId:editingCondition?.animalId??String(data.get('animalId')),
+      kind:String(data.get('kind')).trim()||null,
+      detectedOn:String(data.get('date')),description:String(data.get('description')).trim(),
+      ...(editingCondition?{expectedVersion:editingCondition.version}:{})};
+    void run(()=>editingCondition?updateHealthCondition(accessToken,editingCondition.id,input)
+      :createHealthCondition(accessToken,input),()=>{setShowCondition(false);setEditingCondition(null);});
+  }
   function saveCampaign(event:FormEvent<HTMLFormElement>){event.preventDefault();
     const data=new FormData(event.currentTarget);
     if(!medicine)return;
@@ -71,7 +87,8 @@ export function HealthPanel({accessToken,canManage}:{accessToken:string;canManag
       appliedOn:String(data.get('date')),responsible:String(data.get('responsible')).trim()||null,
       notes:String(data.get('notes')).trim()||null,
       animals:ids.map((id)=>({animalId:id,selected:true,
-        dose:Number(doses[id]??data.get('defaultDose')),unitCode:medicine.defaultUnitCode})),
+        dose:Number(doses[id]??data.get('defaultDose')),unitCode:medicine.defaultUnitCode,
+        conditionId:conditionIds[id]||null})),
       ...(editing?{expectedVersion:editing.version}:{})};
     void run(()=>editing?updateHealthCampaign(accessToken,editing.id,input)
       :createHealthCampaign(accessToken,input),reset);
@@ -82,10 +99,27 @@ export function HealthPanel({accessToken,canManage}:{accessToken:string;canManag
       <p className="muted">Registra vacunas, desparasitaciones y tratamientos por animal o por jornada.</p></div>
       {canManage&&<div className="movement-actions"><button className="secondary-button compact" type="button"
         onClick={()=>setShowMedicine((value)=>!value)}>+ Medicamento</button>
+        <button className="secondary-button compact" type="button" onClick={()=>{
+          setEditingCondition(null);setShowCondition((value)=>!value);}}>+ Condición</button>
         <button className="primary-button compact" type="button" onClick={()=>showCampaign?reset():setShowCampaign(true)}>
           {showCampaign?'Cerrar':'+ Jornada'}</button></div>}
     </div>
     {error&&<div role="alert" className="form-error admin-error">{error}</div>}
+    {canManage&&showCondition&&options&&<form className="movement-form" onSubmit={saveCondition}
+      key={editingCondition?.id??'condition-new'}>
+      <h3>{editingCondition?'Editar condición':'Nueva condición de salud'}</h3>
+      <label><span>Animal *</span><select name="animalId" required
+        defaultValue={editingCondition?.animalId??''} disabled={Boolean(editingCondition)}>
+        <option value="">Selecciona</option>{options.animals.map((animal)=><option
+          key={animal.id} value={animal.id}>{animal.name}</option>)}</select></label>
+      <label><span>Tipo o diagnóstico</span><input name="kind" maxLength={160}
+        defaultValue={editingCondition?.kind??''} placeholder="Ej. Herida, fiebre"/></label>
+      <label><span>Fecha de detección *</span><input name="date" type="date" required
+        max={today()} defaultValue={editingCondition?.detectedOn??today()}/></label>
+      <label className="movement-wide"><span>Descripción *</span><textarea name="description"
+        required minLength={2} maxLength={2000} defaultValue={editingCondition?.description??''}/></label>
+      <button className="primary-button compact" disabled={busy}>Guardar condición</button>
+    </form>}
     {canManage&&showMedicine&&<form className="movement-form" onSubmit={saveMedicine}>
       <h3>Nuevo medicamento</h3>
       <label><span>Nombre comercial *</span><input name="name" required minLength={2} maxLength={160}/></label>
@@ -140,12 +174,36 @@ export function HealthPanel({accessToken,canManage}:{accessToken:string;canManag
             {selectedIds.includes(animal.id)&&<input type="number" min="0.001" max="1000000"
               step="any" aria-label={`Dosis de ${animal.name}`} placeholder="Dosis individual"
               value={doses[animal.id]??''} onChange={(event)=>setDoses({...doses,
-                [animal.id]:event.target.value})}/>}</div>)}</div>
+                [animal.id]:event.target.value})}/>}
+            {selectedIds.includes(animal.id)&&conditions.some((item)=>item.animalId===animal.id
+              &&item.status!=='RESUELTA')&&<select aria-label={`Condición de ${animal.name}`}
+              value={conditionIds[animal.id]??''} onChange={(event)=>setConditionIds({...conditionIds,
+                [animal.id]:event.target.value})}>
+              <option value="">Sin condición vinculada</option>
+              {conditions.filter((item)=>item.animalId===animal.id&&item.status!=='RESUELTA')
+                .map((item)=><option key={item.id} value={item.id}>{item.kind??item.description}</option>)}
+            </select>}</div>)}</div>
       </div>
       <button className="primary-button compact" disabled={busy||!medicineId||!selectedIds.length
         ||selectedIds.length>500||mode==='GRUPO'&&!groupId}>
         {editing?'Guardar borrador':'Crear borrador'}</button>
     </form>}
+    <div className="movement-list"><h3>Condiciones de salud</h3>
+      {!conditions.length&&<p className="muted">No hay condiciones registradas.</p>}
+      {conditions.map((condition)=><article className="movement-card" key={condition.id}>
+        <div className="movement-card-top"><div><strong>{condition.animalName} · {condition.kind??'Condición'}</strong>
+          <small>Detectada: {condition.detectedOn} · {condition.treatmentCount} tratamientos</small></div>
+          <span className="movement-status">{condition.status==='RESUELTA'?'Resuelta':
+            condition.status==='EN_TRATAMIENTO'?'En tratamiento':'Por resolver'}</span></div>
+        <p>{condition.description}</p>{condition.resolvedOn&&<small>Resuelta: {condition.resolvedOn}</small>}
+        {canManage&&condition.status!=='RESUELTA'&&<div className="movement-actions">
+          <button type="button" className="secondary-button compact" disabled={busy} onClick={()=>{
+            setEditingCondition(condition);setShowCondition(true);window.scrollTo({top:0,behavior:'smooth'});
+          }}>Editar</button>
+          <button type="button" className="primary-button compact" disabled={busy} onClick={()=>{
+            const resolvedOn=today();void run(()=>resolveHealthCondition(accessToken,condition.id,
+              {resolvedOn,expectedVersion:condition.version}));}}>Resolver hoy</button></div>}
+      </article>)}</div>
     <div className="movement-list"><h3>Jornadas e historial</h3>
       {!campaigns&&!error&&<p className="muted">Cargando registros…</p>}
       {campaigns?.length===0&&<p className="muted">Aún no hay tratamientos registrados.</p>}

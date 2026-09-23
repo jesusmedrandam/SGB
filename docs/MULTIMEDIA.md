@@ -3,7 +3,8 @@
 ## Registros disponibles para adjuntos
 
 Los identificadores de celos, servicios reproductivos, preñeces, partos,
-pérdidas, lactancias, ordeños, producción de tanque, movimientos y jornadas sanitarias son estables y tienen
+pérdidas, lactancias, ordeños, producción de tanque, movimientos, jornadas sanitarias,
+condiciones de salud y limpiezas son estables y tienen
 su tipo en `media_entity_type_catalog`. La API de carga debe verificar en
 servidor que el registro indicado pertenezca a la misma cuenta y propiedad
 del archivo antes de insertar `media_attachment`, y conservar los adjuntos

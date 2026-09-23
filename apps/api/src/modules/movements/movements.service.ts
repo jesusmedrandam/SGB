@@ -210,10 +210,12 @@ async function resolve(client:PoolClient,auth:AuthState,context:PropertyContext,
     const blocked=await client.query(`SELECT 1 FROM animal a WHERE a.id=ANY($1::uuid[]) AND (
       EXISTS(SELECT 1 FROM reproduction_pregnancy p WHERE p.cow_id=a.id AND p.status='CONFIRMED')
       OR EXISTS(SELECT 1 FROM milk_lactation l WHERE l.cow_id=a.id AND l.ended_on IS NULL)
-      OR EXISTS(SELECT 1 FROM milk_animal_state ms WHERE ms.cow_id=a.id AND ms.enabled)) LIMIT 1`,
+      OR EXISTS(SELECT 1 FROM milk_animal_state ms WHERE ms.cow_id=a.id AND ms.enabled)
+      OR EXISTS(SELECT 1 FROM health_condition hc WHERE hc.animal_id=a.id
+        AND hc.status<>'RESUELTA')) LIMIT 1`,
     [selectedIds]);
     if(blocked.rowCount)throw conflict('MOVEMENT_OPEN_PROCESS',
-      'Finaliza la preñez o lactancia y desactiva el ordeño antes de trasladar la vaca a otra propiedad.');
+      'Finaliza la preñez, lactancia o condición sanitaria y desactiva el ordeño antes del traslado.');
   }
   return {source,destination,destinationLocationId,animals,sourceLocationId:source.location_id,accountId};
 }

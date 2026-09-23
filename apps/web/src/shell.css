@@ -122,6 +122,7 @@ textarea { border-radius: 12px; }
 .stat-movements { color: #3675c7; background: #e3efff; }
 .stat-team { color: #3675c7; background: #e3efff; }.stat-admin { color: #7550bf; background: #eee7ff; }
 .stat-health { color: #a43e68; background: #ffe8f1; }
+.stat-cleanings { color: #36845f; background: #e6f5df; }
 .dashboard-module-copy { display: grid; gap: 3px; min-width: 0; }.dashboard-module-copy strong { font-size: .96rem; }
 .dashboard-module-copy small { color: var(--muted); font-size: .72rem; line-height: 1.35; }
 .livestock-shell .summary-grid { margin-top: 18px; }.livestock-shell .summary-grid article { padding: 18px; }
@@ -194,6 +195,15 @@ textarea { border-radius: 12px; }
   padding: 7px; border: 1px solid var(--border); border-radius: 10px; }
 .health-animal-row label { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .health-animal-row input[type="number"] { width: 120px; min-width: 90px; }
+.cleaning-activities { display: flex; flex-wrap: wrap; gap: 16px; padding: 12px;
+  border: 1px solid var(--border); border-radius: 12px; }
+.cleaning-activities label { display: flex; align-items: center; gap: 6px; }
+.cleaning-lines { display: grid; gap: 10px; min-width: 0; }
+.cleaning-lines h3 { margin: 0; }
+.cleaning-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 10px; border: 1px solid var(--border); border-radius: 12px; }
+.cleaning-line input, .cleaning-line select { flex: 1 1 140px; min-width: 100px; }
+.cleaning-line strong { font-size: .8rem; }
 
 @media (max-width: 1100px) {
   .dashboard-module-grid { grid-template-columns: 1fr; }

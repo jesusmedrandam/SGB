@@ -1,5 +1,10 @@
 import {z} from 'zod';
 export const idSchema=z.object({id:z.uuid()});
+export const conditionSchema=z.object({animalId:z.uuid(),kind:z.string().trim().min(2).max(160)
+  .nullable().optional(),detectedOn:z.iso.date(),description:z.string().trim().min(2).max(2000),
+  expectedVersion:z.number().int().positive().optional()});
+export const resolutionSchema=z.object({resolvedOn:z.iso.date(),
+  expectedVersion:z.number().int().positive().optional()});
 export const medicineSchema=z.object({
   name:z.string().trim().min(2).max(160),
   kind:z.enum(['VACUNA','DESPARASITACION','ENFERMEDAD','OTRO']),
@@ -20,6 +25,7 @@ export const campaignSchema=z.object({
   animals:z.array(z.object({animalId:z.uuid(),selected:z.boolean().default(true),
     dose:z.number().finite().positive().max(1000000),
     unitCode:z.enum(['MILLIGRAM','GRAM','MILLILITER','LITER','UNIT','DOSE']),
+    conditionId:z.uuid().nullable().optional(),
     notes:z.string().trim().max(300).nullable().optional()})).min(1).max(500),
   expectedVersion:z.number().int().positive().optional(),
 }).superRefine((input,ctx)=>{
@@ -32,3 +38,4 @@ export const campaignSchema=z.object({
 });
 export type MedicineInput=z.infer<typeof medicineSchema>;
 export type CampaignInput=z.infer<typeof campaignSchema>;
+export type ConditionInput=z.infer<typeof conditionSchema>;

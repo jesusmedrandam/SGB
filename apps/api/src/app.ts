@@ -19,6 +19,7 @@ import { reproductionRouter } from './modules/reproduction/reproduction.routes.j
 import { productionRouter } from './modules/production/production.routes.js';
 import { movementsRouter } from './modules/movements/movements.routes.js';
 import { healthRouter } from './modules/health/health.routes.js';
+import { cleaningsRouter } from './modules/cleanings/cleanings.routes.js';
 
 export const app = express();
 
@@ -54,5 +55,6 @@ app.use('/reproduction', reproductionRouter);
 app.use('/production', productionRouter);
 app.use('/movements', movementsRouter);
 app.use('/health-records', healthRouter);
+app.use('/cleanings', cleaningsRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);

@@ -768,8 +768,27 @@ export interface HealthOptions {
   units:Array<{code:string;name:string;symbol:string}>;
 }
 export interface HealthAnimalInput {
-  animalId:string;selected:boolean;dose:number;unitCode:string;notes?:string|null;
+  animalId:string;selected:boolean;dose:number;unitCode:string;notes?:string|null;conditionId?:string|null;
 }
+export interface HealthCondition {
+  id:string;animalId:string;animalName:string;kind:string|null;detectedOn:string;
+  description:string;status:'POR_RESOLVER'|'EN_TRATAMIENTO'|'RESUELTA';
+  resolvedOn:string|null;version:number;treatmentCount:number;
+}
+export interface HealthConditionInput {
+  animalId:string;kind?:string|null;detectedOn:string;description:string;expectedVersion?:number;
+}
+export function getHealthConditions(accessToken:string){return request<HealthCondition[]>(
+  '/health-records/conditions',{headers:bearer(accessToken)});}
+export function createHealthCondition(accessToken:string,input:HealthConditionInput){
+  return request<HealthCondition>('/health-records/conditions',{
+    method:'POST',headers:{...bearer(accessToken),'Content-Type':'application/json'},body:JSON.stringify(input)});}
+export function updateHealthCondition(accessToken:string,id:string,input:HealthConditionInput){
+  return request<HealthCondition>(`/health-records/conditions/${encodeURIComponent(id)}`,{
+    method:'PUT',headers:{...bearer(accessToken),'Content-Type':'application/json'},body:JSON.stringify(input)});}
+export function resolveHealthCondition(accessToken:string,id:string,input:{resolvedOn:string;expectedVersion:number}){
+  return request<HealthCondition>(`/health-records/conditions/${encodeURIComponent(id)}/resolve`,{
+    method:'POST',headers:{...bearer(accessToken),'Content-Type':'application/json'},body:JSON.stringify(input)});}
 export interface HealthCampaignInput {
   medicineId:string;administrationRoute:'ORAL'|'INTRAMUSCULAR'|'SUBCUTANEA'|'INTRAVENOSA'|'TOPICA'|'OTRA';
   selectionMode:'TODOS'|'GRUPO'|'MANUAL';groupId?:string|null;appliedOn:string;
@@ -802,6 +821,47 @@ export function applyHealthCampaign(accessToken:string,id:string){
 export function cancelHealthCampaign(accessToken:string,id:string){
   return request<HealthCampaign>(`/health-records/campaigns/${encodeURIComponent(id)}/cancel`,{
     method:'POST',headers:bearer(accessToken)});}
+
+export interface CleaningProduct {id:string;name:string;category:string|null;active:boolean}
+export interface CleaningOptions {
+  locations:Array<{id:string;name:string;areaValue:number|null;areaUnitCode:string|null}>;
+  units:Array<{code:string;name:string;symbol:string}>;
+}
+export interface CleaningInput {
+  locationId:string;startedOn:string;finishedOn?:string|null;
+  activities:Array<'FUMIGACION'|'TALA_SELECTIVA'|'DESBROCE'|'OTRA'>;
+  applicationUnit:'TANQUES'|'BOMBADAS';applicationCount?:number|null;
+  tankCapacityLiters?:number|null;areaType:'TOTAL'|'PARCIAL';partialPercent?:number|null;
+  notes?:string|null;
+  products:Array<{productId:string;unitCode:string;quantityPerApplication:number;notes?:string|null}>;
+  operators:Array<{name:string;function?:string|null;notes?:string|null}>;
+  expectedVersion?:number;
+}
+export interface CleaningRecord extends CleaningInput {
+  id:string;locationName:string;areaValue:number|null;areaUnitCode:string|null;
+  status:'BORRADOR'|'COMPLETADO'|'CANCELADO';version:number;
+  products:Array<CleaningInput['products'][number]&{productName:string;totalQuantity:number}>;
+  createdAt:string;completedAt:string|null;cancelledAt:string|null;
+}
+export function getCleanings(accessToken:string){return request<CleaningRecord[]>(
+  '/cleanings',{headers:bearer(accessToken)});}
+export function getCleaningOptions(accessToken:string){return request<CleaningOptions>(
+  '/cleanings/options',{headers:bearer(accessToken)});}
+export function getCleaningProducts(accessToken:string){return request<CleaningProduct[]>(
+  '/cleanings/products',{headers:bearer(accessToken)});}
+export function createCleaningProduct(accessToken:string,input:{name:string;category?:string|null}){
+  return request<CleaningProduct>('/cleanings/products',{
+    method:'POST',headers:{...bearer(accessToken),'Content-Type':'application/json'},body:JSON.stringify(input)});}
+export function createCleaning(accessToken:string,input:CleaningInput){return request<CleaningRecord>(
+  '/cleanings',{method:'POST',headers:{...bearer(accessToken),'Content-Type':'application/json'},
+    body:JSON.stringify(input)});}
+export function updateCleaning(accessToken:string,id:string,input:CleaningInput){
+  return request<CleaningRecord>(`/cleanings/${encodeURIComponent(id)}`,{
+    method:'PUT',headers:{...bearer(accessToken),'Content-Type':'application/json'},body:JSON.stringify(input)});}
+export function applyCleaning(accessToken:string,id:string){return request<CleaningRecord>(
+  `/cleanings/${encodeURIComponent(id)}/apply`,{method:'POST',headers:bearer(accessToken)});}
+export function cancelCleaning(accessToken:string,id:string){return request<CleaningRecord>(
+  `/cleanings/${encodeURIComponent(id)}/cancel`,{method:'POST',headers:bearer(accessToken)});}
 
 export function createAccountProperty(accessToken: string, name: string) {
   return request<{ accountId: string; propertyId: string; roleId: string }>('/property-settings/properties', {

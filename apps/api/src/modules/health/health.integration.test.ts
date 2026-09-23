@@ -7,6 +7,7 @@ import {createAnimal} from '../animals/animals.service.js';
 import {assignAnimalToGroup,createGroup} from '../groups/groups.service.js';
 import {applyCampaign,cancelCampaign,createCampaign,createMedicine,listCampaigns,
   listHealthOptions,listMedicines,updateCampaign} from './health.service.js';
+import {createCondition,listConditions,resolveCondition,updateCondition} from './conditions.service.js';
 
 const metadata={ipAddress:'127.0.0.1',userAgent:'sgb-health-test'};
 test('sanidad respeta propiedad, dosis, selección, borradores y aplicación única',async()=>{
@@ -47,10 +48,19 @@ test('sanidad respeta propiedad, dosis, selección, borradores y aplicación ún
     assert.equal(options.animals.length,2);
     const today=(await pool.query<{today:string}>(`SELECT (now() AT TIME ZONE timezone)::date::text
       AS today FROM property WHERE id=$1`,[property.id])).rows[0]!.today;
+    const condition=await createCondition(auth,context,{animalId:first.id,kind:'Herida',
+      detectedOn:today,description:'Lesión en una extremidad'},metadata);
+    const changedCondition=await updateCondition(auth,context,condition.id,{animalId:first.id,
+      kind:'Herida leve',detectedOn:today,description:'Herida revisada',
+      expectedVersion:condition.version},metadata);
+    await assert.rejects(()=>updateCondition(auth,context,condition.id,{animalId:second.id,
+      detectedOn:today,description:'Otro animal'},metadata),
+      (error:{code?:string})=>error.code==='HEALTH_ANIMAL_IMMUTABLE');
     const base={medicineId:medicine.id as string,administrationRoute:'INTRAMUSCULAR' as const,
       appliedOn:today,selectionMode:'GRUPO' as const,groupId:group.id,
       animals:[first.id,second.id].map((animalId)=>({animalId,selected:true,
-        dose:2,unitCode:'MILLILITER' as const}))};
+        dose:2,unitCode:'MILLILITER' as const,
+        conditionId:animalId===first.id?condition.id:null}))};
     await assert.rejects(()=>createCampaign(auth,context,{...base,
       animals:[{...base.animals[0]!,unitCode:'GRAM'}]},metadata),
       (error:{code?:string})=>error.code==='HEALTH_UNIT_INVALID');
@@ -63,6 +73,11 @@ test('sanidad respeta propiedad, dosis, selección, borradores y aplicación ún
     const applied=await applyCampaign(auth,context,created.id,metadata);
     assert.equal(applied.status,'COMPLETADO');
     assert.equal(applied.animals.find((animal:{animalId:string})=>animal.animalId===first.id)?.dose,3);
+    assert.equal((await listConditions(context))[0]?.status,'EN_TRATAMIENTO');
+    const resolved=await resolveCondition(auth,context,condition.id,{resolvedOn:today,
+      expectedVersion:changedCondition.version+1},metadata);
+    assert.equal(resolved.status,'RESUELTA');
+    assert.equal(resolved.treatmentCount,1);
     await assert.rejects(()=>applyCampaign(auth,context,created.id,metadata),
       (error:{code?:string})=>error.code==='HEALTH_CAMPAIGN_FINAL');
     const cancelled=await createCampaign(auth,context,{...base,selectionMode:'MANUAL',

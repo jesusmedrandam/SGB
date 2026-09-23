@@ -29,12 +29,13 @@ import { ReproductionPanel } from './ReproductionPanel';
 import { ProductionPanel } from './ProductionPanel';
 import { MovementPanel } from './MovementPanel';
 import { HealthPanel } from './HealthPanel';
+import { CleaningPanel } from './CleaningPanel';
 import { ShellIcon, type ShellIconName } from './ShellIcon';
 
 type Theme = 'light' | 'dark';
 type AppSession = SessionPayload & { overview: SessionOverview };
 type SectionId = 'home'|'animals'|'groups'|'reproduction'|'production'|'catalogs'|
-  'movements'|'health'|'team'|'settings'|'admin';
+  'movements'|'health'|'cleanings'|'team'|'settings'|'admin';
 type NavigationItem = { id:SectionId; label:string; description:string; icon:ShellIconName;
   group:'principal'|'operations'|'configuration'; enabled:boolean };
 
@@ -99,6 +100,7 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
     {id:'production',label:'Producción',description:'Lactancias y ordeños',icon:'production',group:'operations',enabled:has('PRODUCTION_VIEW')&&modules.includes('PRODUCTION')},
     {id:'movements',label:'Movimientos',description:'Grupos, potreros y traslados',icon:'movements',group:'operations',enabled:has('MOVEMENT_VIEW')&&modules.includes('MOVEMENTS')},
     {id:'health',label:'Sanidad',description:'Medicamentos y tratamientos',icon:'health',group:'operations',enabled:has('HEALTH_VIEW')&&modules.includes('HEALTH')},
+    {id:'cleanings',label:'Limpieza de potreros',description:'Labores y productos',icon:'cleanings',group:'operations',enabled:has('CLEANING_VIEW')&&modules.includes('PASTURE_CLEANING')&&modules.includes('PASTURES')},
     {id:'catalogs',label:'Catálogos',description:'Razas, colores y marquillas',icon:'catalogs',group:'configuration',enabled:has('CATALOG_VIEW')},
     {id:'team',label:'Equipo y roles',description:'Acceso a la propiedad',icon:'team',group:'configuration',enabled:has('MEMBERSHIP_VIEW')},
     {id:'settings',label:'Configuración',description:'Propiedades y módulos',icon:'settings',group:'configuration',enabled:has('MODULE_VIEW')},
@@ -276,6 +278,11 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
         && activeRole?.permissions.includes('HEALTH_VIEW') &&
         <HealthPanel key={`health:${activeProperty.id}:${activeRole.id}`}
           accessToken={session.accessToken} canManage={activeRole.permissions.includes('HEALTH_MANAGE')} />}
+      {section==='cleanings' && activeProperty && activeProperty.enabledModules.includes('PASTURE_CLEANING')
+        && activeProperty.enabledModules.includes('PASTURES')
+        && activeRole?.permissions.includes('CLEANING_VIEW') &&
+        <CleaningPanel key={`cleanings:${activeProperty.id}:${activeRole.id}`}
+          accessToken={session.accessToken} canManage={activeRole.permissions.includes('CLEANING_MANAGE')} />}
     </main>
     <footer className="app-footer">SGB · Sistema de Gestión Bovina</footer>
     </div>

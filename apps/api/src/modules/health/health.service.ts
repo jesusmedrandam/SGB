@@ -5,7 +5,7 @@ import {inTransaction} from '../../database/transaction.js';
 import type {AuthState,PropertyContext,RequestMetadata} from '../auth/auth.types.js';
 import type {CampaignInput,MedicineInput} from './health.schemas.js';
 
-async function access(client:PoolClient,auth:AuthState,context:PropertyContext,permission:string){
+export async function healthAccess(client:PoolClient,auth:AuthState,context:PropertyContext,permission:string){
   const row=(await client.query<{account_id:string;today:string}>(
     `SELECT p.account_id,(now() AT TIME ZONE p.timezone)::date::text AS today
      FROM property p JOIN administrative_account aa ON aa.id=p.account_id AND aa.status='ACTIVE'
@@ -19,7 +19,7 @@ async function access(client:PoolClient,auth:AuthState,context:PropertyContext,p
   if(!row)throw forbidden('HEALTH_DENIED','Sanidad no está habilitada o el rol no tiene permiso.');
   return row;
 }
-async function audit(client:PoolClient,auth:AuthState,context:PropertyContext,
+export async function healthAudit(client:PoolClient,auth:AuthState,context:PropertyContext,
   metadata:RequestMetadata,action:string,entityType:string,id:string,before:unknown,after:unknown){
   await client.query(`INSERT INTO audit_event(actor_user_id,property_id,active_role_id,
     action,entity_type,entity_id,before_data,after_data,ip_address,user_agent)
@@ -40,7 +40,7 @@ export async function listMedicines(context:PropertyContext){
 export async function createMedicine(auth:AuthState,context:PropertyContext,input:MedicineInput,
   metadata:RequestMetadata){
   return inTransaction(async(client)=>{
-    const {account_id}=await access(client,auth,context,'HEALTH_MANAGE');
+    const {account_id}=await healthAccess(client,auth,context,'HEALTH_MANAGE');
     const result=await client.query(`INSERT INTO health_medicine(account_id,name,kind,active_ingredient,
       default_unit_code,suggested_dose,indications,withdrawal_milk_days,withdrawal_meat_days,created_by)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
@@ -48,7 +48,7 @@ export async function createMedicine(auth:AuthState,context:PropertyContext,inpu
         input.suggestedDose??null,input.indications??null,input.withdrawalMilkDays,
         input.withdrawalMeatDays,auth.userId]);
     const created=medicine(result.rows[0]!);
-    await audit(client,auth,context,metadata,'HEALTH_MEDICINE_CREATED','HEALTH_MEDICINE',
+    await healthAudit(client,auth,context,metadata,'HEALTH_MEDICINE_CREATED','HEALTH_MEDICINE',
       result.rows[0]!.id,null,created);
     return created;
   });
@@ -73,7 +73,8 @@ const fields=`c.id,c.medicine_id AS "medicineId",m.name AS "medicineName",m.kind
  c.responsible,c.notes,c.status,c.version::int,c.created_at AS "createdAt",
  c.applied_at AS "appliedAt",c.cancelled_at AS "cancelledAt",
  COALESCE((SELECT json_agg(json_build_object('animalId',d.animal_id,'name',a.name,
-   'selected',d.selected,'dose',d.dose,'unitCode',d.unit_code,'notes',d.notes)
+   'selected',d.selected,'dose',d.dose,'unitCode',d.unit_code,'notes',d.notes,
+   'conditionId',d.condition_id)
    ORDER BY lower(a.name),a.id)
    FROM health_campaign_animal d JOIN animal a ON a.id=d.animal_id
    WHERE d.campaign_id=c.id),'[]'::json) AS animals`;
@@ -97,6 +98,13 @@ async function validate(client:PoolClient,context:PropertyContext,input:Campaign
   if(!medicine)throw invalidRequest('HEALTH_MEDICINE_INVALID','Selecciona un medicamento activo de la cuenta.');
   if(input.animals.some((animal)=>animal.unitCode!==medicine.default_unit_code))
     throw invalidRequest('HEALTH_UNIT_INVALID','Todas las dosis deben usar la unidad del medicamento.');
+  for(const item of input.animals.filter((animal)=>animal.conditionId)){
+    const condition=await client.query(`SELECT 1 FROM health_condition WHERE id=$1
+      AND animal_id=$2 AND account_id=$3 AND property_id=$4 AND status<>'RESUELTA'`,
+      [item.conditionId,item.animalId,accountId,context.propertyId]);
+    if(!condition.rowCount)throw invalidRequest('HEALTH_CONDITION_INVALID',
+      'La condición seleccionada no corresponde a un animal activo de esta propiedad.');
+  }
   if(input.groupId){
     const group=await client.query(`SELECT 1 FROM livestock_group
       WHERE id=$1 AND property_id=$2 AND active FOR SHARE`,[input.groupId,context.propertyId]);
@@ -120,13 +128,14 @@ async function validate(client:PoolClient,context:PropertyContext,input:Campaign
 async function details(client:PoolClient,id:string,input:CampaignInput){
   await client.query('DELETE FROM health_campaign_animal WHERE campaign_id=$1',[id]);
   for(const animal of input.animals)await client.query(`INSERT INTO health_campaign_animal
-    (campaign_id,animal_id,selected,dose,unit_code,notes) VALUES($1,$2,$3,$4,$5,$6)`,
-    [id,animal.animalId,animal.selected,animal.dose,animal.unitCode,animal.notes??null]);
+    (campaign_id,animal_id,selected,dose,unit_code,notes,condition_id) VALUES($1,$2,$3,$4,$5,$6,$7)`,
+    [id,animal.animalId,animal.selected,animal.dose,animal.unitCode,animal.notes??null,
+      animal.conditionId??null]);
 }
 export async function createCampaign(auth:AuthState,context:PropertyContext,input:CampaignInput,
   metadata:RequestMetadata){
   return inTransaction(async(client)=>{
-    const {account_id,today}=await access(client,auth,context,'HEALTH_MANAGE');
+    const {account_id,today}=await healthAccess(client,auth,context,'HEALTH_MANAGE');
     await validate(client,context,input,account_id,today);
     const row=(await client.query<{id:string}>(`INSERT INTO health_campaign(account_id,property_id,
       medicine_id,administration_route,selection_mode,group_id,applied_on,responsible,notes,created_by,updated_by)
@@ -135,7 +144,7 @@ export async function createCampaign(auth:AuthState,context:PropertyContext,inpu
         input.groupId??null,input.appliedOn,input.responsible??null,input.notes??null,auth.userId])).rows[0]!;
     await details(client,row.id,input);
     const after=await read(client,row.id);
-    await audit(client,auth,context,metadata,'HEALTH_CAMPAIGN_DRAFT_CREATED',
+    await healthAudit(client,auth,context,metadata,'HEALTH_CAMPAIGN_DRAFT_CREATED',
       'HEALTH_CAMPAIGN',row.id,null,after);
     return after;
   });
@@ -151,7 +160,7 @@ async function draft(client:PoolClient,context:PropertyContext,id:string){
 export async function updateCampaign(auth:AuthState,context:PropertyContext,id:string,
   input:CampaignInput,metadata:RequestMetadata){
   return inTransaction(async(client)=>{
-    const {account_id,today}=await access(client,auth,context,'HEALTH_MANAGE');
+    const {account_id,today}=await healthAccess(client,auth,context,'HEALTH_MANAGE');
     const current=await draft(client,context,id);
     if(input.expectedVersion && input.expectedVersion!==current.version)
       throw conflict('HEALTH_VERSION_CONFLICT','El borrador cambió. Actualiza la pantalla.');
@@ -163,7 +172,7 @@ export async function updateCampaign(auth:AuthState,context:PropertyContext,id:s
         input.appliedOn,input.responsible??null,input.notes??null,auth.userId]);
     await details(client,id,input);
     const after=await read(client,id);
-    await audit(client,auth,context,metadata,'HEALTH_CAMPAIGN_DRAFT_UPDATED',
+    await healthAudit(client,auth,context,metadata,'HEALTH_CAMPAIGN_DRAFT_UPDATED',
       'HEALTH_CAMPAIGN',id,before,after);
     return after;
   });
@@ -171,7 +180,7 @@ export async function updateCampaign(auth:AuthState,context:PropertyContext,id:s
 export async function applyCampaign(auth:AuthState,context:PropertyContext,id:string,
   metadata:RequestMetadata){
   return inTransaction(async(client)=>{
-    const {account_id,today}=await access(client,auth,context,'HEALTH_MANAGE');
+    const {account_id,today}=await healthAccess(client,auth,context,'HEALTH_MANAGE');
     await draft(client,context,id);
     const before=await read(client,id);
     const row=(await client.query<{medicine_id:string;administration_route:CampaignInput['administrationRoute'];
@@ -179,20 +188,24 @@ export async function applyCampaign(auth:AuthState,context:PropertyContext,id:st
       responsible:string|null;notes:string|null}>(`SELECT medicine_id,administration_route,
       selection_mode,group_id,applied_on::text,responsible,notes FROM health_campaign WHERE id=$1`,[id])).rows[0]!;
     const items=(await client.query<{animal_id:string;selected:boolean;dose:string;
-      unit_code:CampaignInput['animals'][number]['unitCode'];notes:string|null}>(
-      `SELECT animal_id,selected,dose::text,unit_code,notes FROM health_campaign_animal
+      unit_code:CampaignInput['animals'][number]['unitCode'];notes:string|null;condition_id:string|null}>(
+      `SELECT animal_id,selected,dose::text,unit_code,notes,condition_id FROM health_campaign_animal
        WHERE campaign_id=$1 ORDER BY animal_id`,[id])).rows;
     const input:CampaignInput={medicineId:row.medicine_id,administrationRoute:row.administration_route,
       selectionMode:row.selection_mode,groupId:row.group_id,appliedOn:row.applied_on,
       responsible:row.responsible,notes:row.notes,
       animals:items.map((item)=>({animalId:item.animal_id,selected:item.selected,
-        dose:Number(item.dose),unitCode:item.unit_code,notes:item.notes}))};
+        dose:Number(item.dose),unitCode:item.unit_code,notes:item.notes,conditionId:item.condition_id}))};
     if(!items.some((item)=>item.selected))throw conflict('HEALTH_EMPTY_CAMPAIGN','Selecciona animales.');
     await validate(client,context,input,account_id,today);
+    for(const item of items.filter((animal)=>animal.selected&&animal.condition_id)){
+      await client.query(`UPDATE health_condition SET status='EN_TRATAMIENTO',updated_by=$2
+        WHERE id=$1 AND status='POR_RESOLVER'`,[item.condition_id,auth.userId]);
+    }
     await client.query(`UPDATE health_campaign SET status='COMPLETADO',applied_at=now(),updated_by=$2
       WHERE id=$1`,[id,auth.userId]);
     const after=await read(client,id);
-    await audit(client,auth,context,metadata,'HEALTH_CAMPAIGN_APPLIED',
+    await healthAudit(client,auth,context,metadata,'HEALTH_CAMPAIGN_APPLIED',
       'HEALTH_CAMPAIGN',id,before,after);
     return after;
   });
@@ -200,13 +213,13 @@ export async function applyCampaign(auth:AuthState,context:PropertyContext,id:st
 export async function cancelCampaign(auth:AuthState,context:PropertyContext,id:string,
   metadata:RequestMetadata){
   return inTransaction(async(client)=>{
-    await access(client,auth,context,'HEALTH_MANAGE');
+    await healthAccess(client,auth,context,'HEALTH_MANAGE');
     await draft(client,context,id);
     const before=await read(client,id);
     await client.query(`UPDATE health_campaign SET status='CANCELADO',cancelled_at=now(),updated_by=$2
       WHERE id=$1`,[id,auth.userId]);
     const after=await read(client,id);
-    await audit(client,auth,context,metadata,'HEALTH_CAMPAIGN_CANCELLED',
+    await healthAudit(client,auth,context,metadata,'HEALTH_CAMPAIGN_CANCELLED',
       'HEALTH_CAMPAIGN',id,before,after);
     return after;
   });
