@@ -50,7 +50,7 @@ export function CatalogPanel({ accessToken, canManage }: { accessToken: string; 
 
   return <section className="section-block catalog-panel">
     <div className="section-heading"><div><span className="eyebrow">Núcleo ganadero</span><h2>Catálogos</h2>
-      <p className="muted">Opciones de la propiedad activa para el registro de animales.</p></div></div>
+      <p className="muted">Opciones del sistema y de tu cuenta, disponibles en todas tus propiedades.</p></div></div>
     {error && <div className="form-error admin-error" role="alert">{error}</div>}
     {!reference && !error && <p className="muted">Cargando catálogos…</p>}
     {reference && <>
@@ -63,7 +63,7 @@ export function CatalogPanel({ accessToken, canManage }: { accessToken: string; 
           {canManage && reference.species.some((species) => species.code === 'BOVINE') &&
             <form className="catalog-create" onSubmit={(event) => void create(event, code)}>
               <label><span>Nueva opción</span><input name="name" minLength={2} maxLength={160}
-                placeholder={`Ej. ${code === 'BREEDS' ? 'Brahman' : 'Colorado'}`} disabled={busy} required /></label>
+                placeholder={`Ej. ${code === 'BREEDS' ? 'Charolais' : 'Colorado'}`} disabled={busy} required /></label>
               <button type="submit" className="primary-button compact" disabled={busy}>Agregar</button>
             </form>}
           {items[code].length === 0 && <p className="muted">Aún no hay opciones registradas.</p>}

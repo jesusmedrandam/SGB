@@ -43,7 +43,7 @@ function CatalogFields({ choices, selected }: { choices: AnimalChoices; selected
       </label>)}
     </fieldset>
     <fieldset className="animal-colors"><legend>Colores</legend>
-      {availableColors.length === 0 && <small>No hay colores disponibles en esta finca.</small>}
+      {availableColors.length === 0 && <small>No hay colores disponibles.</small>}
       {availableColors.map((entry) => <label key={entry.id}>
         <input type="checkbox" name="colorIds" value={entry.id}
           defaultChecked={colors.some((color) => color.id === entry.id)} />

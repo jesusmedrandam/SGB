@@ -74,7 +74,7 @@ export async function createBrand(auth: AuthState, context: PropertyContext,
   } catch (error) {
     const databaseError = error as { code?: string; constraint?: string };
     if (databaseError.code === '23505' && databaseError.constraint === 'livestock_brand_name_property_unique') {
-      throw conflict('BRAND_NAME_TAKEN', 'Ya existe una marquilla con ese nombre en la propiedad.');
+      throw conflict('BRAND_NAME_TAKEN', 'Ya existe una marquilla con ese nombre en la cuenta.');
     }
     throw error;
   }
