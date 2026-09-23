@@ -22,6 +22,7 @@ const schema = z.object({
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
   EMAIL_TOKEN_TTL_HOURS: z.coerce.number().int().min(1).max(72).default(24),
   EMAIL_VERIFICATION_RESEND_SECONDS: z.coerce.number().int().min(30).max(3600).default(60),
+  INVITATION_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),
   BREVO_API_KEY: optionalEnvironmentValue(z.string().trim().min(20)),
   BREVO_SENDER_EMAIL: optionalEnvironmentValue(z.email()),
   BREVO_SENDER_NAME: z.string().trim().min(1).max(120).default('SGB'),

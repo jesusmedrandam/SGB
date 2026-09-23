@@ -10,7 +10,15 @@ export const registerSchema = z.object({
   email: z.email().max(254).transform((value) => value.trim().toLowerCase()),
   password,
   displayName: z.string().trim().min(2).max(160),
-  propertyName: z.string().trim().min(2).max(160),
+  propertyName: z.string().trim().min(2).max(160).optional(),
+  invitationToken: z.string().trim().min(40).max(200).optional(),
+}).superRefine((value, context) => {
+  if (!value.invitationToken && !value.propertyName) {
+    context.addIssue({
+      code: 'custom', path: ['propertyName'],
+      message: 'Indica el nombre de tu primera propiedad.',
+    });
+  }
 });
 
 export const verifyEmailSchema = z.object({

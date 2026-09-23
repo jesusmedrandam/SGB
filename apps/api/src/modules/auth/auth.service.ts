@@ -175,6 +175,24 @@ export async function register(input: RegisterInput, metadata: RequestMetadata) 
 
   try {
     const result = await inTransaction(async (client) => {
+      let invitationId: string | null = null;
+      if (input.invitationToken) {
+        const invitation = await client.query<{ id: string }>(
+          `SELECT id
+             FROM property_invitation
+            WHERE token_hash = $1
+              AND email = $2
+              AND status = 'PENDING'
+              AND expires_at > now()
+            FOR UPDATE`,
+          [hashToken(input.invitationToken), input.email],
+        );
+        invitationId = invitation.rows[0]?.id ?? null;
+        if (!invitationId) {
+          throw new ApiError(400, 'INVALID_INVITATION', 'La invitación no es válida para este correo o ya expiró.');
+        }
+      }
+
       const userResult = await client.query<{ id: string }>(
         `INSERT INTO app_user(email, password_hash, display_name, status)
          VALUES($1,$2,$3,'PENDING') RETURNING id`,
@@ -182,72 +200,75 @@ export async function register(input: RegisterInput, metadata: RequestMetadata) 
       );
       const userId = userResult.rows[0]!.id;
 
-      const accountResult = await client.query<{ id: string }>(
-        `INSERT INTO administrative_account(owner_user_id, name)
-         VALUES($1,$2) RETURNING id`,
-        [userId, input.propertyName],
-      );
-      const accountId = accountResult.rows[0]!.id;
-
-      await client.query(
-        `INSERT INTO account_module(account_id, module_code, enabled, configured_by)
-         SELECT $1, code, true, $2 FROM module_catalog WHERE scope = 'ACCOUNT_PROPERTY'`,
-        [accountId, userId],
-      );
       await client.query(
         `INSERT INTO user_module(user_id, module_code, enabled, configured_by)
          SELECT $1, code, true, $1 FROM module_catalog WHERE scope = 'USER'`,
         [userId],
       );
 
-      const propertyResult = await client.query<{ id: string }>(
-        `INSERT INTO property(account_id, owner_user_id, name, created_by)
-         VALUES($1,$2,$3,$2) RETURNING id`,
-        [accountId, userId, input.propertyName],
-      );
-      const propertyId = propertyResult.rows[0]!.id;
+      let accountId: string | null = null;
+      let propertyId: string | null = null;
+      let ownerRoleId: string | null = null;
 
-      await client.query(
-        `INSERT INTO property_module(property_id, module_code, enabled, configured_by)
-         SELECT $1, module_code, true, $2
-           FROM account_module
-          WHERE account_id = $3 AND enabled`,
-        [propertyId, userId, accountId],
-      );
+      if (!invitationId) {
+        const propertyName = input.propertyName!;
+        const accountResult = await client.query<{ id: string }>(
+          `INSERT INTO administrative_account(owner_user_id, name)
+           VALUES($1,$2) RETURNING id`,
+          [userId, propertyName],
+        );
+        accountId = accountResult.rows[0]!.id;
 
-      await client.query(
-        `INSERT INTO property_role(property_id, code, name, description, is_system, created_by)
-         SELECT $1, code, name, description, true, $2
-           FROM role_template WHERE active`,
-        [propertyId, userId],
-      );
-      await client.query(
-        `INSERT INTO role_permission(role_id, permission_code)
-         SELECT pr.id, rtp.permission_code
-           FROM property_role pr
-           JOIN role_template_permission rtp ON rtp.role_code = pr.code
-          WHERE pr.property_id = $1`,
-        [propertyId],
-      );
+        await client.query(
+          `INSERT INTO account_module(account_id, module_code, enabled, configured_by)
+           SELECT $1, code, true, $2 FROM module_catalog WHERE scope = 'ACCOUNT_PROPERTY'`,
+          [accountId, userId],
+        );
+        const propertyResult = await client.query<{ id: string }>(
+          `INSERT INTO property(account_id, owner_user_id, name, created_by)
+           VALUES($1,$2,$3,$2) RETURNING id`,
+          [accountId, userId, propertyName],
+        );
+        propertyId = propertyResult.rows[0]!.id;
+        await client.query(
+          `INSERT INTO property_module(property_id, module_code, enabled, configured_by)
+           SELECT $1, module_code, true, $2
+             FROM account_module
+            WHERE account_id = $3 AND enabled`,
+          [propertyId, userId, accountId],
+        );
+        await client.query(
+          `INSERT INTO property_role(property_id, code, name, description, is_system, created_by)
+           SELECT $1, code, name, description, true, $2
+             FROM role_template WHERE active`,
+          [propertyId, userId],
+        );
+        await client.query(
+          `INSERT INTO role_permission(role_id, permission_code)
+           SELECT pr.id, rtp.permission_code
+             FROM property_role pr
+             JOIN role_template_permission rtp ON rtp.role_code = pr.code
+            WHERE pr.property_id = $1`,
+          [propertyId],
+        );
+        const membershipResult = await client.query<{ id: string }>(
+          `INSERT INTO property_membership(
+             property_id, user_id, status, job_title, joined_at, created_by
+           ) VALUES($1,$2,'ACTIVE','Propietario',now(),$2) RETURNING id`,
+          [propertyId, userId],
+        );
+        const ownerRoleResult = await client.query<{ id: string }>(
+          `SELECT id FROM property_role WHERE property_id = $1 AND code = 'OWNER'`,
+          [propertyId],
+        );
+        ownerRoleId = ownerRoleResult.rows[0]!.id;
+        await client.query(
+          `INSERT INTO membership_role(membership_id, role_id, property_id, assigned_by)
+           VALUES($1,$2,$3,$4)`,
+          [membershipResult.rows[0]!.id, ownerRoleId, propertyId, userId],
+        );
+      }
 
-      const membershipResult = await client.query<{ id: string }>(
-        `INSERT INTO property_membership(
-           property_id, user_id, status, job_title, joined_at, created_by
-         ) VALUES($1,$2,'ACTIVE','Propietario',now(),$2) RETURNING id`,
-        [propertyId, userId],
-      );
-      const membershipId = membershipResult.rows[0]!.id;
-      const ownerRoleResult = await client.query<{ id: string }>(
-        `SELECT id FROM property_role WHERE property_id = $1 AND code = 'OWNER'`,
-        [propertyId],
-      );
-      const ownerRoleId = ownerRoleResult.rows[0]!.id;
-
-      await client.query(
-        `INSERT INTO membership_role(membership_id, role_id, property_id, assigned_by)
-         VALUES($1,$2,$3,$4)`,
-        [membershipId, ownerRoleId, propertyId, userId],
-      );
       await client.query(
         `INSERT INTO email_verification_token(user_id, token_hash, expires_at)
          VALUES($1,$2,$3)`,
@@ -263,7 +284,7 @@ export async function register(input: RegisterInput, metadata: RequestMetadata) 
           propertyId,
           ownerRoleId,
           userId,
-          JSON.stringify({ accountId, propertyId, email: input.email }),
+          JSON.stringify({ accountId, propertyId, invitationId, email: input.email }),
           metadata.ipAddress,
           metadata.userAgent,
         ],
@@ -273,6 +294,7 @@ export async function register(input: RegisterInput, metadata: RequestMetadata) 
         userId,
         accountId,
         propertyId,
+        invitationId,
         verificationToken: verification.value,
         verificationExpiresAt,
       };
@@ -282,6 +304,7 @@ export async function register(input: RegisterInput, metadata: RequestMetadata) 
       displayName: input.displayName,
       token: result.verificationToken,
       expiresAt: result.verificationExpiresAt,
+      ...(input.invitationToken ? { invitationToken: input.invitationToken } : {}),
     });
     return { ...result, verificationDelivery };
   } catch (error) {
@@ -668,10 +691,13 @@ export async function getSessionOverview(auth: AuthState) {
     role_id: string;
     role_code: string;
     role_name: string;
+    permissions: string[];
   }>(
     `SELECT p.id AS property_id, p.name AS property_name, p.timezone,
             (p.owner_user_id = $1) AS is_owner,
-            pr.id AS role_id, pr.code AS role_code, pr.name AS role_name
+            pr.id AS role_id, pr.code AS role_code, pr.name AS role_name,
+            ARRAY(SELECT rp.permission_code FROM role_permission rp
+                   WHERE rp.role_id = pr.id ORDER BY rp.permission_code) AS permissions
        FROM property_membership pm
        JOIN property p ON p.id = pm.property_id AND p.deleted_at IS NULL AND p.status = 'ACTIVE'
        JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
@@ -687,7 +713,7 @@ export async function getSessionOverview(auth: AuthState) {
     name: string;
     timezone: string;
     isOwner: boolean;
-    roles: Array<{ id: string; code: string; name: string }>;
+    roles: Array<{ id: string; code: string; name: string; permissions: string[] }>;
     enabledModules: string[];
     enabledSpecies: string[];
   }>();
@@ -705,7 +731,12 @@ export async function getSessionOverview(auth: AuthState) {
       };
       properties.set(row.property_id, property);
     }
-    property.roles.push({ id: row.role_id, code: row.role_code, name: row.role_name });
+    property.roles.push({
+      id: row.role_id,
+      code: row.role_code,
+      name: row.role_name,
+      permissions: row.permissions,
+    });
   }
 
   const propertyIds = [...properties.keys()];

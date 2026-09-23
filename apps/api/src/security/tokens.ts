@@ -1,12 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-type TokenKind = 'access' | 'refresh' | 'verify' | 'reset';
+type TokenKind = 'access' | 'refresh' | 'verify' | 'reset' | 'invite';
 
 const prefixes: Record<TokenKind, string> = {
   access: 'sgb_at_',
   refresh: 'sgb_rt_',
   verify: 'sgb_ev_',
   reset: 'sgb_pr_',
+  invite: 'sgb_pi_',
 };
 
 export interface IssuedToken {

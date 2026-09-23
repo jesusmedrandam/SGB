@@ -7,6 +7,7 @@ import { errorHandler, notFoundHandler } from './core/error-handler.js';
 import { pool } from './database/pool.js';
 import { requestId } from './middleware/request-id.js';
 import { authRouter } from './modules/auth/auth.routes.js';
+import { invitationRouter, propertyTeamRouter } from './modules/collaboration/collaboration.routes.js';
 import { superadminRouter } from './modules/superadmin/superadmin.routes.js';
 
 export const app = express();
@@ -28,6 +29,8 @@ app.get('/health/ready', asyncHandler(async (_request, response) => {
 }));
 
 app.use('/auth', authRouter);
+app.use('/invitations', invitationRouter);
+app.use('/property-team', propertyTeamRouter);
 app.use('/superadmin', superadminRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);

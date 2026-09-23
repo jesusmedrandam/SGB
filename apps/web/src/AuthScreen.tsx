@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Brand } from './Brand';
-import type { RegistrationResult } from './api';
+import type { InvitationPreview, RegistrationResult } from './api';
 
 export type VerificationState = 'NONE' | 'CHECKING' | 'VERIFIED' | 'INVALID';
 
@@ -11,18 +11,28 @@ interface Props {
   verificationState: VerificationState;
   verificationMessage: string | null;
   resendAccepted: boolean;
+  invitationToken: string | null;
+  invitation: InvitationPreview | null;
+  invitationLoading: boolean;
+  invitationError: string | null;
   onLogin: (email: string, password: string) => Promise<void>;
   onRegister: (input: {
-    displayName: string; propertyName: string; email: string; password: string;
+    displayName: string; propertyName?: string; email: string; password: string; invitationToken?: string;
   }) => Promise<void>;
   onResend: (email: string) => Promise<void>;
   onUseLogin: () => void;
 }
 
-type Mode = 'LOGIN' | 'REGISTER' | 'PENDING' | 'VERIFY_RESULT';
+type Mode = 'LOGIN' | 'REGISTER' | 'PENDING' | 'VERIFY_RESULT' | 'INVITATION';
+
+const frequencyNames: Record<string, string> = {
+  HOURLY: 'Por hora', DAILY: 'Diario', WEEKLY: 'Semanal', BIWEEKLY: 'Quincenal',
+  MONTHLY: 'Mensual', OTHER: 'Otro',
+};
 
 export function AuthScreen(props: Props) {
-  const [mode, setMode] = useState<Mode>(props.verificationState === 'NONE' ? 'LOGIN' : 'VERIFY_RESULT');
+  const [mode, setMode] = useState<Mode>(props.verificationState !== 'NONE'
+    ? 'VERIFY_RESULT' : props.invitationToken ? 'INVITATION' : 'LOGIN');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -40,6 +50,13 @@ export function AuthScreen(props: Props) {
     if (props.verificationState !== 'NONE') setMode('VERIFY_RESULT');
   }, [props.verificationState]);
 
+  useEffect(() => {
+    if (!props.invitation) return;
+    setEmail(props.invitation.email);
+    setRegisterEmail(props.invitation.email);
+    if (props.verificationState === 'NONE' && !props.pendingRegistration) setMode('INVITATION');
+  }, [props.invitation, props.pendingRegistration, props.verificationState]);
+
   function useLogin() {
     props.onUseLogin();
     setMode('LOGIN');
@@ -53,7 +70,12 @@ export function AuthScreen(props: Props) {
   async function submitRegistration(event: FormEvent) {
     event.preventDefault();
     if (!passwordValid || registerPassword !== confirmation) return;
-    await props.onRegister({ displayName, propertyName, email: registerEmail, password: registerPassword });
+    await props.onRegister({
+      displayName,
+      ...(props.invitationToken ? { invitationToken: props.invitationToken } : { propertyName }),
+      email: registerEmail,
+      password: registerPassword,
+    });
   }
 
   const requirements = {
@@ -80,6 +102,31 @@ export function AuthScreen(props: Props) {
     <section className="login-panel">
       <div className={`login-card ${mode === 'REGISTER' ? 'registration-card' : ''}`}>
         <div className="mobile-brand"><Brand /></div>
+
+        {mode === 'INVITATION' && <div className="verification-card invitation-preview">
+          <span className="verification-icon">↗</span>
+          <span className="eyebrow">Invitación de colaboración</span>
+          {props.invitationLoading && <><h2>Consultando invitación…</h2><span className="spinner large" /></>}
+          {props.invitationError && <><h2>No puede utilizarse</h2><div className="form-error">{props.invitationError}</div>
+            <button className="secondary-button" type="button" onClick={useLogin}>Ir a iniciar sesión</button></>}
+          {props.invitation && <>
+            <h2>{props.invitation.property.name}</h2>
+            <p><strong>{props.invitation.invitedBy}</strong> te invitó como {props.invitation.roles.map((role) => role.name).join(', ')}.</p>
+            {props.invitation.employment && <div className="invitation-employment">
+              <strong>{props.invitation.employment.jobTitle}</strong>
+              {props.invitation.employment.payAmount !== null && <span>
+                {props.invitation.employment.currency} {props.invitation.employment.payAmount.toFixed(2)}
+                {props.invitation.employment.frequency
+                  ? ` · ${frequencyNames[props.invitation.employment.frequency] || props.invitation.employment.frequency}`
+                  : ''}
+              </span>}
+              {props.invitation.employment.notes && <small>{props.invitation.employment.notes}</small>}
+            </div>}
+            {props.invitation.existingUser
+              ? <button className="primary-button" type="button" onClick={() => setMode('LOGIN')}>Iniciar sesión para aceptar</button>
+              : <button className="primary-button" type="button" onClick={() => setMode('REGISTER')}>Crear cuenta para aceptar</button>}
+          </>}
+        </div>}
 
         {mode === 'LOGIN' && <>
           <div className="auth-tabs" role="tablist">
@@ -114,21 +161,23 @@ export function AuthScreen(props: Props) {
             <button type="button" role="tab" onClick={useLogin}>Ingresar</button>
             <button className="active" type="button" role="tab">Crear cuenta</button>
           </div>
-          <span className="eyebrow">Primera propiedad incluida</span>
-          <h2>Crear mi espacio</h2>
-          <p className="muted">Se creará tu usuario, cuenta administrativa y primera propiedad.</p>
+          <span className="eyebrow">{props.invitation ? 'Aceptar colaboración' : 'Primera propiedad incluida'}</span>
+          <h2>{props.invitation ? 'Crear mi usuario' : 'Crear mi espacio'}</h2>
+          <p className="muted">{props.invitation
+            ? `Tu usuario quedará listo para colaborar en ${props.invitation.property.name}.`
+            : 'Se creará tu usuario, cuenta administrativa y primera propiedad.'}</p>
           <form onSubmit={submitRegistration} className="login-form registration-form">
             <div className="field-pair">
               <label><span>Tu nombre</span><input autoComplete="name" value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)} minLength={2} maxLength={160}
                 placeholder="Nombre completo" required disabled={props.busy} /></label>
-              <label><span>Nombre de la propiedad</span><input value={propertyName}
+              {!props.invitation && <label><span>Nombre de la propiedad</span><input value={propertyName}
                 onChange={(event) => setPropertyName(event.target.value)} minLength={2} maxLength={160}
-                placeholder="Ej. La Fortuna" required disabled={props.busy} /></label>
+                placeholder="Ej. La Fortuna" required disabled={props.busy} /></label>}
             </div>
             <label><span>Correo electrónico</span><input type="email" autoComplete="email"
               value={registerEmail} onChange={(event) => setRegisterEmail(event.target.value)}
-              placeholder="nombre@correo.com" required disabled={props.busy} /></label>
+              placeholder="nombre@correo.com" required disabled={props.busy || Boolean(props.invitation)} /></label>
             <div className="field-pair">
               <label><span>Contraseña</span><input type="password" autoComplete="new-password"
                 value={registerPassword} onChange={(event) => setRegisterPassword(event.target.value)}
@@ -146,7 +195,8 @@ export function AuthScreen(props: Props) {
             {props.error && <div className="form-error" role="alert">{props.error}</div>}
             <button className="primary-button" type="submit"
               disabled={props.busy || !passwordValid || !requirements.matches}>
-              {props.busy ? <><span className="spinner" />Creando…</> : 'Crear cuenta y propiedad'}
+              {props.busy ? <><span className="spinner" />Creando…</>
+                : props.invitation ? 'Crear cuenta y continuar' : 'Crear cuenta y propiedad'}
             </button>
           </form>
         </>}

@@ -82,6 +82,7 @@ authRouter.post('/register', authLimiter, asyncHandler(async (request, response)
       userId: result.userId,
       accountId: result.accountId,
       propertyId: result.propertyId,
+      invitationId: result.invitationId,
       verificationRequired: true,
       verificationExpiresAt: result.verificationExpiresAt.toISOString(),
       verificationDelivery: result.verificationDelivery,

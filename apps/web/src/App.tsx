@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
   ApiRequestError,
+  acceptInvitation,
   changeContext,
+  getInvitationPreview,
   getSessionOverview,
   login,
   logout,
@@ -9,12 +11,14 @@ import {
   refreshSession,
   resendVerification,
   verifyEmail,
+  type InvitationPreview,
   type RegistrationResult,
   type SessionOverview,
   type SessionPayload,
 } from './api';
 import { AuthScreen, type VerificationState } from './AuthScreen';
 import { Brand } from './Brand';
+import { PropertyTeamPanel } from './PropertyTeamPanel';
 import { SuperadminPanel } from './SuperadminPanel';
 
 type Theme = 'light' | 'dark';
@@ -22,6 +26,7 @@ type AppSession = SessionPayload & { overview: SessionOverview };
 
 const deviceStorageKey = 'sgb.device-id';
 const themeStorageKey = 'sgb.theme';
+const invitationStorageKey = 'sgb.pending-invitation';
 
 function deviceId(): string {
   const existing = localStorage.getItem(deviceStorageKey);
@@ -45,10 +50,12 @@ function errorMessage(error: unknown): string {
     : 'Ocurrió un error inesperado. Inténtalo nuevamente.';
 }
 
-function Dashboard({ session, busy, error, onLogout, onContextChange }: {
+function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLogout, onContextChange }: {
   session: AppSession;
   busy: boolean;
   error: string | null;
+  invitation: InvitationPreview | null;
+  onAcceptInvitation: () => Promise<void>;
   onLogout: () => Promise<void>;
   onContextChange: (propertyId: string, roleId: string) => Promise<void>;
 }) {
@@ -57,6 +64,7 @@ function Dashboard({ session, busy, error, onLogout, onContextChange }: {
   const [propertyId, setPropertyId] = useState(overview.activeContext?.propertyId || overview.properties[0]?.id || '');
   const property = overview.properties.find((item) => item.id === propertyId);
   const [roleId, setRoleId] = useState(overview.activeContext?.roleId || property?.roles[0]?.id || '');
+  const activeRole = activeProperty?.roles.find((role) => role.id === overview.activeContext?.roleId);
 
   useEffect(() => {
     if (!property?.roles.some((role) => role.id === roleId)) setRoleId(property?.roles[0]?.id || '');
@@ -83,6 +91,14 @@ function Dashboard({ session, busy, error, onLogout, onContextChange }: {
       </section>
       {error && <div className="form-error dashboard-error" role="alert">{error}</div>}
 
+      {invitation && <section className="invitation-banner">
+        <div><span className="eyebrow">Invitación pendiente</span><h2>{invitation.property.name}</h2>
+          <p>{invitation.invitedBy} te asignó {invitation.roles.map((role) => role.name).join(', ')}.</p></div>
+        <button className="primary-button compact" type="button" disabled={busy} onClick={onAcceptInvitation}>
+          {busy ? 'Aceptando…' : 'Aceptar invitación'}
+        </button>
+      </section>}
+
       {!overview.user.isSuperadmin && overview.properties.length > 0 && <section className="context-card">
         <div><span className="eyebrow">Contexto activo</span><h2>Propiedad y rol</h2>
           <p className="muted">Cada operación se limita a la combinación seleccionada.</p></div>
@@ -106,6 +122,8 @@ function Dashboard({ session, busy, error, onLogout, onContextChange }: {
         <div className="section-heading"><div><span className="eyebrow">Acceso disponible</span><h2>Módulos habilitados</h2></div></div>
         <div className="module-list">{(activeProperty?.enabledModules || []).map((module) => <span key={module}>{module}</span>)}</div>
       </section>}
+      {!overview.user.isSuperadmin && activeRole?.permissions.includes('MEMBERSHIP_VIEW')
+        && <PropertyTeamPanel key={`${activeProperty?.id}:${activeRole.id}`} accessToken={session.accessToken} />}
     </main>
   </div>;
 }
@@ -127,6 +145,13 @@ export function App() {
     verificationToken ? 'CHECKING' : 'NONE',
   );
   const [verificationMessage, setVerificationMessage] = useState<string | null>(null);
+  const [invitationToken, setInvitationToken] = useState(() =>
+    new URLSearchParams(window.location.search).get('invitation')
+      || localStorage.getItem(invitationStorageKey),
+  );
+  const [invitation, setInvitation] = useState<InvitationPreview | null>(null);
+  const [invitationLoading, setInvitationLoading] = useState(Boolean(invitationToken));
+  const [invitationError, setInvitationError] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -164,6 +189,26 @@ export function App() {
   }, [verificationToken]);
 
   useEffect(() => {
+    if (!invitationToken) return;
+    setInvitationLoading(true);
+    void getInvitationPreview(invitationToken).then((preview) => {
+      setInvitation(preview);
+      setInvitationError(null);
+      localStorage.setItem(invitationStorageKey, invitationToken);
+    }).catch((previewError) => {
+      setInvitation(null);
+      setInvitationError(errorMessage(previewError));
+      setInvitationToken(null);
+      localStorage.removeItem(invitationStorageKey);
+    }).finally(() => {
+      setInvitationLoading(false);
+      const url = new URL(window.location.href);
+      url.searchParams.delete('invitation');
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    });
+  }, [invitationToken]);
+
+  useEffect(() => {
     if (!session) return;
     const delay = Math.max(10_000, new Date(session.accessExpiresAt).getTime() - Date.now() - 60_000);
     const timer = window.setTimeout(() => void refreshSession().then(completeSession).catch(() => setSession(null)), delay);
@@ -178,13 +223,32 @@ export function App() {
   }
 
   async function handleRegister(input: {
-    displayName: string; propertyName: string; email: string; password: string;
+    displayName: string; propertyName?: string; email: string; password: string; invitationToken?: string;
   }) {
     setBusy(true); setError(null); setResendAccepted(false);
     try {
       const result = await register(input);
       setPendingRegistration({ email: input.email, delivery: result.verificationDelivery });
     } catch (registrationError) { setError(errorMessage(registrationError)); }
+    finally { setBusy(false); }
+  }
+
+  async function handleAcceptInvitation() {
+    if (!session || !invitationToken) return;
+    setBusy(true); setError(null);
+    try {
+      const accepted = await acceptInvitation(session.accessToken, invitationToken);
+      const overview = await getSessionOverview(session.accessToken);
+      setSession({
+        ...session,
+        activeContext: { propertyId: accepted.propertyId, roleId: accepted.roleId },
+        overview,
+      });
+      setInvitation(null);
+      setInvitationToken(null);
+      setInvitationError(null);
+      localStorage.removeItem(invitationStorageKey);
+    } catch (acceptError) { setError(errorMessage(acceptError)); }
     finally { setBusy(false); }
   }
 
@@ -227,11 +291,13 @@ export function App() {
       aria-label={theme === 'dark' ? 'Usar modo claro' : 'Usar modo oscuro'}>{theme === 'dark' ? '☀' : '☾'}</button></div>
     {initializing ? <main className="loading-screen"><Brand /><span className="spinner large" />
       <p>Restaurando sesión segura…</p></main>
-      : session ? <Dashboard session={session} busy={busy} error={error} onLogout={handleLogout}
-        onContextChange={handleContextChange} />
+      : session ? <Dashboard session={session} busy={busy} error={error} invitation={invitation}
+        onAcceptInvitation={handleAcceptInvitation} onLogout={handleLogout} onContextChange={handleContextChange} />
         : <AuthScreen busy={busy} error={error} pendingRegistration={pendingRegistration}
           verificationState={verificationState} verificationMessage={verificationMessage}
-          resendAccepted={resendAccepted} onLogin={handleLogin} onRegister={handleRegister}
+          resendAccepted={resendAccepted} invitationToken={invitationToken} invitation={invitation}
+          invitationLoading={invitationLoading} invitationError={invitationError}
+          onLogin={handleLogin} onRegister={handleRegister}
           onResend={handleResend} onUseLogin={useLogin} />}
   </>;
 }

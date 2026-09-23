@@ -26,7 +26,7 @@ export interface PropertyAccess {
   name: string;
   timezone: string;
   isOwner: boolean;
-  roles: Array<{ id: string; code: string; name: string }>;
+  roles: Array<{ id: string; code: string; name: string; permissions: string[] }>;
   enabledModules: string[];
   enabledSpecies: string[];
 }
@@ -40,12 +40,57 @@ export interface SessionOverview {
 
 export interface RegistrationResult {
   userId: string;
-  accountId: string;
-  propertyId: string;
+  accountId: string | null;
+  propertyId: string | null;
+  invitationId: string | null;
   verificationRequired: true;
   verificationExpiresAt: string;
   verificationDelivery: 'SENT' | 'UNAVAILABLE' | 'FAILED';
   verificationToken?: string;
+}
+
+export interface InvitationPreview {
+  id: string;
+  email: string;
+  expiresAt: string;
+  property: { id: string; name: string };
+  accountName: string;
+  invitedBy: string;
+  existingUser: boolean;
+  roles: Array<{ id: string; code: string; name: string }>;
+  employment: null | {
+    jobTitle: string;
+    payAmount: number | null;
+    currency: string;
+    frequency: string | null;
+    notes: string | null;
+  };
+}
+
+export interface PropertyTeam {
+  canManage: boolean;
+  members: Array<{
+    id: string;
+    userId: string;
+    displayName: string;
+    email: string;
+    status: 'ACTIVE' | 'SUSPENDED';
+    jobTitle: string | null;
+    joinedAt: string | null;
+    isOwner: boolean;
+    isSelf: boolean;
+    roles: Array<{ id: string; code: string; name: string }>;
+    payment: null | { amount: number; currency: string; frequency: string | null };
+  }>;
+  invitations: Array<{
+    id: string;
+    email: string;
+    expiresAt: string;
+    jobTitle: string | null;
+    roles: Array<{ id: string; code: string; name: string }>;
+  }>;
+  assignableRoles: Array<{ id: string; code: string; name: string; description: string | null }>;
+  quota: { used: number; limit: number | null };
 }
 
 export interface AdministrativeAccountSummary {
@@ -156,14 +201,27 @@ export function login(email: string, password: string, deviceId: string) {
 
 export function register(input: {
   displayName: string;
-  propertyName: string;
+  propertyName?: string;
   email: string;
   password: string;
+  invitationToken?: string;
 }) {
   return request<RegistrationResult>('/auth/register', {
     method: 'POST',
     body: JSON.stringify(input),
   });
+}
+
+export function getInvitationPreview(token: string) {
+  return request<InvitationPreview>(`/invitations/preview/${encodeURIComponent(token)}`);
+}
+
+export function acceptInvitation(accessToken: string, token: string) {
+  return request<{ propertyId: string; propertyName: string; membershipId: string; roleId: string }>(
+    '/invitations/accept', {
+      method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ token }),
+    },
+  );
 }
 
 export function verifyEmail(token: string) {
@@ -206,6 +264,41 @@ export async function logout(accessToken: string | null) {
 }
 
 const bearer = (accessToken: string) => ({ authorization: `Bearer ${accessToken}` });
+
+export function getPropertyTeam(accessToken: string) {
+  return request<PropertyTeam>('/property-team', { headers: bearer(accessToken) });
+}
+
+export function createPropertyInvitation(accessToken: string, input: {
+  email: string;
+  roleIds: string[];
+  jobTitle?: string;
+  payAmount?: number | null;
+  payFrequency?: 'HOURLY' | 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' | 'OTHER' | null;
+  employmentNotes?: string;
+}) {
+  return request<{ id: string; expiresAt: string; delivery: 'SENT' | 'UNAVAILABLE' | 'FAILED' }>(
+    '/property-team/invitations', {
+      method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
+    },
+  );
+}
+
+export function revokePropertyInvitation(accessToken: string, invitationId: string) {
+  return request<{ revoked: true }>(`/property-team/invitations/${invitationId}`, {
+    method: 'DELETE', headers: bearer(accessToken),
+  });
+}
+
+export function updateMembershipStatus(
+  accessToken: string,
+  membershipId: string,
+  status: 'ACTIVE' | 'SUSPENDED' | 'ENDED',
+) {
+  return request<{ status: string }>(`/property-team/members/${membershipId}/status`, {
+    method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify({ status }),
+  });
+}
 
 export function getPlatformOverview(accessToken: string) {
   return request<PlatformOverview>('/superadmin/overview', { headers: bearer(accessToken) });
