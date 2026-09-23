@@ -245,7 +245,8 @@ export async function setGroupState(auth: AuthState, context: PropertyContext, i
       }
       await client.query(
         `UPDATE livestock_group SET active = $2, archived_at = CASE WHEN $2 THEN NULL ELSE now() END,
-           archived_by = CASE WHEN $2 THEN NULL ELSE $3 END, updated_by = $3 WHERE id = $1`,
+           archived_by = CASE WHEN $2 THEN NULL::uuid ELSE $3::uuid END,
+           updated_by = $3 WHERE id = $1`,
         [id, input.active, auth.userId],
       );
       const after = await getGroup(client, context.propertyId, id);
