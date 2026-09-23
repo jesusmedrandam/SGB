@@ -297,6 +297,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .animal-colors label { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; padding: 6px; }
 .animal-colors input { width: 18px; height: 18px; accent-color: var(--primary); }
 .animal-colors small { color: var(--muted); }
+.animal-parent-summary { margin-top: 16px !important; }
+.animal-parent-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.animal-parent-field { display: grid; gap: 10px; min-width: 0; margin: 0; padding: 14px;
+  border: 1px solid var(--border); border-radius: 12px; }
+.animal-parent-field legend { padding: 0 5px; font-weight: 760; }
+.animal-parent-field label { display: grid; gap: 6px; min-width: 0; }
+.animal-parent-field label span { font-size: .78rem; font-weight: 760; }
+.animal-parent-field small { color: var(--muted); }
 
 @media (max-width: 900px) {
   .login-layout { grid-template-columns: 1fr; }
@@ -337,7 +345,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
   .property-module-grid { grid-template-columns: 1fr; }
   .catalog-grid { grid-template-columns: 1fr; }
   .catalog-create { flex-direction: column; align-items: stretch; }
-  .animal-create, .animal-detail dl { grid-template-columns: 1fr; }
+  .animal-create, .animal-detail dl, .animal-parent-grid { grid-template-columns: 1fr; }
   .animal-search { flex-direction: column; align-items: stretch; }
   .new-property-form { align-items: stretch; flex-direction: column; }
   .new-property-form button { width: 100%; }

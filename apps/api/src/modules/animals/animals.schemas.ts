@@ -19,6 +19,17 @@ export const updateAnimalBrandsSchema = z.object({
   expectedVersion: z.number().int().positive(),
 });
 
+const parentSchema = z.union([
+  z.strictObject({ animalId: z.uuid() }),
+  z.strictObject({ reportedName: z.string().trim().min(1).max(160) }),
+]).nullable();
+export const updateAnimalParentsSchema = z.object({
+  mother: parentSchema,
+  father: parentSchema,
+  expectedVersion: z.number().int().positive(),
+});
+export type ParentSelection = z.infer<typeof parentSchema>;
+
 export const updateAnimalCatalogSchema = catalogSelectionSchema.extend({
   expectedVersion: z.number().int().positive(),
 });

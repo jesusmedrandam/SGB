@@ -39,7 +39,7 @@ function animal(row: AnimalRow) {
 
 interface SelectionRow { catalog_code: 'BREEDS' | 'COLORS'; id: string; name: string }
 
-async function readAnimal(client: PoolClient, context: PropertyContext, id: string) {
+export async function readAnimal(client: PoolClient, context: PropertyContext, id: string) {
   const result = await client.query<AnimalRow>(
     `SELECT ${animalFields} FROM animal
      WHERE property_id = $1 AND id = $2 AND record_status = 'CURRENT'`,
@@ -55,7 +55,21 @@ async function readAnimal(client: PoolClient, context: PropertyContext, id: stri
     [id, context.propertyId],
   );
   const breed = choices.rows.find((choice) => choice.catalog_code === 'BREEDS');
+  const parents = await client.query<{
+    role: 'MOTHER' | 'FATHER'; parent_animal_id: string | null;
+    reported_parent_name: string | null; name: string | null;
+  }>(
+    `SELECT ap.role, ap.parent_animal_id, ap.reported_parent_name, p.name
+       FROM animal_parentage ap LEFT JOIN animal p ON p.id = ap.parent_animal_id
+      WHERE ap.child_animal_id = $1 AND ap.property_id = $2 AND ap.removed_at IS NULL`,
+    [id, context.propertyId],
+  );
+  const parent = (role: 'MOTHER' | 'FATHER') => {
+    const row = parents.rows.find((entry) => entry.role === role);
+    return row ? { animalId: row.parent_animal_id, name: row.name ?? row.reported_parent_name! } : null;
+  };
   return { ...animal(result.rows[0]),
+    mother: parent('MOTHER'), father: parent('FATHER'),
     breed: breed ? { id: breed.id, name: breed.name } : null,
     colors: choices.rows.filter((choice) => choice.catalog_code === 'COLORS')
       .map((choice) => ({ id: choice.id, name: choice.name })) };

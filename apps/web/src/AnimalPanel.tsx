@@ -1,8 +1,8 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import {
   ApiRequestError, createAnimal, createBrand, getAnimal, getAnimals, listBrands,
-  listCatalogItems, setBrandActive, updateAnimalBrands, updateAnimalCatalogs,
-  type Animal, type AnimalList, type CatalogItem, type LivestockBrand,
+  listCatalogItems, setBrandActive, updateAnimalBrands, updateAnimalCatalogs, updateAnimalParents,
+  type Animal, type AnimalList, type CatalogItem, type LivestockBrand, type ParentSelection,
 } from './api';
 
 interface AnimalChoices { BREEDS: CatalogItem[]; COLORS: CatalogItem[] }
@@ -59,6 +59,56 @@ function BrandFields({ brands, selected }: { brands: LivestockBrand[]; selected?
         defaultChecked={chosen.some((entry) => entry.id === brand.id)} />
       <span>{brand.name}{brand.active ? '' : ' (inactiva)'}</span>
     </label>)}
+  </fieldset>;
+}
+
+function ParentField({ accessToken, child, role }: {
+  accessToken: string; child: Animal; role: 'mother' | 'father';
+}) {
+  const current = child[role];
+  const [mode, setMode] = useState<'none' | 'animal' | 'reported'>(
+    current ? current.animalId ? 'animal' : 'reported' : 'none',
+  );
+  const [search, setSearch] = useState('');
+  const [candidates, setCandidates] = useState<Animal[]>([]);
+  const [loadError, setLoadError] = useState(false);
+  useEffect(() => {
+    if (mode !== 'animal') return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void getAnimals(accessToken, 1, search).then((page) => {
+        if (active) { setCandidates(page.items); setLoadError(false); }
+      }).catch(() => { if (active) setLoadError(true); });
+    }, 250);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [accessToken, mode, search]);
+  const label = role === 'mother' ? 'Madre' : 'Padre';
+  const eligible = candidates.filter((entry) => entry.id !== child.id
+    && entry.sex === (role === 'mother' ? 'FEMALE' : 'MALE')
+    && (!child.birthDate || !entry.birthDate || entry.birthDate < child.birthDate));
+  return <fieldset className="animal-parent-field"><legend>{label}</legend>
+    <label><span>Tipo de registro</span><select name={`${role}Mode`} value={mode}
+      onChange={(event) => setMode(event.target.value as typeof mode)}>
+      <option value="none">Sin registrar</option>
+      <option value="animal">Animal registrado en esta propiedad</option>
+      <option value="reported">Nombre informado (externo)</option>
+    </select></label>
+    {mode === 'animal' && <>
+      <label><span>Buscar {label.toLowerCase()}</span><input value={search}
+        onChange={(event) => setSearch(event.target.value)} maxLength={80} /></label>
+      <label><span>Animal</span><select name={`${role}AnimalId`} defaultValue={current?.animalId || ''} required>
+        <option value="">Selecciona un animal</option>
+        {current?.animalId && !eligible.some((entry) => entry.id === current.animalId)
+          && <option value={current.animalId}>{current.name} (actual)</option>}
+        {eligible.map((entry) => <option key={entry.id} value={entry.id}>
+          {entry.name}{entry.earTagCode ? ` · ${entry.earTagCode}` : ''}
+        </option>)}
+      </select></label>
+      {loadError && <small>No se pudieron cargar los animales; intenta buscar de nuevo.</small>}
+    </>}
+    {mode === 'reported' && <label><span>Nombre informado</span>
+      <input name={`${role}ReportedName`} defaultValue={current?.animalId === null ? current.name : ''}
+        minLength={1} maxLength={160} required /></label>}
   </fieldset>;
 }
 
@@ -207,6 +257,28 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     } finally { setBusy(false); }
   }
 
+  async function changeParents(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const data = new FormData(event.currentTarget);
+    const parent = (role: 'mother' | 'father'): ParentSelection => {
+      const mode = data.get(`${role}Mode`);
+      if (mode === 'animal') return { animalId: String(data.get(`${role}AnimalId`)) };
+      if (mode === 'reported') return { reportedName: String(data.get(`${role}ReportedName`)).trim() };
+      return null;
+    };
+    setBusy(true); setError(null);
+    try {
+      setSelected(await updateAnimalParents(accessToken, selected.id,
+        { mother: parent('mother'), father: parent('father'), expectedVersion: selected.version }));
+    } catch (failure) {
+      setError(message(failure));
+      if (failure instanceof ApiRequestError && failure.code === 'ANIMAL_VERSION_CONFLICT') {
+        try { setSelected(await getAnimal(accessToken, selected.id)); } catch { /* conserva el error original */ }
+      }
+    } finally { setBusy(false); }
+  }
+
   return <section className="section-block animal-panel">
     <div className="section-heading"><div><span className="eyebrow">Núcleo ganadero</span><h2>Animales</h2>
       <p className="muted">Registros de la propiedad activa.</p></div>
@@ -286,6 +358,8 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
             : selected.initialWeightUnitCode === 'GRAM' ? 'g' : 'kg'}`}</dd></div>
         <div><dt>Raza</dt><dd>{selected.breed?.name || 'No registrada'}</dd></div>
         <div><dt>Colores</dt><dd>{selected.colors?.map((color) => color.name).join(', ') || 'No registrados'}</dd></div></dl>
+      <dl className="animal-parent-summary"><div><dt>Madre</dt><dd>{selected.mother?.name || 'No registrada'}</dd></div>
+        <div><dt>Padre</dt><dd>{selected.father?.name || 'No registrado'}</dd></div></dl>
       {canUpdate && choices && <form className="animal-catalog-edit" key={`${selected.id}:${selected.version}`}
         onSubmit={(event) => void changeCatalogs(event)}>
         <h4>Raza y colores</h4><CatalogFields choices={choices} selected={selected} />
@@ -297,6 +371,16 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         <h4>Marquillas</h4><BrandFields brands={brands} selected={selected} />
         <button className="primary-button compact" type="submit" disabled={busy}>
           {busy ? 'Guardando…' : 'Guardar marquillas'}</button>
+      </form>}
+      {canUpdate && <form className="animal-catalog-edit" key={`parents:${selected.id}:${selected.version}`}
+        onSubmit={(event) => void changeParents(event)}>
+        <h4>Parentesco</h4>
+        <div className="animal-parent-grid">
+          <ParentField accessToken={accessToken} child={selected} role="mother" />
+          <ParentField accessToken={accessToken} child={selected} role="father" />
+        </div>
+        <button className="primary-button compact" type="submit" disabled={busy}>
+          {busy ? 'Guardando…' : 'Guardar parentesco'}</button>
       </form>}
     </div>}
   </section>;

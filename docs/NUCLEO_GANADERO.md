@@ -37,7 +37,7 @@ se conserva el historial y una marquilla desactivada sigue visible en la ficha,
 pero no se admite para nuevas asignaciones. La migración `0010` crea estas tablas;
 el migrador habitual la aplica, sin pegar SQL manualmente. La carga de imágenes
 de fierros se incorporará con el flujo multimedia, todavía no operativo.
-Los progenitores y propietarios se incorporarán en flujos posteriores.
+Los propietarios se incorporarán en un flujo posterior.
 
 ## Estado frente a ciclo del registro
 
@@ -56,6 +56,10 @@ el historial.
 Madre y padre son relaciones independientes. El servidor valida sexo, especie,
 orden de fechas y ciclos de parentesco. Cuando el progenitor no está registrado
 se permite conservar únicamente un nombre informado, sin crear un animal falso.
+La ficha permite elegir un animal de la propiedad o indicar un nombre externo para
+cada rol. `PATCH /animals/:id/parents` modifica ambas relaciones con control de
+versión, historial de correcciones y auditoría. La búsqueda ofrece los primeros
+40 animales coincidentes; conviene acotar por nombre o arete cuando hay más.
 
 Un animal admite varios propietarios. Cada propietario puede ser un usuario,
 una persona externa o una organización; las participaciones vigentes no pueden

@@ -4,6 +4,7 @@ import test from 'node:test';
 import { pool } from '../../database/pool.js';
 import { createAnimal, getAnimal, listAnimals, updateAnimalBrands, updateAnimalCatalogs } from '../animals/animals.service.js';
 import { createBrand, listBrands, setBrandActive } from '../animals/brands.service.js';
+import { updateAnimalParents } from '../animals/parents.service.js';
 import {
   createCatalogItem, getCatalogReference, listCatalogItems, setCatalogItemActive,
 } from '../catalogs/catalogs.service.js';
@@ -241,6 +242,36 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       () => pool.query(`DELETE FROM animal_catalog_assignment WHERE animal_id = $1`, [decorated.id]),
       (error: { code?: string }) => error.code === '23514',
     );
+
+    const related = await updateAnimalParents(ownerAuth, ownerContext, animal.id, {
+      mother: { animalId: decorated.id }, father: { reportedName: 'Toro externo' },
+      expectedVersion: fewerBrands.version,
+    }, metadata);
+    assert.equal(related.mother?.animalId, decorated.id);
+    assert.equal(related.father?.name, 'Toro externo');
+    await assert.rejects(
+      () => updateAnimalParents(ownerAuth, ownerContext, decorated.id, {
+        mother: { animalId: animal.id }, father: null, expectedVersion: changed.version,
+      }, metadata),
+      (error: { code?: string }) => error.code === 'INVALID_ANIMAL_PARENT',
+    );
+    await assert.rejects(
+      () => updateAnimalParents(ownerAuth, ownerContext, animal.id, {
+        mother: { animalId: decorated.id }, father: null, expectedVersion: fewerBrands.version,
+      }, metadata),
+      (error: { code?: string }) => error.code === 'ANIMAL_VERSION_CONFLICT',
+    );
+    const reported = await updateAnimalParents(ownerAuth, ownerContext, animal.id, {
+      mother: { reportedName: 'Vaca externa' }, father: { reportedName: 'Toro externo' },
+      expectedVersion: related.version,
+    }, metadata);
+    assert.equal(reported.mother?.animalId, null);
+    assert.equal(reported.mother?.name, 'Vaca externa');
+    const parentHistory = await pool.query<{ removed_at: Date | null }>(
+      `SELECT removed_at FROM animal_parentage WHERE child_animal_id = $1 AND parent_animal_id = $2`,
+      [animal.id, decorated.id],
+    );
+    assert.ok(parentHistory.rows[0]?.removed_at);
 
     const initialTeam = await getPropertyTeam(ownerAuth, ownerContext);
     const operatorRole = initialTeam.assignableRoles.find((role) => role.code === 'OPERATOR');
@@ -531,6 +562,8 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         'ANIMAL_CREATED',
         'CATALOG_ITEM_STATE_CHANGED',
         'ANIMAL_CATALOGS_UPDATED',
+        'ANIMAL_PARENTS_UPDATED',
+        'ANIMAL_PARENTS_UPDATED',
         'PROPERTY_INVITATION_CREATED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',

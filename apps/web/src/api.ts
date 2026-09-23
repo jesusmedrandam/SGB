@@ -78,6 +78,8 @@ export interface Animal {
   breed?: { id: string; name: string } | null;
   colors?: Array<{ id: string; name: string }>;
   brands: Array<{ id: string; name: string }>;
+  mother?: { animalId: string | null; name: string } | null;
+  father?: { animalId: string | null; name: string } | null;
 }
 
 export interface LivestockBrand { id: string; name: string; active: boolean }
@@ -372,6 +374,16 @@ export function updateAnimalBrands(accessToken: string, id: string, input: {
   brandIds: string[]; expectedVersion: number;
 }) {
   return request<Animal>(`/animals/${encodeURIComponent(id)}/brands`, {
+    method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+
+export type ParentSelection = { animalId: string } | { reportedName: string } | null;
+
+export function updateAnimalParents(accessToken: string, id: string, input: {
+  mother: ParentSelection; father: ParentSelection; expectedVersion: number;
+}) {
+  return request<Animal>(`/animals/${encodeURIComponent(id)}/parents`, {
     method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
   });
 }
