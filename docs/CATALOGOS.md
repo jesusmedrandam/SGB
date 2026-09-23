@@ -56,3 +56,17 @@ animal. El tratamiento realizado conserva la cantidad realmente aplicada.
 - Los códigos del sistema son estables; las etiquetas visibles pueden traducirse.
 - Una unidad incompatible produce un error de dominio claro y no se guarda.
 - El paquete offline incluye definiciones, relaciones permitidas y su versión.
+
+## Primera pantalla de catálogos
+
+La API expone `GET /catalogs/reference` con especies habilitadas y las unidades
+compatibles con `ANIMAL_WEIGHT` y `LAND_AREA`. `GET /catalogs/BREEDS/items` y
+`GET /catalogs/COLORS/items` combinan opciones oficiales con las de la propiedad
+activa. Las opciones de otras propiedades nunca aparecen.
+
+Para razas y colores, `POST /catalogs/:catalogCode/items` crea una opción local
+y `PATCH /catalogs/:catalogCode/items/:id` activa o desactiva la propia. Requieren
+`CATALOG_MANAGE`; las lecturas requieren `CATALOG_VIEW`. La API comprueba el rol
+de nuevo dentro de la transacción y audita los cambios. Desactivar una opción no
+la borra ni altera las referencias históricas. Los catálogos de solo sistema y
+los propios de la propiedad tendrán sus reglas específicas en entregas posteriores.

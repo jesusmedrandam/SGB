@@ -19,6 +19,7 @@ import {
 } from './api';
 import { AuthScreen, type VerificationState } from './AuthScreen';
 import { Brand } from './Brand';
+import { CatalogPanel } from './CatalogPanel';
 import { PropertyTeamPanel } from './PropertyTeamPanel';
 import { PropertySettingsPanel } from './PropertySettingsPanel';
 import { SuperadminPanel } from './SuperadminPanel';
@@ -159,6 +160,9 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
       {!overview.user.isSuperadmin && activeRole?.permissions.includes('MODULE_VIEW') &&
         <PropertySettingsPanel key={`${activeProperty?.id}:${activeRole.id}`} accessToken={session.accessToken}
           onPropertyCreated={onPropertyCreated} onSettingsChanged={onSettingsChanged} />}
+      {!overview.user.isSuperadmin && activeRole?.permissions.includes('CATALOG_VIEW') &&
+        <CatalogPanel key={`${activeProperty?.id}:${activeRole.id}`} accessToken={session.accessToken}
+          canManage={activeRole.permissions.includes('CATALOG_MANAGE')} />}
     </main>
   </div>;
 }

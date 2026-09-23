@@ -49,6 +49,20 @@ export interface PropertySettings {
   }>;
 }
 
+export type EditableCatalogCode = 'BREEDS' | 'COLORS';
+export interface CatalogItem {
+  id: string;
+  catalogCode: EditableCatalogCode;
+  name: string;
+  speciesCode: string | null;
+  systemDefined: boolean;
+  active: boolean;
+}
+export interface CatalogReference {
+  species: Array<{ code: string; name: string; rulesetCode: string; rulesetVersion: number }>;
+  units: Array<{ contextCode: string; code: string; name: string; symbol: string; isDefault: boolean }>;
+}
+
 export interface RegistrationResult {
   userId: string;
   accountId: string | null;
@@ -282,6 +296,26 @@ export function getPropertyTeam(accessToken: string) {
 
 export function getPropertySettings(accessToken: string) {
   return request<PropertySettings>('/property-settings', { headers: bearer(accessToken) });
+}
+
+export function getCatalogReference(accessToken: string) {
+  return request<CatalogReference>('/catalogs/reference', { headers: bearer(accessToken) });
+}
+
+export function listCatalogItems(accessToken: string, code: EditableCatalogCode) {
+  return request<CatalogItem[]>(`/catalogs/${code}/items`, { headers: bearer(accessToken) });
+}
+
+export function createCatalogItem(accessToken: string, code: EditableCatalogCode, name: string) {
+  return request<CatalogItem>(`/catalogs/${code}/items`, {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name, speciesCode: 'BOVINE' }),
+  });
+}
+
+export function setCatalogItemActive(accessToken: string, code: EditableCatalogCode, id: string, active: boolean) {
+  return request<CatalogItem>(`/catalogs/${code}/items/${encodeURIComponent(id)}`, {
+    method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify({ active }),
+  });
 }
 
 export function createAccountProperty(accessToken: string, name: string) {

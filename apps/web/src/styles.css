@@ -249,6 +249,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
 .property-module-toggle input { width: 22px; min-width: 22px; min-height: 22px; accent-color: var(--primary); }
 .property-module-toggle input:disabled { cursor: not-allowed; }
 .property-settings-panel > .new-property-form { max-width: 650px; margin: 16px 0 22px; }
+.catalog-panel > .section-heading p { margin: 7px 0 0; }
+.catalog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.catalog-grid .team-block { margin: 0; min-width: 0; }
+.catalog-content { display: grid; gap: 10px; padding: 16px; }
+.catalog-content > p { margin: 0; }
+.catalog-create { display: flex; align-items: end; gap: 10px; margin-bottom: 7px; }
+.catalog-create label { flex: 1; min-width: 0; display: grid; gap: 7px; }
+.catalog-create label span { font-size: .76rem; font-weight: 760; }
 
 @media (max-width: 900px) {
   .login-layout { grid-template-columns: 1fr; }
@@ -287,6 +295,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--primary); box-sh
   .quota-row > div:first-child { grid-column: 1 / -1; }
   .module-switches { grid-template-columns: 1fr; }
   .property-module-grid { grid-template-columns: 1fr; }
+  .catalog-grid { grid-template-columns: 1fr; }
+  .catalog-create { flex-direction: column; align-items: stretch; }
   .new-property-form { align-items: stretch; flex-direction: column; }
   .new-property-form button { width: 100%; }
   .property-row { align-items: start; flex-direction: column; }

@@ -1,0 +1,11 @@
+import { z } from 'zod';
+
+export const catalogCodeSchema = z.enum(['BREEDS', 'COLORS']);
+export type EditableCatalogCode = z.infer<typeof catalogCodeSchema>;
+export const catalogParamsSchema = z.object({ catalogCode: catalogCodeSchema });
+export const catalogItemParamsSchema = catalogParamsSchema.extend({ id: z.uuid() });
+export const createCatalogItemSchema = z.object({
+  name: z.string().trim().min(2).max(160),
+  speciesCode: z.literal('BOVINE').nullable().optional(),
+});
+export const catalogItemStateSchema = z.object({ active: z.boolean() });

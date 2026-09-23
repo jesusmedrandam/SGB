@@ -3,6 +3,9 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { pool } from '../../database/pool.js';
 import {
+  createCatalogItem, getCatalogReference, listCatalogItems, setCatalogItemActive,
+} from '../catalogs/catalogs.service.js';
+import {
   getAccountDetails,
   getPlatformOverview,
   updateAccount,
@@ -108,6 +111,22 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       enabledSpecies: new Set(ownerProperty.enabledSpecies),
     };
 
+    const reference = await getCatalogReference(ownerContext);
+    assert.ok(reference.species.some((species) => species.code === 'BOVINE'));
+    assert.ok(reference.units.some((unit) => unit.contextCode === 'ANIMAL_WEIGHT' && unit.code === 'KILOGRAM'));
+    assert.ok(reference.units.every((unit) => unit.contextCode !== 'ANIMAL_WEIGHT' || unit.code !== 'HECTARE'));
+    const breed = await createCatalogItem(ownerAuth, ownerContext, 'BREEDS',
+      { name: `Raza ${suffix}`, speciesCode: 'BOVINE' }, metadata);
+    const color = await createCatalogItem(ownerAuth, ownerContext, 'COLORS',
+      { name: `Color ${suffix}`, speciesCode: 'BOVINE' }, metadata);
+    assert.equal((await listCatalogItems(ownerContext, 'BREEDS')).find((row) => row.id === breed.id)?.active, true);
+    await assert.rejects(
+      () => createCatalogItem(ownerAuth, ownerContext, 'BREEDS', { name: `Raza ${suffix}` }, metadata),
+      (error: { code?: string }) => error.code === '23505',
+    );
+    await setCatalogItemActive(ownerAuth, ownerContext, 'BREEDS', breed.id, false, metadata);
+    assert.equal((await listCatalogItems(ownerContext, 'BREEDS')).find((row) => row.id === breed.id)?.active, false);
+
     const initialTeam = await getPropertyTeam(ownerAuth, ownerContext);
     const operatorRole = initialTeam.assignableRoles.find((role) => role.code === 'OPERATOR');
     assert.ok(operatorRole);
@@ -166,6 +185,22 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     assert.equal(collaboratorOverview.properties[0]?.roles[0]?.code, 'OPERATOR');
     const collaboratorProperty = collaboratorOverview.properties[0]!;
     const collaboratorRole = collaboratorProperty.roles[0]!;
+    const operatorContext = {
+      propertyId: collaboratorProperty.id,
+      propertyName: collaboratorProperty.name,
+      roleId: collaboratorRole.id,
+      roleCode: collaboratorRole.code,
+      roleName: collaboratorRole.name,
+      permissions: new Set(collaboratorRole.permissions),
+      enabledModules: new Set(collaboratorProperty.enabledModules),
+      enabledSpecies: new Set(collaboratorProperty.enabledSpecies),
+    };
+    assert.ok((await listCatalogItems(operatorContext, 'COLORS')).some((row) => row.id === color.id));
+    await assert.rejects(
+      () => createCatalogItem(activeCollaboratorAuth, operatorContext, 'COLORS',
+        { name: `Sin permiso ${suffix}` }, metadata),
+      (error: { code?: string }) => error.code === 'CATALOG_MANAGE_DENIED',
+    );
     const collaboratorTeam = await getPropertyTeam(activeCollaboratorAuth, {
       propertyId: collaboratorProperty.id,
       propertyName: collaboratorProperty.name,
@@ -242,6 +277,11 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     const nextProperty = await createAccountProperty(ownerAuth, ownerContext, `Segunda ${suffix}`, metadata);
     assert.equal(nextProperty.accountId, accountId);
     const secondContext = { ...ownerContext, propertyId: nextProperty.propertyId, roleId: nextProperty.roleId };
+    assert.equal((await listCatalogItems(secondContext, 'BREEDS')).some((row) => row.id === breed.id), false);
+    await assert.rejects(
+      () => setCatalogItemActive(ownerAuth, secondContext, 'COLORS', color.id, false, metadata),
+      (error: { code?: string }) => error.code === 'CATALOG_ITEM_UNAVAILABLE',
+    );
     await updatePropertyModule(ownerAuth, secondContext, 'WEIGHING', false, metadata);
     const secondSettings = await getPropertySettings(secondContext);
     assert.equal(secondSettings.modules.find((item) => item.code === 'WEIGHING')?.enabled, false);
@@ -287,6 +327,9 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         'EMAIL_VERIFICATION_REQUESTED',
         'EMAIL_VERIFIED',
         'AUTH_LOGIN',
+        'CATALOG_ITEM_CREATED',
+        'CATALOG_ITEM_CREATED',
+        'CATALOG_ITEM_STATE_CHANGED',
         'PROPERTY_INVITATION_CREATED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
