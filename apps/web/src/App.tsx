@@ -25,6 +25,7 @@ import { CatalogPanel } from './CatalogPanel';
 import { PropertyTeamPanel } from './PropertyTeamPanel';
 import { PropertySettingsPanel } from './PropertySettingsPanel';
 import { SuperadminPanel } from './SuperadminPanel';
+import { ReproductionPanel } from './ReproductionPanel';
 
 type Theme = 'light' | 'dark';
 type AppSession = SessionPayload & { overview: SessionOverview };
@@ -183,6 +184,11 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
           canManageLocations={activeRole.permissions.includes('LOCATION_MANAGE')}
           canAssignAnimals={activeRole.permissions.includes('ANIMAL_VIEW')
             && activeRole.permissions.includes('ANIMAL_UPDATE')} />}
+      {activeProperty && activeProperty.enabledModules.includes('REPRODUCTION')
+        && activeRole?.permissions.includes('REPRODUCTION_VIEW') &&
+        <ReproductionPanel key={`reproduction:${activeProperty.id}:${activeRole.id}`}
+          accessToken={session.accessToken}
+          canManage={activeRole.permissions.includes('REPRODUCTION_MANAGE')} />}
     </main>
   </div>;
 }

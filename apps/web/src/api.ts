@@ -528,6 +528,98 @@ export function setCatalogItemActive(accessToken: string, code: EditableCatalogC
   });
 }
 
+export interface ReproductionHeat {
+  id: string; cowId: string; cowName: string; bullId: string | null;
+  startsOn: string; endsOn: string | null; isFalse: boolean;
+  notes: string | null; cancelled: boolean;
+}
+export interface ReproductionPregnancy {
+  id: string; cowId: string; cowName: string; heatId: string | null;
+  fatherId: string | null; externalFather: string | null;
+  conceptionMethod: string; confirmationMethod: string;
+  confirmedOn: string; expectedBirthOn: string | null;
+  gestationDays: number | null; status: 'CONFIRMED' | 'BORN' | 'LOST' | 'CANCELLED';
+  notes: string | null;
+}
+export interface ReproductionBirth {
+  id: string; pregnancyId: string; motherId: string; motherName: string;
+  occurredOn: string; liveCount: number; stillbornCount: number; notes: string | null;
+  calves: Array<{ id: string; name: string; sex: Animal['sex'] }>;
+}
+export interface ReproductionLoss {
+  id: string; pregnancyId: string; cowId: string; cowName: string;
+  occurredOn: string; notes: string;
+}
+export interface ReproductionRecords {
+  heats: ReproductionHeat[]; pregnancies: ReproductionPregnancy[];
+  births: ReproductionBirth[]; losses: ReproductionLoss[];
+}
+export interface ReproductionCandidate { id: string; name: string; sex: Animal['sex'] }
+export interface ReproductionSettings {
+  daysAfterBirthHeat: number; daysAfterBirthPregnancy: number;
+  daysAfterLossHeat: number; daysAfterLossPregnancy: number;
+  minimumCowMonths: number; minimumBullMonths: number;
+  allowSecondHeat: boolean; allowFalseHeatInPregnancy: boolean;
+  useLastValidHeat: boolean;
+}
+export function getReproductionSettings(accessToken: string) {
+  return request<ReproductionSettings>('/reproduction/settings', { headers: bearer(accessToken) });
+}
+export function updateReproductionSettings(accessToken: string, input: ReproductionSettings) {
+  return request<ReproductionSettings>('/reproduction/settings', {
+    method: 'PUT', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+export function getReproduction(accessToken: string) {
+  return request<ReproductionRecords>('/reproduction', { headers: bearer(accessToken) });
+}
+export function getReproductionCandidates(accessToken: string) {
+  return request<ReproductionCandidate[]>('/reproduction/candidates', { headers: bearer(accessToken) });
+}
+export function createHeat(accessToken: string, input: {
+  cowId: string; bullId?: string | null; startsOn: string; endsOn?: string | null;
+  isFalse: boolean; notes?: string | null;
+}) {
+  return request<ReproductionHeat>('/reproduction/heats', {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+export function createPregnancy(accessToken: string, input: {
+  cowId: string; heatId?: string | null; fatherId?: string | null;
+  externalFather?: string | null; conceptionMethod: string; confirmationMethod: string;
+  confirmedOn: string; gestationDays?: number | null; notes?: string | null;
+}) {
+  return request<ReproductionPregnancy>('/reproduction/pregnancies', {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+export function recordBirth(accessToken: string, input: {
+  pregnancyId: string; occurredOn: string;
+  calves: Array<{ name: string; sex: Animal['sex']; earTagCode?: string }>;
+  stillbornCount: number; notes?: string | null;
+}) {
+  return request<ReproductionBirth>('/reproduction/births', {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+export function recordLoss(accessToken: string, input: {
+  pregnancyId: string; occurredOn: string; notes: string;
+}) {
+  return request<ReproductionLoss>('/reproduction/losses', {
+    method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+export function cancelPregnancy(accessToken: string, id: string) {
+  return request<{ id: string; status: string }>(`/reproduction/pregnancies/${encodeURIComponent(id)}/cancel`, {
+    method: 'POST', headers: bearer(accessToken),
+  });
+}
+export function cancelHeat(accessToken: string, id: string) {
+  return request<{ id: string; cancelled: boolean }>(`/reproduction/heats/${encodeURIComponent(id)}/cancel`, {
+    method: 'POST', headers: bearer(accessToken),
+  });
+}
+
 export function createAccountProperty(accessToken: string, name: string) {
   return request<{ accountId: string; propertyId: string; roleId: string }>('/property-settings/properties', {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify({ name }),

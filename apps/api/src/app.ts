@@ -15,6 +15,7 @@ import { catalogsRouter } from './modules/catalogs/catalogs.routes.js';
 import { invitationRouter, propertyTeamRouter } from './modules/collaboration/collaboration.routes.js';
 import { ownAccountRouter, propertySettingsRouter } from './modules/properties/properties.routes.js';
 import { superadminRouter } from './modules/superadmin/superadmin.routes.js';
+import { reproductionRouter } from './modules/reproduction/reproduction.routes.js';
 
 export const app = express();
 
@@ -46,5 +47,6 @@ app.use('/my-account', ownAccountRouter);
 app.use('/property-settings', propertySettingsRouter);
 app.use('/catalogs', catalogsRouter);
 app.use('/superadmin', superadminRouter);
+app.use('/reproduction', reproductionRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);
