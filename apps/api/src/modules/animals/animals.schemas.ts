@@ -6,6 +6,17 @@ export const animalListSchema = z.object({
   search: z.string().trim().max(80).default(''),
 });
 
+const catalogSelectionSchema = z.object({
+  breedId: z.uuid().nullable(),
+  colorIds: z.array(z.uuid()).max(12).refine((ids) => new Set(ids).size === ids.length,
+    'No se puede seleccionar el mismo color dos veces.'),
+});
+
+export const updateAnimalCatalogSchema = catalogSelectionSchema.extend({
+  expectedVersion: z.number().int().positive(),
+});
+export type AnimalCatalogSelection = z.infer<typeof catalogSelectionSchema>;
+
 export const createAnimalSchema = z.object({
   name: z.string().trim().min(1).max(160),
   sex: z.enum(['FEMALE', 'MALE']),
@@ -18,6 +29,8 @@ export const createAnimalSchema = z.object({
     'El peso admite como máximo tres decimales.',
   ).optional(),
   initialWeightUnitCode: z.string().regex(/^[A-Z_]{2,30}$/).optional(),
+  breedId: z.uuid().nullable().optional(),
+  colorIds: catalogSelectionSchema.shape.colorIds.optional(),
 }).superRefine((value, ctx) => {
   if ((value.initialWeight === undefined) !== (value.initialWeightUnitCode === undefined)) {
     ctx.addIssue({ code: 'custom', path: ['initialWeight'],

@@ -19,8 +19,13 @@ Si no se indica ingreso, se toma el día civil actual de la zona horaria de la
 finca, no el día UTC del servidor. No se admiten fechas futuras ni nacimiento
 posterior al ingreso. El servidor valida la unidad de peso, evita marquillas
 duplicadas, respeta el límite compartido por cuenta y audita cada creación.
-La asociación de razas y colores, los progenitores, propietarios y multimedia
-se incorporarán en flujos posteriores con sus propias reglas y relaciones.
+Raza y colores ya pueden elegirse al crear un animal. Solo se admiten opciones
+vigentes de la propiedad y especie; puede haber una raza y varios colores. La
+ficha conserva los nombres aunque después se desactiven en el catálogo. La
+edición de raza y colores usa la versión del animal y conserva las asignaciones
+anteriores como filas cerradas, con auditoría. La migración `0009` crea la tabla
+histórica y la aplica el migrador habitual; no se pega SQL manualmente. Los
+progenitores, propietarios y multimedia se incorporarán en flujos posteriores.
 
 ## Estado frente a ciclo del registro
 

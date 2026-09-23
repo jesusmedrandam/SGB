@@ -3,7 +3,7 @@ import { ApiError, conflict, forbidden, invalidRequest } from '../../core/errors
 import { pool } from '../../database/pool.js';
 import { inTransaction } from '../../database/transaction.js';
 import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.types.js';
-import type { CreateAnimalInput } from './animals.schemas.js';
+import type { AnimalCatalogSelection, CreateAnimalInput } from './animals.schemas.js';
 
 interface AnimalRow {
   id: string;
@@ -32,6 +32,30 @@ function animal(row: AnimalRow) {
     availabilityStatusCode: row.availability_status_code, version: Number(row.version) };
 }
 
+interface SelectionRow { catalog_code: 'BREEDS' | 'COLORS'; id: string; name: string }
+
+async function readAnimal(client: PoolClient, context: PropertyContext, id: string) {
+  const result = await client.query<AnimalRow>(
+    `SELECT ${animalFields} FROM animal
+     WHERE property_id = $1 AND id = $2 AND record_status = 'CURRENT'`,
+    [context.propertyId, id],
+  );
+  if (!result.rows[0]) throw new ApiError(404, 'ANIMAL_NOT_FOUND', 'El animal no está disponible en esta propiedad.');
+  const choices = await client.query<SelectionRow>(
+    `SELECT aca.catalog_code, ci.id, ci.name
+       FROM animal_catalog_assignment aca
+       JOIN governed_catalog_item ci ON ci.id = aca.catalog_item_id
+      WHERE aca.animal_id = $1 AND aca.property_id = $2 AND aca.ended_at IS NULL
+      ORDER BY aca.catalog_code, lower(ci.name), ci.id`,
+    [id, context.propertyId],
+  );
+  const breed = choices.rows.find((choice) => choice.catalog_code === 'BREEDS');
+  return { ...animal(result.rows[0]),
+    breed: breed ? { id: breed.id, name: breed.name } : null,
+    colors: choices.rows.filter((choice) => choice.catalog_code === 'COLORS')
+      .map((choice) => ({ id: choice.id, name: choice.name })) };
+}
+
 export async function listAnimals(context: PropertyContext, page: number, search: string) {
   const result = await pool.query<AnimalRow>(
     `SELECT ${animalFields} FROM animal
@@ -45,13 +69,50 @@ export async function listAnimals(context: PropertyContext, page: number, search
 }
 
 export async function getAnimal(context: PropertyContext, id: string) {
-  const result = await pool.query<AnimalRow>(
-    `SELECT ${animalFields} FROM animal
-     WHERE property_id = $1 AND id = $2 AND record_status = 'CURRENT'`,
-    [context.propertyId, id],
+  return inTransaction((client) => readAnimal(client, context, id));
+}
+
+async function validateSelections(client: PoolClient, context: PropertyContext, speciesCode: string,
+  selection: AnimalCatalogSelection, existing: ReadonlyMap<string, 'BREEDS' | 'COLORS'> = new Map()) {
+  const requested = [
+    ...(selection.breedId ? [{ id: selection.breedId, code: 'BREEDS' }] : []),
+    ...selection.colorIds.map((id) => ({ id, code: 'COLORS' })),
+  ];
+  if (requested.some(({ id, code }) => existing.has(id) && existing.get(id) !== code)) {
+    throw invalidRequest('INVALID_ANIMAL_CATALOG_SELECTION', 'La raza y los colores deben conservar su tipo.');
+  }
+  const ids = requested.filter(({ id }) => !existing.has(id)).map(({ id }) => id);
+  if (!ids.length) return;
+  const result = await client.query<{ id: string; catalog_code: string }>(
+    `SELECT ci.id, ci.catalog_code FROM governed_catalog_item ci
+     WHERE ci.id = ANY($1::uuid[]) AND ci.active AND ci.deleted_at IS NULL
+       AND (ci.system_defined OR ci.property_id = $2)
+       AND (ci.species_code IS NULL OR ci.species_code = $3)
+     FOR SHARE OF ci`,
+    [ids, context.propertyId, speciesCode],
   );
-  if (!result.rows[0]) throw new ApiError(404, 'ANIMAL_NOT_FOUND', 'El animal no está disponible en esta propiedad.');
-  return animal(result.rows[0]);
+  const byId = new Map(result.rows.map((row) => [row.id, row.catalog_code]));
+  if (byId.size !== ids.length
+    || requested.some(({ id, code }) => !existing.has(id) && byId.get(id) !== code)) {
+    throw invalidRequest('INVALID_ANIMAL_CATALOG_SELECTION',
+      'Selecciona una raza y colores activos de la propiedad y especie del animal.');
+  }
+}
+
+async function insertSelections(client: PoolClient, auth: AuthState, context: PropertyContext,
+  animalId: string, selection: AnimalCatalogSelection, existing: ReadonlySet<string> = new Set()) {
+  const choices = [
+    ...(selection.breedId ? [{ code: 'BREEDS', id: selection.breedId }] : []),
+    ...selection.colorIds.map((id) => ({ code: 'COLORS', id })),
+  ].filter(({ id }) => !existing.has(id));
+  for (const choice of choices) {
+    await client.query(
+      `INSERT INTO animal_catalog_assignment(
+         animal_id, property_id, catalog_code, catalog_item_id, assigned_by
+       ) VALUES($1,$2,$3,$4,$5)`,
+      [animalId, context.propertyId, choice.code, choice.id, auth.userId],
+    );
+  }
 }
 
 async function accessForCreate(client: PoolClient, auth: AuthState, context: PropertyContext) {
@@ -99,7 +160,10 @@ export async function createAnimal(auth: AuthState, context: PropertyContext,
           input.birthDate ?? null, entryDate, input.initialWeight ?? null,
           input.initialWeightUnitCode ?? null, auth.userId],
       );
-      const created = animal(result.rows[0]!);
+      const selection = { breedId: input.breedId ?? null, colorIds: input.colorIds ?? [] };
+      await validateSelections(client, context, 'BOVINE', selection);
+      await insertSelections(client, auth, context, result.rows[0]!.id, selection);
+      const created = await readAnimal(client, context, result.rows[0]!.id);
       await client.query(
         `INSERT INTO audit_event(actor_user_id, property_id, active_role_id, action,
            entity_type, entity_id, after_data, ip_address, user_agent)
@@ -119,4 +183,61 @@ export async function createAnimal(auth: AuthState, context: PropertyContext,
     }
     throw error;
   }
+}
+
+export async function updateAnimalCatalogs(auth: AuthState, context: PropertyContext,
+  id: string, selection: AnimalCatalogSelection, expectedVersion: number, metadata: RequestMetadata) {
+  return inTransaction(async (client) => {
+    const grant = await client.query(
+      `SELECT 1 FROM property p
+       JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
+       JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'
+       JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = p.id
+       JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = p.id AND pr.active
+       JOIN role_permission rp ON rp.role_id = pr.id AND rp.permission_code = 'ANIMAL_UPDATE'
+       WHERE p.id = $1 AND pr.id = $3 AND p.deleted_at IS NULL AND p.status = 'ACTIVE'
+       FOR SHARE OF p, pm, pr`,
+      [context.propertyId, auth.userId, context.roleId],
+    );
+    if (!grant.rowCount) throw forbidden('ANIMAL_UPDATE_DENIED', 'El rol activo no permite modificar este animal.');
+    const locked = await client.query<{ version: string; species_code: string }>(
+      `SELECT version::text AS version, species_code FROM animal
+       WHERE id = $1 AND property_id = $2 AND record_status = 'CURRENT' FOR UPDATE`,
+      [id, context.propertyId],
+    );
+    if (!locked.rows[0]) throw new ApiError(404, 'ANIMAL_NOT_FOUND', 'El animal no está disponible en esta propiedad.');
+    if (Number(locked.rows[0].version) !== expectedVersion) {
+      throw conflict('ANIMAL_VERSION_CONFLICT', 'El animal cambió. Actualiza su ficha antes de guardar.');
+    }
+    const before = await readAnimal(client, context, id);
+    const currentChoices = new Map<string, 'BREEDS' | 'COLORS'>([
+      ...(before.breed ? [[before.breed.id, 'BREEDS' as const] as const] : []),
+      ...before.colors.map((color) => [color.id, 'COLORS' as const] as const),
+    ]);
+    const currentIds = new Set(currentChoices.keys());
+    const desiredIds = new Set([
+      ...(selection.breedId ? [selection.breedId] : []), ...selection.colorIds,
+    ]);
+    await validateSelections(client, context, locked.rows[0].species_code, selection, currentChoices);
+    if (currentIds.size === desiredIds.size && [...desiredIds].every((choice) => currentIds.has(choice))) {
+      return before;
+    }
+    await client.query(
+      `UPDATE animal_catalog_assignment SET ended_at = now(), ended_by = $3
+       WHERE animal_id = $1 AND property_id = $2 AND ended_at IS NULL
+         AND NOT (catalog_item_id = ANY($4::uuid[]))`,
+      [id, context.propertyId, auth.userId, [...desiredIds]],
+    );
+    await insertSelections(client, auth, context, id, selection, currentIds);
+    await client.query(`UPDATE animal SET updated_by = $2 WHERE id = $1`, [id, auth.userId]);
+    const after = await readAnimal(client, context, id);
+    await client.query(
+      `INSERT INTO audit_event(actor_user_id, property_id, active_role_id, action, entity_type,
+         entity_id, before_data, after_data, ip_address, user_agent)
+       VALUES($1,$2,$3,'ANIMAL_CATALOGS_UPDATED','ANIMAL',$4,$5::jsonb,$6::jsonb,$7,$8)`,
+      [auth.userId, context.propertyId, context.roleId, id, JSON.stringify(before),
+        JSON.stringify(after), metadata.ipAddress, metadata.userAgent],
+    );
+    return after;
+  });
 }

@@ -75,6 +75,8 @@ export interface Animal {
   initialWeightUnitCode: string | null;
   availabilityStatusCode: string;
   version: number;
+  breed?: { id: string; name: string } | null;
+  colors?: Array<{ id: string; name: string }>;
 }
 
 export interface AnimalList { items: Animal[]; page: number; hasMore: boolean }
@@ -331,9 +333,18 @@ export function createAnimal(accessToken: string, input: {
   name: string; sex: Animal['sex']; speciesCode: 'BOVINE';
   earTagCode?: string; birthDate?: string; entryDate?: string;
   initialWeight?: number; initialWeightUnitCode?: string;
+  breedId?: string | null; colorIds?: string[];
 }) {
   return request<Animal>('/animals', {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
+  });
+}
+
+export function updateAnimalCatalogs(accessToken: string, id: string, input: {
+  breedId: string | null; colorIds: string[]; expectedVersion: number;
+}) {
+  return request<Animal>(`/animals/${encodeURIComponent(id)}/catalogs`, {
+    method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
   });
 }
 

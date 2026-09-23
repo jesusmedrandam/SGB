@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { pool } from '../../database/pool.js';
-import { createAnimal, getAnimal, listAnimals } from '../animals/animals.service.js';
+import { createAnimal, getAnimal, listAnimals, updateAnimalCatalogs } from '../animals/animals.service.js';
 import {
   createCatalogItem, getCatalogReference, listCatalogItems, setCatalogItemActive,
 } from '../catalogs/catalogs.service.js';
@@ -166,8 +166,40 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       () => createCatalogItem(ownerAuth, ownerContext, 'BREEDS', { name: `Raza ${suffix}` }, metadata),
       (error: { code?: string }) => error.code === '23505',
     );
+    const decorated = await createAnimal(ownerAuth, ownerContext, {
+      name: 'Vaca con colores', sex: 'FEMALE', speciesCode: 'BOVINE',
+      breedId: breed.id, colorIds: [color.id],
+    }, metadata);
+    assert.equal(decorated.breed?.id, breed.id);
+    assert.deepEqual(decorated.colors.map((entry) => entry.id), [color.id]);
+    await assert.rejects(
+      () => createAnimal(ownerAuth, ownerContext, {
+        name: 'Color como raza', sex: 'FEMALE', speciesCode: 'BOVINE', breedId: color.id,
+      }, metadata),
+      (error: { code?: string }) => error.code === 'INVALID_ANIMAL_CATALOG_SELECTION',
+    );
     await setCatalogItemActive(ownerAuth, ownerContext, 'BREEDS', breed.id, false, metadata);
     assert.equal((await listCatalogItems(ownerContext, 'BREEDS')).find((row) => row.id === breed.id)?.active, false);
+    assert.equal((await getAnimal(ownerContext, decorated.id)).breed?.id, breed.id);
+    const changed = await updateAnimalCatalogs(ownerAuth, ownerContext, decorated.id,
+      { breedId: breed.id, colorIds: [] }, decorated.version, metadata);
+    assert.equal(changed.breed?.id, breed.id);
+    assert.deepEqual(changed.colors, []);
+    assert.equal(changed.version, decorated.version + 1);
+    await assert.rejects(
+      () => updateAnimalCatalogs(ownerAuth, ownerContext, decorated.id,
+        { breedId: breed.id, colorIds: [color.id] }, decorated.version, metadata),
+      (error: { code?: string }) => error.code === 'ANIMAL_VERSION_CONFLICT',
+    );
+    const history = await pool.query<{ ended_at: Date | null }>(
+      `SELECT ended_at FROM animal_catalog_assignment
+       WHERE animal_id = $1 AND catalog_item_id = $2`, [decorated.id, color.id],
+    );
+    assert.ok(history.rows[0]?.ended_at);
+    await assert.rejects(
+      () => pool.query(`DELETE FROM animal_catalog_assignment WHERE animal_id = $1`, [decorated.id]),
+      (error: { code?: string }) => error.code === '23514',
+    );
 
     const initialTeam = await getPropertyTeam(ownerAuth, ownerContext);
     const operatorRole = initialTeam.assignableRoles.find((role) => role.code === 'OPERATOR');
@@ -380,6 +412,12 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     assert.equal(nextProperty.accountId, accountId);
     const secondContext = { ...ownerContext, propertyId: nextProperty.propertyId, roleId: nextProperty.roleId };
     await assert.rejects(
+      () => createAnimal(ownerAuth, secondContext, {
+        name: 'Color ajeno', sex: 'MALE', speciesCode: 'BOVINE', colorIds: [color.id],
+      }, metadata),
+      (error: { code?: string }) => error.code === 'INVALID_ANIMAL_CATALOG_SELECTION',
+    );
+    await assert.rejects(
       () => getAnimal(secondContext, animal.id),
       (error: { code?: string }) => error.code === 'ANIMAL_NOT_FOUND',
     );
@@ -444,7 +482,9 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         'ANIMAL_CREATED',
         'CATALOG_ITEM_CREATED',
         'CATALOG_ITEM_CREATED',
+        'ANIMAL_CREATED',
         'CATALOG_ITEM_STATE_CHANGED',
+        'ANIMAL_CATALOGS_UPDATED',
         'PROPERTY_INVITATION_CREATED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',

@@ -1,7 +1,56 @@
 import { type FormEvent, useEffect, useState } from 'react';
-import { ApiRequestError, createAnimal, getAnimal, getAnimals, type Animal, type AnimalList } from './api';
+import {
+  ApiRequestError, createAnimal, getAnimal, getAnimals, listCatalogItems, updateAnimalCatalogs,
+  type Animal, type AnimalList, type CatalogItem,
+} from './api';
 
-export function AnimalPanel({ accessToken, canCreate }: { accessToken: string; canCreate: boolean }) {
+interface AnimalChoices { BREEDS: CatalogItem[]; COLORS: CatalogItem[] }
+
+async function loadAnimalChoices(accessToken: string): Promise<AnimalChoices> {
+  const [breeds, colors] = await Promise.all([
+    listCatalogItems(accessToken, 'BREEDS'), listCatalogItems(accessToken, 'COLORS'),
+  ]);
+  return { BREEDS: breeds, COLORS: colors };
+}
+
+function CatalogFields({ choices, selected }: { choices: AnimalChoices; selected?: Animal | null }) {
+  const breed = selected?.breed;
+  const colors = selected?.colors || [];
+  const availableBreed = choices.BREEDS.filter((entry) => entry.active &&
+    (!entry.speciesCode || entry.speciesCode === 'BOVINE'));
+  const availableColors = choices.COLORS.filter((entry) => entry.active &&
+    (!entry.speciesCode || entry.speciesCode === 'BOVINE'));
+  if (breed && !availableBreed.some((entry) => entry.id === breed.id)) {
+    availableBreed.push({ id: breed.id, name: breed.name, catalogCode: 'BREEDS',
+      speciesCode: 'BOVINE', systemDefined: false, active: false });
+  }
+  for (const color of colors) {
+    if (!availableColors.some((entry) => entry.id === color.id)) {
+      availableColors.push({ id: color.id, name: color.name, catalogCode: 'COLORS',
+        speciesCode: 'BOVINE', systemDefined: false, active: false });
+    }
+  }
+  return <>
+    <label><span>Raza</span><select name="breedId" defaultValue={breed?.id || ''}>
+      <option value="">Sin raza registrada</option>
+      {availableBreed.map((entry) => <option key={entry.id} value={entry.id}>
+        {entry.name}{entry.active ? '' : ' (inactiva)'}
+      </option>)}
+    </select></label>
+    <fieldset className="animal-colors"><legend>Colores</legend>
+      {availableColors.length === 0 && <small>No hay colores disponibles en esta finca.</small>}
+      {availableColors.map((entry) => <label key={entry.id}>
+        <input type="checkbox" name="colorIds" value={entry.id}
+          defaultChecked={colors.some((color) => color.id === entry.id)} />
+        <span>{entry.name}{entry.active ? '' : ' (inactivo)'}</span>
+      </label>)}
+    </fieldset>
+  </>;
+}
+
+export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs }: {
+  accessToken: string; canCreate: boolean; canUpdate: boolean; canViewCatalogs: boolean;
+}) {
   const [result, setResult] = useState<AnimalList | null>(null);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
@@ -11,6 +60,7 @@ export function AnimalPanel({ accessToken, canCreate }: { accessToken: string; c
   const [showCreate, setShowCreate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [choices, setChoices] = useState<AnimalChoices | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -20,6 +70,15 @@ export function AnimalPanel({ accessToken, canCreate }: { accessToken: string; c
     return () => { active = false; };
   }, [accessToken, page, search, revision]);
 
+  useEffect(() => {
+    if (!canViewCatalogs) return;
+    let active = true;
+    void loadAnimalChoices(accessToken)
+      .then((value) => { if (active) setChoices(value); })
+      .catch(() => { if (active) setChoices(null); });
+    return () => { active = false; };
+  }, [accessToken, canViewCatalogs]);
+
   function find(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPage(1); setSearch(searchInput.trim()); setSelected(null);
@@ -27,7 +86,10 @@ export function AnimalPanel({ accessToken, canCreate }: { accessToken: string; c
 
   async function open(id: string) {
     setBusy(true); setError(null);
-    try { setSelected(await getAnimal(accessToken, id)); }
+    try {
+      setSelected(await getAnimal(accessToken, id));
+      if (canViewCatalogs) void loadAnimalChoices(accessToken).then(setChoices).catch(() => setChoices(null));
+    }
     catch (failure) { setError(message(failure)); }
     finally { setBusy(false); }
   }
@@ -41,6 +103,8 @@ export function AnimalPanel({ accessToken, canCreate }: { accessToken: string; c
     const earTagCode = optional('earTagCode');
     const birthDate = optional('birthDate');
     const entryDate = optional('entryDate');
+    const breedId = optional('breedId');
+    const colorIds = data.getAll('colorIds').map(String);
     setBusy(true); setError(null);
     try {
       const created = await createAnimal(accessToken, {
@@ -51,6 +115,7 @@ export function AnimalPanel({ accessToken, canCreate }: { accessToken: string; c
         ...(birthDate ? { birthDate } : {}),
         ...(entryDate ? { entryDate } : {}),
         ...(weight ? { initialWeight: Number(weight), initialWeightUnitCode: String(data.get('weightUnit')) } : {}),
+        ...(choices ? { breedId: breedId ?? null, colorIds } : {}),
       });
       setSelected(created); setShowCreate(false); setSearchInput(''); setSearch(''); setPage(1);
       setRevision((value) => value + 1);
@@ -58,11 +123,33 @@ export function AnimalPanel({ accessToken, canCreate }: { accessToken: string; c
     finally { setBusy(false); }
   }
 
+  async function changeCatalogs(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selected) return;
+    const data = new FormData(event.currentTarget);
+    setBusy(true); setError(null);
+    try {
+      setSelected(await updateAnimalCatalogs(accessToken, selected.id, {
+        breedId: String(data.get('breedId') || '') || null,
+        colorIds: data.getAll('colorIds').map(String),
+        expectedVersion: selected.version,
+      }));
+    } catch (failure) {
+      setError(message(failure));
+      if (failure instanceof ApiRequestError && failure.code === 'ANIMAL_VERSION_CONFLICT') {
+        try { setSelected(await getAnimal(accessToken, selected.id)); } catch { /* conserva el error original */ }
+      }
+    } finally { setBusy(false); }
+  }
+
   return <section className="section-block animal-panel">
     <div className="section-heading"><div><span className="eyebrow">Núcleo ganadero</span><h2>Animales</h2>
       <p className="muted">Registros de la propiedad activa.</p></div>
       {canCreate && <button className="primary-button compact" type="button" disabled={busy}
-        onClick={() => setShowCreate((value) => !value)}>{showCreate ? 'Cerrar' : '+ Animal'}</button>}
+        onClick={() => {
+          setShowCreate((value) => !value);
+          if (canViewCatalogs) void loadAnimalChoices(accessToken).then(setChoices).catch(() => setChoices(null));
+        }}>{showCreate ? 'Cerrar' : '+ Animal'}</button>}
     </div>
     {error && <div className="form-error admin-error" role="alert">{error}</div>}
     {showCreate && <form className="animal-create" onSubmit={(event) => void create(event)}>
@@ -79,6 +166,7 @@ export function AnimalPanel({ accessToken, canCreate }: { accessToken: string; c
       <label><span>Unidad de peso</span><select name="weightUnit" disabled={busy} defaultValue="KILOGRAM">
         <option value="KILOGRAM">kg</option><option value="POUND">lb</option>
         <option value="GRAM">g</option></select></label>
+      {choices && <CatalogFields choices={choices} />}
       <button className="primary-button compact" type="submit" disabled={busy}>
         {busy ? 'Guardando…' : 'Registrar animal'}</button>
     </form>}
@@ -110,7 +198,15 @@ export function AnimalPanel({ accessToken, canCreate }: { accessToken: string; c
         <div><dt>Ingreso</dt><dd>{selected.entryDate}</dd></div>
         <div><dt>Peso inicial</dt><dd>{selected.initialWeight === null ? 'No registrado'
           : `${selected.initialWeight} ${selected.initialWeightUnitCode === 'POUND' ? 'lb'
-            : selected.initialWeightUnitCode === 'GRAM' ? 'g' : 'kg'}`}</dd></div></dl>
+            : selected.initialWeightUnitCode === 'GRAM' ? 'g' : 'kg'}`}</dd></div>
+        <div><dt>Raza</dt><dd>{selected.breed?.name || 'No registrada'}</dd></div>
+        <div><dt>Colores</dt><dd>{selected.colors?.map((color) => color.name).join(', ') || 'No registrados'}</dd></div></dl>
+      {canUpdate && choices && <form className="animal-catalog-edit" key={`${selected.id}:${selected.version}`}
+        onSubmit={(event) => void changeCatalogs(event)}>
+        <h4>Raza y colores</h4><CatalogFields choices={choices} selected={selected} />
+        <button className="primary-button compact" type="submit" disabled={busy}>
+          {busy ? 'Guardando…' : 'Guardar cambios'}</button>
+      </form>}
     </div>}
   </section>;
 }

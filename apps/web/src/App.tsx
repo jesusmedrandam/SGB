@@ -170,7 +170,9 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
           canManage={activeRole.permissions.includes('CATALOG_MANAGE')} />}
       {activeProperty && activeRole?.permissions.includes('ANIMAL_VIEW') &&
         <AnimalPanel key={`${activeProperty.id}:${activeRole.id}`} accessToken={session.accessToken}
-          canCreate={activeRole.permissions.includes('ANIMAL_CREATE')} />}
+          canCreate={activeRole.permissions.includes('ANIMAL_CREATE')}
+          canUpdate={activeRole.permissions.includes('ANIMAL_UPDATE')}
+          canViewCatalogs={activeRole.permissions.includes('CATALOG_VIEW')} />}
     </main>
   </div>;
 }
