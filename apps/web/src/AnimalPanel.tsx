@@ -13,6 +13,9 @@ import {
 import {ShellIcon} from './ShellIcon';
 
 interface AnimalChoices { BREEDS: CatalogItem[]; COLORS: CatalogItem[] }
+const animalStatusLabels:Record<string,string>={
+  ACTIVE:'Activo',INACTIVE:'Inactivo',DEAD:'Fallecido',MISSING:'Desaparecido',
+};
 
 async function loadAnimalChoices(accessToken: string): Promise<AnimalChoices> {
   const [breeds, colors] = await Promise.all([
@@ -524,16 +527,24 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       <label><span className="sr-only">Buscar por nombre, arete o marquilla</span><input value={searchInput}
         placeholder="Buscar nombre, arete o marquilla…" maxLength={80}
         onChange={(event) => setSearchInput(event.target.value)} /></label>
-      <button className="secondary-button compact" type="submit">Buscar</button>
-      <button type="button" className="secondary-button compact" aria-expanded={advancedOpen}
-        onClick={()=>setAdvancedOpen(open=>!open)}>⚙ Filtros{Object.values(filters).filter(Boolean).length
-          ? ` (${Object.values(filters).filter(Boolean).length})`:''}</button>
+      <button className="secondary-button compact animal-toolbar-button" type="submit"
+        aria-label="Buscar" title="Buscar"><ShellIcon name="search"/></button>
+      <select className="animal-sex-select" aria-label="Filtrar por sexo"
+        value={filters.sex??''} onChange={event=>setFilter('sex',event.target.value)}>
+        <option value="">Todos los sexos</option><option value="FEMALE">Hembras</option>
+        <option value="MALE">Machos</option>
+      </select>
+      <button type="button" className={`secondary-button compact animal-toolbar-button${advancedOpen?' active':''}`}
+        aria-label="Filtros avanzados" title="Filtros avanzados" aria-expanded={advancedOpen}
+        onClick={()=>setAdvancedOpen(open=>!open)}><ShellIcon name="filter"/>
+        {Object.values(filters).filter(Boolean).length>0&&<span className="animal-filter-count">
+          {Object.values(filters).filter(Boolean).length}</span>}</button>
+      <span className="animal-total" aria-live="polite">{result?.total??0} animales</span>
     </form>
-    <div className="animal-quick-filters" role="group" aria-label="Sexo">
-      {([['','Todos'],['FEMALE','Hembras'],['MALE','Machos']] as const).map(([value,label])=><button
-        key={value} type="button" className={filters.sex===value||!filters.sex&&!value?'active':''}
-        aria-pressed={filters.sex===value||!filters.sex&&!value}
-        onClick={()=>setFilter('sex',value)}>{label}</button>)}
+    <div className="animal-quick-filters">
+      <label><span className="sr-only">Grupo</span><select value={filters.groupId??''}
+        onChange={event=>setFilter('groupId',event.target.value)}><option value="">Todos los grupos</option>
+        {groups.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <label><span className="sr-only">Clasificación</span><select value={classification} onChange={event=>{
         setClassification(event.target.value);setPage(1);}}><option value="">Todas</option>
         {(['VACA','VACONA','TERNERA','TORO','TORETE','TERNERO'] as const)
@@ -543,9 +554,6 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     </div>
     {advancedOpen&&<div className="animal-advanced-filters">
       <div className="animal-filter-grid">
-        <label><span>Grupo</span><select value={filters.groupId??''} onChange={event=>setFilter('groupId',event.target.value)}>
-          <option value="">Todos</option>{groups.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
-        </select></label>
         <label><span>Estado</span><select value={filters.status??''} onChange={event=>setFilter('status',event.target.value)}>
           <option value="">Todos</option><option value="ACTIVE">Activo</option><option value="INACTIVE">Inactivo</option>
           <option value="DEAD">Fallecido</option><option value="MISSING">Desaparecido</option>
@@ -580,12 +588,15 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         <span className="animal-row-avatar">{entry.profilePhotoUrl?<img src={entry.profilePhotoUrl} alt=""/>
           :<ShellIcon name="animals" size={24}/>}</span>
         <span className="animal-row-content"><strong>{entry.name}</strong>
-          <small>{entry.description||'Sin descripción'}</small>
-          <small>{entry.sex==='FEMALE'?'Hembra':'Macho'} · {entry.group?.name||'Sin grupo'}
-            {entry.location?` · ${entry.location.name}`:''}</small>
-          <small>{entry.earTagCode?`Arete ${entry.earTagCode}`:'Sin arete'} · {entry.birthDate||'Sin fecha de nacimiento'}</small>
+          {entry.description&&<small className="animal-row-description">{entry.description}</small>}
+          <small className="animal-row-facts">{entry.classification?.name??'Animal'} · {entry.sex==='FEMALE'?'Hembra':'Macho'}
+            {' · '}{entry.group?.name||'Sin grupo'}{entry.location?` · ${entry.location.name}`:''}</small>
+          <span className="animal-row-footer"><small>{entry.earTagCode?`Arete ${entry.earTagCode} · `:''}
+            {entry.birthDate?`Nacimiento ${entry.birthDate}`:'Sin fecha de nacimiento'}</small>
+            {entry.primaryOwnerName&&<small>Propietario: {entry.primaryOwnerName}</small>}</span>
         </span>
-        <span className="animal-row-category">{entry.classification?.name??'Animal'}</span>
+        <span className={`animal-row-status ${entry.availabilityStatusCode.toLowerCase()}`}>
+          {animalStatusLabels[entry.availabilityStatusCode]??entry.availabilityStatusCode}</span>
       </button>)}</div>
       {(page > 1 || result.hasMore) && <div className="animal-pages">
         <button className="secondary-button compact" type="button" disabled={page === 1}

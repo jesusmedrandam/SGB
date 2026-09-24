@@ -29,6 +29,8 @@ interface AnimalRow {
   location_id?: string | null; location_name?: string | null;
   location_kind?: 'PASTURE' | 'CORRAL' | null;
   profile_photo_asset:string|null;
+  primary_owner_name?:string|null;
+  total_count?:number;
 }
 
 const animalFields = `id, name, description, ear_tag_code, sex, species_code,
@@ -129,7 +131,12 @@ export async function listAnimals(context: PropertyContext, filters: z.infer<typ
     brandId,birthFrom,birthTo}=filters;
   const result = await pool.query<AnimalRow>(
     `SELECT ${animalFields}, pos.group_id, pos.group_name, pos.location_id, pos.location_name,
-       pos.location_kind FROM animal
+       pos.location_kind, count(*) OVER()::int AS total_count,
+       (SELECT pp.display_name FROM animal_ownership ao
+         JOIN property_party pp ON pp.id=ao.party_id
+         WHERE ao.animal_id=animal.id AND ao.valid_until IS NULL
+         ORDER BY ao.is_primary DESC, lower(pp.display_name) LIMIT 1) AS primary_owner_name
+     FROM animal
      LEFT JOIN animal_current_position pos ON pos.animal_id=animal.id AND pos.property_id=animal.property_id
      WHERE animal.property_id = $1 AND animal.record_status = 'CURRENT'
        AND ($4::varchar IS NULL OR classify_animal(animal.id,
@@ -161,7 +168,9 @@ export async function listAnimals(context: PropertyContext, filters: z.infer<typ
       groupId??null,locationId??null,ownerId??null,breedId??null,colorId??null,brandId??null,
       birthFrom??null,birthTo??null],
   );
-  return { items: result.rows.slice(0, 40).map(animal), page, hasMore: result.rows.length > 40 };
+  return { items: result.rows.slice(0, 40).map(row=>({...animal(row),
+    primaryOwnerName:row.primary_owner_name??null})),
+    page, hasMore: result.rows.length > 40,total:result.rows[0]?.total_count??0 };
 }
 
 export async function getAnimal(context: PropertyContext, id: string) {

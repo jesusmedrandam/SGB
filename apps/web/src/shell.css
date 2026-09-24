@@ -616,19 +616,28 @@ textarea { border-radius: 12px; }
 .animal-quick-filters button { border:1px solid var(--border);border-radius:999px;padding:7px 13px;
   background:var(--surface);color:var(--text);cursor:pointer;font-weight:700; }
 .animal-quick-filters button.active { border-color:var(--primary);background:var(--primary-soft);color:var(--primary-dark); }
-.animal-quick-filters label { margin-left:auto; }
+.animal-quick-filters label { margin:0; }
 .animal-quick-filters select { min-width:165px; }
 .animal-advanced-filters { border:1px solid var(--border);border-radius:16px;padding:15px;
   background:var(--surface);margin-bottom:15px; }
 .animal-filter-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px; }
 .animal-filter-grid label { display:grid;gap:6px;min-width:0;font-size:.78rem;font-weight:700; }
 .animal-advanced-filters .text-button { margin-top:10px; }
-.animal-row { gap:14px;justify-content:flex-start; }
-.animal-row-avatar { flex:0 0 49px;display:grid;place-items:center;width:49px;height:49px;
+.animal-row { gap:14px;justify-content:flex-start;align-items:flex-start; }
+.animal-row-avatar { flex:0 0 62px;display:grid;place-items:center;width:62px;height:62px;
   border-radius:13px;color:var(--primary);background:var(--primary-soft);overflow:hidden; }
 .animal-row-avatar img { width:100%;height:100%;object-fit:cover; }
 .animal-row .animal-row-content { flex:1;min-width:0;display:grid;gap:3px; }
 .animal-row .animal-row-content small { white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.animal-row .animal-row-content strong { font-size:1rem; }
+.animal-row .animal-row-content .animal-row-description { color:var(--text); }
+.animal-row-facts { color:var(--muted); }
+.animal-row-footer { display:flex;align-items:center;gap:8px 18px;flex-wrap:wrap;margin-top:5px;
+  padding-top:7px;border-top:1px solid var(--border); }
+.animal-row > .animal-row-status { flex:0 0 auto;border-radius:5px;padding:3px 8px;font-size:.69rem;font-weight:750;
+  color:#286047;background:#e2f2e7; }
+.animal-row > .animal-row-status.inactive,.animal-row > .animal-row-status.missing { color:#8a611d;background:#fff1d4; }
+.animal-row > .animal-row-status.dead { color:#8a4040;background:#fbe6e6; }
 .animal-row-category { border-radius:999px;padding:6px 10px;color:var(--primary-dark);
   background:var(--primary-soft);white-space:nowrap;font-size:.75rem;font-weight:750; }
 .animal-classification-badge { padding:7px 11px;border-radius:999px;color:var(--primary-dark);
@@ -645,9 +654,16 @@ textarea { border-radius: 12px; }
 .animal-detail .animal-edit-section > summary { cursor:pointer;color:var(--primary);font-weight:800; }
 .animal-list { gap:7px; }
 .animal-row { border-radius:12px;box-shadow:0 4px 14px rgba(19,51,34,.04); }
-.animal-row::after { content:'›';padding-left:10px;color:var(--primary);font-size:1.3rem; }
-.animal-search { max-width:840px; }
-.animal-search label:last-child { flex:0 1 195px; }
+.animal-search { max-width:none;align-items:center;gap:7px;margin:14px 0 8px; }
+.animal-search label { flex:1 1 auto; }
+.animal-search input { width:100%; }
+.animal-search .animal-toolbar-button { position:relative;display:grid;place-items:center;flex:0 0 39px;
+  width:39px;height:39px;padding:7px; }
+.animal-search .animal-toolbar-button.active { border-color:var(--primary);background:var(--primary-soft); }
+.animal-sex-select { flex:0 0 140px;max-width:140px; }
+.animal-filter-count { position:absolute;right:-5px;top:-7px;border-radius:99px;
+  background:var(--primary);color:#fff;font-size:.61rem;min-width:16px;line-height:16px; }
+.animal-total { flex:0 0 auto;color:var(--muted);font-size:.78rem;font-weight:700;white-space:nowrap; }
 .classification-section { margin-bottom:12px; }
 .classification-form { display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px; }
 .classification-form label { display:grid;gap:5px;min-width:0; }
@@ -678,10 +694,13 @@ textarea { border-radius: 12px; }
   .animal-profile-action-strip { margin:-35px 0 15px;padding-left:0;padding-top:38px; }
   .animal-profile-action-strip button { margin-left:0; }
   .animal-profile-buttons { width:100%;margin-left:0; }
-  .animal-quick-filters label { flex:1 1 100%;margin-left:0; }
-  .animal-row-category { display:none; }
+  .animal-quick-filters label { flex:1 1 45%; }
+  .animal-quick-filters select { min-width:0;width:100%; }
+  .animal-row-footer { gap:2px 12px; }
+  .animal-row-status { font-size:.63rem; }
   .animal-data-card dl { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .animal-search { max-width:none;flex-wrap:wrap; }
-  .animal-search label:first-child { flex:1 1 65%; }
-  .animal-search label:last-child { flex:1 1 100%; }
+  .animal-search { flex-direction:row;align-items:center;flex-wrap:wrap; }
+  .animal-search label:first-child { flex:1 1 calc(100% - 48px); }
+  .animal-sex-select { flex:1 1 160px;max-width:none; }
+  .animal-total { margin-left:auto; }
 }

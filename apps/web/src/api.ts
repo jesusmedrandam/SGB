@@ -78,6 +78,7 @@ export interface Animal {
   initialWeightUnitCode: string | null;
   availabilityStatusCode: string;
   profilePhotoUrl?:string|null;
+  primaryOwnerName?:string|null;
   classification: {code:string;name:string}|null;
   version: number;
   breed?: { id: string; name: string } | null;
@@ -94,7 +95,7 @@ export interface Animal {
 export interface LivestockBrand { id: string; name: string; active: boolean; owner_ids?: string[] }
 export interface LivestockOwner { id: string; name: string; kind: string; active: boolean }
 
-export interface AnimalList { items: Animal[]; page: number; hasMore: boolean }
+export interface AnimalList { items: Animal[]; page: number; hasMore: boolean; total:number }
 export interface AnimalSummary {
   total:number;classifications:Array<{code:string;label:string;count:number}>;
   groups:Array<{name:string;count:number}>;sex:Array<{sex:'FEMALE'|'MALE';count:number}>;

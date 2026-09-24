@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 export type ShellIconName = 'home'|'animals'|'groups'|'reproduction'|'production'|'movements'|'health'|'cleanings'|'activities'|'media'|'catalogs'|
-  'team'|'settings'|'admin'|'menu'|'close'|'moon'|'sun'|'logout'|'chevron'|'camera'|'edit';
+  'team'|'settings'|'admin'|'menu'|'close'|'moon'|'sun'|'logout'|'chevron'|'camera'|'edit'|'search'|'filter';
 
 const shapes: Record<ShellIconName, ReactNode> = {
   home: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
@@ -26,6 +26,8 @@ const shapes: Record<ShellIconName, ReactNode> = {
   chevron: <path d="m9 18 6-6-6-6"/>,
   camera: <><path d="M4 6h4l2-3h4l2 3h4a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="4"/></>,
   edit: <><path d="m4 17 11-11 3 3L7 20l-4 1 1-4ZM14 7l3-3a2 2 0 0 1 3 3l-3 3"/></>,
+  search: <><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></>,
+  filter: <><path d="M4 7h16M7 12h10M10 17h4"/></>,
 };
 
 export function ShellIcon({name,size=19}:{name:ShellIconName;size?:number}) {
