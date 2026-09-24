@@ -49,7 +49,9 @@ function QuotaEditor({ quota, busy, onSave }: {
   </form>;
 }
 
-export function SuperadminPanel({ accessToken }: { accessToken: string }) {
+export function SuperadminPanel({ accessToken, onSettingsChanged }: {
+  accessToken: string; onSettingsChanged: () => Promise<void>;
+}) {
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
   const [detail, setDetail] = useState<AccountDetails | null>(null);
   const [busy, setBusy] = useState(false);
@@ -105,7 +107,8 @@ export function SuperadminPanel({ accessToken }: { accessToken: string }) {
   async function saveModule(code: string, enabled: boolean) {
     if (!detail) return;
     setBusy(true); setError(null);
-    try { await updateAdministrativeModule(accessToken, detail.account.id, code, enabled); await reloadAccount(); }
+    try { await updateAdministrativeModule(accessToken, detail.account.id, code, enabled);
+      await reloadAccount(); await onSettingsChanged(); }
     catch (saveError) { setError(message(saveError)); }
     finally { setBusy(false); }
   }

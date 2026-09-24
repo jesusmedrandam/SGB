@@ -7,7 +7,7 @@ const labels:Record<(typeof codes)[number],string>={VACA:'Vacas',VACONA:'Vaconas
   TERNERA:'Terneras',TORO:'Toros',TORETE:'Toretes',TERNERO:'Terneros'};
 
 export function HomeSummary({accessToken,onAnimals,onGroups,onClassification}:{accessToken:string;
-  onAnimals:()=>void;onGroups:()=>void;onClassification:(code:string)=>void}){
+  onAnimals:()=>void;onGroups:(()=>void)|undefined;onClassification:(code:string)=>void}){
   const [data,setData]=useState<AnimalSummary|null>(null);
   const [error,setError]=useState<string|null>(null);
   useEffect(()=>{let active=true;void getAnimalSummary(accessToken)
@@ -26,14 +26,14 @@ export function HomeSummary({accessToken,onAnimals,onGroups,onClassification}:{a
     <div className="home-herd-facts"><button type="button" onClick={onAnimals}>
       <strong>{sex('FEMALE')}</strong><small>Hembras</small></button>
       <button type="button" onClick={onAnimals}><strong>{sex('MALE')}</strong><small>Machos</small></button>
-      <button type="button" onClick={onGroups}><strong>{data.groups.length}</strong><small>Grupos</small></button></div>
+      {onGroups&&<button type="button" onClick={onGroups}><strong>{data.groups.length}</strong><small>Grupos</small></button>}</div>
     <div className="home-herd-sections"><div><h3>Clasificación</h3>
       <div className="home-classification-grid">{codes.map(code=><button type="button" key={code}
         onClick={()=>onClassification(code)}><strong>{count(code)}</strong><small>{data.classifications.find(row=>row.code===code)?.label??labels[code]}</small></button>)}</div>
-    </div><div><h3>Grupos de esta propiedad</h3><div className="home-group-grid">
+    </div>{onGroups&&<div><h3>Grupos de esta propiedad</h3><div className="home-group-grid">
       {data.groups.map(group=><button key={group.name} type="button" onClick={onGroups}>
         <strong>{group.count}</strong><small>{group.name}</small></button>)}
       {!data.groups.length&&<small className="muted">Todavía no hay grupos.</small>}
-    </div></div></div>
+    </div></div>}</div>
   </section>;
 }

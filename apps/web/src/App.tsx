@@ -96,10 +96,11 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
   const activeRole = activeProperty?.roles.find((role) => role.id === overview.activeContext?.roleId);
   const has=(permission:string)=>Boolean(activeProperty && activeRole?.permissions.includes(permission));
   const modules=activeProperty?.enabledModules??[];
+  const showGroups=has('GROUP_VIEW')&&(modules.includes('PASTURES')||modules.includes('CORRALS'));
   const navigation=([
     {id:'home',label:'Panel',description:'Resumen de tu propiedad',icon:'home',group:'principal',enabled:true},
     {id:'animals',label:'Animales',description:'Inventario y fichas',icon:'animals',group:'principal',enabled:has('ANIMAL_VIEW')},
-    {id:'groups',label:'Grupos y potreros',description:'Grupos y ubicaciones',icon:'groups',group:'principal',enabled:has('GROUP_VIEW')},
+    {id:'groups',label:'Grupos y potreros',description:'Grupos y ubicaciones',icon:'groups',group:'principal',enabled:showGroups},
     {id:'reproduction',label:'Reproducción',description:'Celos, preñeces y partos',icon:'reproduction',group:'operations',enabled:has('REPRODUCTION_VIEW')&&modules.includes('REPRODUCTION')},
     {id:'production',label:'Producción',description:'Lactancias y ordeños',icon:'production',group:'operations',enabled:has('PRODUCTION_VIEW')&&modules.includes('PRODUCTION')},
     {id:'movements',label:'Movimientos',description:'Grupos, potreros y traslados',icon:'movements',group:'operations',enabled:has('MOVEMENT_VIEW')&&modules.includes('MOVEMENTS')},
@@ -203,7 +204,7 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
       </section>
       {activeProperty&&activeRole?.permissions.includes('ANIMAL_VIEW')&&<HomeSummary
         key={activeProperty.id} accessToken={session.accessToken}
-        onAnimals={()=>openSection('animals')} onGroups={()=>openSection('groups')}
+        onAnimals={()=>openSection('animals')} onGroups={showGroups?()=>openSection('groups'):undefined}
         onClassification={code=>openSection('animals',code)}/>}
       {!overview.ownedAccount && <section className="context-card">
         <div><span className="eyebrow">Tu cuenta</span><h2>Propiedad propia</h2>
@@ -241,7 +242,8 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
         </button>)}</div>
       </section>
       </>}
-      {section==='admin' && overview.user.isSuperadmin && <SuperadminPanel accessToken={session.accessToken} />}
+      {section==='admin' && overview.user.isSuperadmin && <SuperadminPanel
+        accessToken={session.accessToken} onSettingsChanged={onSettingsChanged} />}
       {section==='team' && activeProperty && activeRole?.permissions.includes('MEMBERSHIP_VIEW')
         && <PropertyTeamPanel key={`${activeProperty?.id}:${activeRole.id}`} accessToken={session.accessToken} />}
       {section==='settings' && activeProperty && activeRole?.permissions.includes('MODULE_VIEW') &&
@@ -261,7 +263,7 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
             && activeRole.permissions.includes('MEDIA_VIEW')}
           canManageMedia={activeProperty.enabledModules.includes('MULTIMEDIA')
             && activeRole.permissions.includes('MEDIA_MANAGE')} />}
-      {section==='groups' && activeProperty && activeRole?.permissions.includes('GROUP_VIEW') &&
+      {section==='groups' && activeProperty && activeRole && showGroups &&
         <GroupPanel key={`groups:${activeProperty.id}:${activeRole.id}`} accessToken={session.accessToken}
           modules={activeProperty.enabledModules}
           canManage={activeRole.permissions.includes('GROUP_MANAGE')}
