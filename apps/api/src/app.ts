@@ -23,6 +23,7 @@ import { cleaningsRouter } from './modules/cleanings/cleanings.routes.js';
 import { activitiesRouter } from './modules/activities/activities.routes.js';
 import { mediaRouter } from './modules/media/media.routes.js';
 import { weighingsRouter } from './modules/weighings/weighings.routes.js';
+import { auditRouter } from './modules/audit/audit.routes.js';
 
 export const app = express();
 
@@ -62,5 +63,6 @@ app.use('/cleanings', cleaningsRouter);
 app.use('/activities', activitiesRouter);
 app.use('/media', mediaRouter);
 app.use('/weighings', weighingsRouter);
+app.use('/audit', auditRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);
