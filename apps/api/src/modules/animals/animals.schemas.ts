@@ -47,6 +47,9 @@ export const updateAnimalCatalogSchema = catalogSelectionSchema.extend({
 export type AnimalCatalogSelection = z.infer<typeof catalogSelectionSchema>;
 
 export const createAnimalSchema = z.object({
+  groupId: z.uuid().optional(),
+  mother: parentSchema.optional(),
+  father: parentSchema.optional(),
   name: z.string().trim().min(1).max(160),
   description: z.string().trim().max(5000).nullable().optional(),
   sex: z.enum(['FEMALE', 'MALE']),
@@ -65,6 +68,8 @@ export const createAnimalSchema = z.object({
   brandIds: brandIdsSchema.optional(),
   owners: ownerEntriesSchema.optional(),
 }).superRefine((value, ctx) => {
+  if (!value.groupId) ctx.addIssue({ code: 'custom', path: ['groupId'],
+    message: 'Selecciona un grupo para el animal.' });
   if ((value.initialWeight === undefined) !== (value.initialWeightUnitCode === undefined)) {
     ctx.addIssue({ code: 'custom', path: ['initialWeight'],
       message: 'Indica juntos el peso y su unidad.' });

@@ -69,7 +69,8 @@ const locationFields = `pl.id, pl.kind, pl.name, pl.description, pl.active, pl.v
   lg.id AS group_id, lg.name AS group_name,
   COALESCE((SELECT json_agg(json_build_object('name', pg.name, 'percent', pg.estimated_percent,
     'area', pg.area_value, 'areaUnitCode', pg.area_unit_code, 'sowingDate', pg.sowing_date,
-    'notes', pg.notes) ORDER BY pg.name) FROM pasture_grass pg WHERE pg.location_id = pl.id), '[]'::json) AS grasses`;
+    'notes', pg.notes, 'catalogItemId', pg.catalog_item_id) ORDER BY pg.name)
+    FROM pasture_grass pg WHERE pg.location_id = pl.id), '[]'::json) AS grasses`;
 const locationJoins = `FROM physical_location pl
   LEFT JOIN group_location_assignment gla ON gla.location_id = pl.id AND gla.ended_at IS NULL
   LEFT JOIN livestock_group lg ON lg.id = gla.group_id`;
@@ -157,17 +158,27 @@ type LocationInput = {
   pastureUse?: string | null | undefined; capacityEstimate?: number | null | undefined;
   waterAvailable?: boolean | null | undefined; lastRestDate?: string | null | undefined;
   floorMaterial?: string | null | undefined; covered?: boolean | null | undefined;
-  grasses?: Array<{ name: string; percent?: number | null | undefined;
+  grasses?: Array<{ name: string; catalogItemId?:string|null|undefined;percent?: number | null | undefined;
     area?: number | null | undefined; areaUnitCode?: string | null | undefined;
     sowingDate?: string | null | undefined; notes?: string | null | undefined }> | undefined;
 };
 async function saveGrasses(client: PoolClient, locationId: string, input: LocationInput) {
   await client.query('DELETE FROM pasture_grass WHERE location_id = $1', [locationId]);
-  for (const grass of input.grasses ?? []) await client.query(
-    `INSERT INTO pasture_grass(location_id, name, estimated_percent, area_value, area_unit_code,
-      sowing_date, notes) VALUES($1,$2,$3,$4,$5,$6,$7)`,
-    [locationId, grass.name, grass.percent ?? null, grass.area ?? null,
-      grass.areaUnitCode ?? null, grass.sowingDate ?? null, grass.notes ?? null]);
+  for (const grass of input.grasses ?? []) {
+    if(grass.catalogItemId){
+      const valid=await client.query(`SELECT 1 FROM governed_catalog_item ci
+        JOIN physical_location pl ON pl.id=$2
+        WHERE ci.id=$1 AND ci.catalog_code='GRASS_TYPES' AND ci.active AND ci.deleted_at IS NULL
+          AND (ci.system_defined OR ci.account_id=pl.account_id) AND ci.name=$3`,
+          [grass.catalogItemId,locationId,grass.name]);
+      if(!valid.rowCount)throw invalidRequest('GRASS_UNAVAILABLE','Selecciona un pasto del catálogo.');
+    }
+    await client.query(
+      `INSERT INTO pasture_grass(location_id, name, estimated_percent, area_value, area_unit_code,
+        sowing_date, notes,catalog_item_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [locationId, grass.name, grass.percent ?? null, grass.area ?? null,
+        grass.areaUnitCode ?? null, grass.sowingDate ?? null, grass.notes ?? null,grass.catalogItemId??null]);
+  }
 }
 async function locationById(client: PoolClient, propertyId: string, id: string) {
   const result = await client.query<LocationRow>(

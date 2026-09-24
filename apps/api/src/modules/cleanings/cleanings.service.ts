@@ -31,7 +31,9 @@ async function audit(client:PoolClient,auth:AuthState,context:PropertyContext,
       before===null?null:JSON.stringify(before),JSON.stringify(after),metadata.ipAddress,metadata.userAgent]);
 }
 export async function listProducts(context:PropertyContext){
-  return (await pool.query(`SELECT p.id,p.name,p.category,p.active FROM pasture_agrochemical p
+  return (await pool.query(`SELECT p.id,p.name,p.category,p.active,
+    p.active_ingredient AS "activeIngredient",p.formulated_by AS "formulatedBy",p.description
+    FROM pasture_agrochemical p
     JOIN property property ON property.account_id=p.account_id WHERE property.id=$1
     ORDER BY p.active DESC,lower(p.name)`,[context.propertyId])).rows;
 }
@@ -39,9 +41,19 @@ export async function createProduct(auth:AuthState,context:PropertyContext,input
   metadata:RequestMetadata){
   return inTransaction(async(client)=>{
     const {account_id}=await access(client,auth,context,'CLEANING_MANAGE');
-    const row=(await client.query(`INSERT INTO pasture_agrochemical(account_id,name,category,created_by)
-      VALUES($1,$2,$3,$4) RETURNING id,name,category,active`,
-      [account_id,input.name,input.category??null,auth.userId])).rows[0]!;
+    if(input.category){
+      const category=await client.query(`SELECT 1 FROM governed_catalog_item
+        WHERE catalog_code='AGROCHEMICAL_CATEGORIES' AND name=$1 AND active AND deleted_at IS NULL
+          AND (system_defined OR account_id=$2)`,[input.category,account_id]);
+      if(!category.rowCount)throw invalidRequest('CLEANING_CATEGORY_INVALID',
+        'Selecciona una categoría del catálogo.');
+    }
+    const row=(await client.query(`INSERT INTO pasture_agrochemical(account_id,name,category,
+      active_ingredient,formulated_by,description,created_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,name,category,active,
+        active_ingredient AS "activeIngredient",formulated_by AS "formulatedBy",description`,
+      [account_id,input.name,input.category??null,input.activeIngredient??null,
+        input.formulatedBy??null,input.description??null,auth.userId])).rows[0]!;
     await audit(client,auth,context,metadata,'CLEANING_PRODUCT_CREATED',row.id,null,row);
     return row;
   });
@@ -126,7 +138,7 @@ export async function createCleaning(auth:AuthState,context:PropertyContext,inpu
       tank_capacity_liters,area_type,partial_percent,area_value,area_unit_code,notes,
       created_by,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15)
       RETURNING id`,[account_id,context.propertyId,input.locationId,input.startedOn,
-      input.finishedOn??null,input.activities,input.applicationUnit,input.applicationCount??null,
+      input.finishedOn??null,input.activities,input.applicationUnit??null,input.applicationCount??null,
       input.tankCapacityLiters??null,input.areaType,input.partialPercent??null,
       area.areaValue,area.areaValue===null?null:area.areaUnitCode,input.notes??null,auth.userId])).rows[0]!;
     await details(client,row.id,input);
@@ -158,7 +170,7 @@ export async function updateCleaning(auth:AuthState,context:PropertyContext,id:s
       activities=$5,application_unit=$6,application_count=$7,tank_capacity_liters=$8,
       area_type=$9,partial_percent=$10,area_value=$11,area_unit_code=$12,notes=$13,updated_by=$14
       WHERE id=$1`,[id,input.locationId,input.startedOn,input.finishedOn??null,input.activities,
-      input.applicationUnit,input.applicationCount??null,input.tankCapacityLiters??null,
+      input.applicationUnit??null,input.applicationCount??null,input.tankCapacityLiters??null,
       input.areaType,input.partialPercent??null,area.areaValue,
       area.areaValue===null?null:area.areaUnitCode,input.notes??null,auth.userId]);
     await details(client,id,input);

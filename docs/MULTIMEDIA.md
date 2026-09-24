@@ -7,14 +7,14 @@ Activa el módulo `MULTIMEDIA` en la cuenta y la propiedad. Configura
 API; ninguna clave se envía al navegador. El servidor necesita `ffmpeg` y
 `ffprobe` instalados para transcodificar videos. La API usa Cloudinary para
 almacenar el resultado y conserva en PostgreSQL el identificador, hash,
-tamaño, cuenta y relaciones. No hay que pegar SQL manualmente: la migración
-`0021_multimedia_access.sql` se ejecuta con las demás migraciones.
+tamaño, cuenta y relaciones. No hay que pegar SQL manualmente: las migraciones
+`0021_multimedia_access.sql` y `0022_catalogs_and_media_details.sql` se ejecutan con las demás.
 
-La galería permite cargar y quitar adjuntos. Al quitar la última relación,
-el objeto entra en papelera y sigue consumiendo cuota durante 30 días. La
-eliminación definitiva de objetos vencidos requiere el trabajador de purga,
-que todavía está pendiente. Tampoco se ha conectado una cola de cargas offline
-para el cliente nativo.
+La galería permite vincular una foto o video a varios animales, añadir etiquetas,
+descripción y fecha de toma. Al eliminar el archivo y su última relación,
+la API solicita de inmediato el borrado en Cloudinary; si falla, el trabajo
+queda en cola y el servidor lo reintenta cada diez minutos cuando corresponda.
+La carga offline del cliente nativo todavía está pendiente.
 
 ## Registros disponibles para adjuntos
 
@@ -91,8 +91,9 @@ publican ni se relacionan con animales.
   cobrarlo varias veces. Nunca se deduplica entre cuentas.
 - Antes de subir se reserva temporalmente el tamaño procesado. La confirmación
   consume la reserva y un fallo la libera.
-- Los elementos enviados a papelera continúan consumiendo cuota durante 30 días.
-  Vaciar la papelera los purga y libera espacio inmediatamente.
+- La eliminación solicitada por el usuario quita las relaciones de la propiedad.
+  Si ya no queda ninguna relación activa, se purga el objeto en Cloudinary y se
+  libera su cuota tras la confirmación del proveedor.
 
 ## Flujo offline
 

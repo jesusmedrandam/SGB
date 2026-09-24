@@ -17,6 +17,7 @@ export const groupLocationSchema = z.object({
 });
 const grass = z.object({
   name: name, percent: z.number().min(0).max(100).nullable().optional(),
+  catalogItemId:z.uuid().nullable().optional(),
   area: z.number().positive().nullable().optional(),
   areaUnitCode: z.string().nullable().optional(),
   sowingDate: z.iso.date().nullable().optional(),

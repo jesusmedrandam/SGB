@@ -49,7 +49,9 @@ export interface PropertySettings {
   }>;
 }
 
-export type EditableCatalogCode = 'BREEDS' | 'COLORS';
+export type EditableCatalogCode = 'BREEDS' | 'COLORS' | 'GRASS_TYPES' |
+  'HEALTH_CONDITION_TYPES' | 'AGROCHEMICAL_CATEGORIES' | 'MEDIA_TAGS' |
+  'MOVEMENT_REASONS' | 'TREATMENT_TYPES';
 export interface CatalogItem {
   id: string;
   catalogCode: EditableCatalogCode;
@@ -103,7 +105,7 @@ export interface PhysicalLocation {
   version: number; area: number | null; areaUnitCode: string | null;
   pastureUse: string | null; capacityEstimate: number | null; waterAvailable: boolean | null;
   lastRestDate: string | null; floorMaterial: string | null; covered: boolean | null;
-  grasses: Array<{ name: string; percent: number | null; area: number | null;
+  grasses: Array<{ name: string; catalogItemId?:string|null;percent: number | null; area: number | null;
     areaUnitCode: string | null; sowingDate: string | null; notes: string | null }>;
 }
 
@@ -357,6 +359,7 @@ export function getAnimal(accessToken: string, id: string) {
 
 export function createAnimal(accessToken: string, input: {
   name: string; sex: Animal['sex']; speciesCode: 'BOVINE';
+  groupId: string; mother?:ParentSelection;father?:ParentSelection;
   description?: string | null;
   earTagCode?: string; birthDate?: string; entryDate?: string;
   initialWeight?: number; initialWeightUnitCode?: string;
@@ -430,7 +433,7 @@ export interface LocationInput {
   area?: number | null; areaUnitCode?: string | null; pastureUse?: string | null;
   capacityEstimate?: number | null; waterAvailable?: boolean | null;
   lastRestDate?: string | null; floorMaterial?: string | null; covered?: boolean | null;
-  grasses?: Array<{ name: string; percent?: number | null; area?: number | null;
+  grasses?: Array<{ name: string; catalogItemId?:string|null;percent?: number | null; area?: number | null;
     areaUnitCode?: string | null; sowingDate?: string | null; notes?: string | null }>;
 }
 export function createLocation(accessToken: string, input: LocationInput) {
@@ -759,6 +762,7 @@ export function cancelMovement(accessToken:string,id:string){
 
 export interface HealthMedicine {
   id:string;name:string;kind:'VACUNA'|'DESPARASITACION'|'ENFERMEDAD'|'OTRO';
+  treatmentCatalogItemId?:string|null;
   activeIngredient:string|null;defaultUnitCode:string;suggestedDose:string|null;
   indications:string|null;withdrawalMilkDays:number;withdrawalMeatDays:number;active:boolean;
 }
@@ -776,7 +780,7 @@ export interface HealthCondition {
   resolvedOn:string|null;version:number;treatmentCount:number;
 }
 export interface HealthConditionInput {
-  animalId:string;kind?:string|null;detectedOn:string;description:string;expectedVersion?:number;
+  animalId:string;kind:string;detectedOn:string;description:string;expectedVersion?:number;
 }
 export function getHealthConditions(accessToken:string){return request<HealthCondition[]>(
   '/health-records/conditions',{headers:bearer(accessToken)});}
@@ -822,7 +826,8 @@ export function cancelHealthCampaign(accessToken:string,id:string){
   return request<HealthCampaign>(`/health-records/campaigns/${encodeURIComponent(id)}/cancel`,{
     method:'POST',headers:bearer(accessToken)});}
 
-export interface CleaningProduct {id:string;name:string;category:string|null;active:boolean}
+export interface CleaningProduct {id:string;name:string;category:string|null;active:boolean;
+  activeIngredient:string|null;formulatedBy:string|null;description:string|null}
 export interface CleaningOptions {
   locations:Array<{id:string;name:string;areaValue:number|null;areaUnitCode:string|null}>;
   units:Array<{code:string;name:string;symbol:string}>;
@@ -830,7 +835,7 @@ export interface CleaningOptions {
 export interface CleaningInput {
   locationId:string;startedOn:string;finishedOn?:string|null;
   activities:Array<'FUMIGACION'|'TALA_SELECTIVA'|'DESBROCE'|'OTRA'>;
-  applicationUnit:'TANQUES'|'BOMBADAS';applicationCount?:number|null;
+  applicationUnit?:'TANQUES'|'BOMBADAS'|null;applicationCount?:number|null;
   tankCapacityLiters?:number|null;areaType:'TOTAL'|'PARCIAL';partialPercent?:number|null;
   notes?:string|null;
   products:Array<{productId:string;unitCode:string;quantityPerApplication:number;notes?:string|null}>;
@@ -849,7 +854,8 @@ export function getCleaningOptions(accessToken:string){return request<CleaningOp
   '/cleanings/options',{headers:bearer(accessToken)});}
 export function getCleaningProducts(accessToken:string){return request<CleaningProduct[]>(
   '/cleanings/products',{headers:bearer(accessToken)});}
-export function createCleaningProduct(accessToken:string,input:{name:string;category?:string|null}){
+export function createCleaningProduct(accessToken:string,input:{name:string;category?:string|null;
+  activeIngredient?:string|null;formulatedBy?:string|null;description?:string|null}){
   return request<CleaningProduct>('/cleanings/products',{
     method:'POST',headers:{...bearer(accessToken),'Content-Type':'application/json'},body:JSON.stringify(input)});}
 export function createCleaning(accessToken:string,input:CleaningInput){return request<CleaningRecord>(
@@ -990,25 +996,40 @@ export function updateAdministrativeModule(
 }
 
 export interface MediaItem {
-  id:string;entity_type:string;entity_id:string;relation_code:string;
+  id:string;storage_object_id:string;entity_type:string;entity_id:string;entity_name:string|null;
+  relation_code:string;description:string|null;captured_on:string|null;
+  tags:Array<{id:string;name:string}>;
   kind:'IMAGE'|'VIDEO';byteSize:number;created_at:string;url:string;thumbnailUrl:string|null;
 }
 export interface MediaUsage {storedBytes:number;reservedBytes:number;limitBytes:number}
-export function getMedia(accessToken:string){return request<MediaItem[]>('/media',{
+export function getMedia(accessToken:string,entityType?:string,entityId?:string){
+  const params=entityType&&entityId?`?${new URLSearchParams({entityType,entityId})}`:'';
+  return request<MediaItem[]>(`/media${params}`,{
   headers:bearer(accessToken)});}
 export function getMediaUsage(accessToken:string){return request<MediaUsage>('/media/usage',{
   headers:bearer(accessToken)});}
 export function deleteMedia(accessToken:string,id:string){return request<void>(`/media/${id}`,{
   method:'DELETE',headers:bearer(accessToken)});}
-export async function uploadMedia(accessToken:string,entityType:string,entityId:string,file:File){
+export function deleteMediaObject(accessToken:string,id:string){return request<{deletedFromProvider:boolean}>(
+  `/media/objects/${id}`,{method:'DELETE',headers:bearer(accessToken)});}
+export async function uploadMedia(accessToken:string,input:{file:File;animalIds?:string[];
+  entityType?:string;entityId?:string;relationCode?:'GENERAL'|'PROFILE'|'COVER';
+  tagIds?:string[];description?:string;capturedOn?:string}){
+  const {file}=input;const first=input.animalIds?.[0];
+  const params=new URLSearchParams({entityType:input.entityType??'ANIMAL',
+    entityId:input.entityId??first??'',relationCode:input.relationCode??'GENERAL'});
+  if(input.animalIds?.length)params.set('animalIds',input.animalIds.join(','));
+  if(input.tagIds?.length)params.set('tagIds',input.tagIds.join(','));
+  if(input.description)params.set('description',input.description);
+  if(input.capturedOn)params.set('capturedOn',input.capturedOn);
   let response:Response;
-  try{response=await fetch(`${API_URL}/media?${new URLSearchParams({entityType,entityId})}`,{
+  try{response=await fetch(`${API_URL}/media?${params}`,{
     method:'POST',credentials:'include',headers:{authorization:`Bearer ${accessToken}`,
       'content-type':file.type||'application/octet-stream',
       'x-media-kind':file.type.startsWith('video/')?'VIDEO':'IMAGE'},body:file});}
   catch{throw new ApiRequestError('No fue posible enviar el archivo.',0,'NETWORK_ERROR');}
-  const body=await response.json() as ApiEnvelope<{id:string}>|ApiErrorEnvelope;
+  const body=await response.json() as ApiEnvelope<{id:string;attachmentIds:string[]}>|ApiErrorEnvelope;
   if(!response.ok)throw new ApiRequestError((body as ApiErrorEnvelope).error?.message||
     'No se pudo cargar el archivo.',response.status,(body as ApiErrorEnvelope).error?.code||'UPLOAD_FAILED');
-  return (body as ApiEnvelope<{id:string}>).data;
+  return (body as ApiEnvelope<{id:string;attachmentIds:string[]}>).data;
 }

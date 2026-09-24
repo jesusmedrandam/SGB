@@ -1,7 +1,8 @@
 import {type FormEvent,useEffect,useState} from 'react';
 import {ApiRequestError,applyCleaning,cancelCleaning,createCleaning,createCleaningProduct,
-  getCleaningOptions,getCleaningProducts,getCleanings,updateCleaning,
-  type CleaningInput,type CleaningOptions,type CleaningProduct,type CleaningRecord} from './api';
+  getCleaningOptions,getCleaningProducts,getCleanings,listCatalogItems,updateCleaning,
+  type CatalogItem,type CleaningInput,type CleaningOptions,type CleaningProduct,type CleaningRecord} from './api';
+import {RecordMedia} from './RecordMedia';
 const labels={FUMIGACION:'Fumigación',TALA_SELECTIVA:'Tala selectiva',
   DESBROCE:'Desbroce',OTRA:'Otra labor'};
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
@@ -9,10 +10,12 @@ const message=(error:unknown)=>error instanceof ApiRequestError?error.message:
   error instanceof Error?error.message:'No se pudo guardar la limpieza.';
 type ProductLine=CleaningInput['products'][number];
 type OperatorLine=CleaningInput['operators'][number];
-export function CleaningPanel({accessToken,canManage}:{accessToken:string;canManage:boolean}){
+export function CleaningPanel({accessToken,canManage,canViewMedia,canManageMedia}:{accessToken:string;
+  canManage:boolean;canViewMedia:boolean;canManageMedia:boolean}){
   const [records,setRecords]=useState<CleaningRecord[]|null>(null);
   const [options,setOptions]=useState<CleaningOptions|null>(null);
   const [products,setProducts]=useState<CleaningProduct[]>([]);
+  const [categories,setCategories]=useState<CatalogItem[]>([]);
   const [revision,setRevision]=useState(0);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState<string|null>(null);
@@ -22,20 +25,21 @@ export function CleaningPanel({accessToken,canManage}:{accessToken:string;canMan
   const [locationId,setLocationId]=useState('');
   const [areaType,setAreaType]=useState<CleaningInput['areaType']>('TOTAL');
   const [activities,setActivities]=useState<CleaningInput['activities']>([]);
-  const [applicationUnit,setApplicationUnit]=useState<CleaningInput['applicationUnit']>('TANQUES');
+  const [applicationUnit,setApplicationUnit]=useState<'TANQUES'|'BOMBADAS'>('TANQUES');
   const [applicationCount,setApplicationCount]=useState('');
   const [lines,setLines]=useState<ProductLine[]>([]);
   const [operators,setOperators]=useState<OperatorLine[]>([]);
   useEffect(()=>{let active=true;void Promise.all([getCleanings(accessToken),
-    getCleaningOptions(accessToken),getCleaningProducts(accessToken)]).then(([items,choices,catalog])=>{
-    if(active){setRecords(items);setOptions(choices);setProducts(catalog);}
+    getCleaningOptions(accessToken),getCleaningProducts(accessToken),
+    listCatalogItems(accessToken,'AGROCHEMICAL_CATEGORIES')]).then(([items,choices,catalog,types])=>{
+    if(active){setRecords(items);setOptions(choices);setProducts(catalog);setCategories(types);}
   }).catch((failure)=>{if(active)setError(message(failure));});return ()=>{active=false;};
   },[accessToken,revision]);
   function reset(){setEditing(null);setShowForm(false);setLocationId('');setAreaType('TOTAL');
     setActivities([]);setApplicationCount('');setApplicationUnit('TANQUES');setLines([]);setOperators([]);}
   function edit(item:CleaningRecord){setEditing(item);setShowForm(true);setLocationId(item.locationId);
-    setAreaType(item.areaType);setActivities(item.activities);setApplicationUnit(item.applicationUnit);
-    setApplicationCount(item.applicationCount===null?'':String(item.applicationCount));
+    setAreaType(item.areaType);setActivities(item.activities);setApplicationUnit(item.applicationUnit??'TANQUES');
+    setApplicationCount(item.applicationCount==null?'':String(item.applicationCount));
     setLines(item.products.map(({productId,unitCode,quantityPerApplication,notes})=>({
       productId,unitCode,quantityPerApplication,notes:notes??null})));setOperators(item.operators);
     window.scrollTo({top:0,behavior:'smooth'});}
@@ -46,14 +50,18 @@ export function CleaningPanel({accessToken,canManage}:{accessToken:string;canMan
   function saveProduct(event:FormEvent<HTMLFormElement>){event.preventDefault();
     const data=new FormData(event.currentTarget);
     void run(()=>createCleaningProduct(accessToken,{name:String(data.get('name')).trim(),
-      category:String(data.get('category')).trim()||null}),()=>setShowProduct(false));}
+      category:String(data.get('category')).trim()||null,
+      activeIngredient:String(data.get('activeIngredient')).trim()||null,
+      formulatedBy:String(data.get('formulatedBy')).trim()||null,
+      description:String(data.get('description')).trim()||null}),()=>setShowProduct(false));}
   function save(event:FormEvent<HTMLFormElement>){event.preventDefault();const data=new FormData(event.currentTarget);
+    const spray=activities.includes('FUMIGACION');
     const input:CleaningInput={locationId,startedOn:String(data.get('startedOn')),
-      finishedOn:String(data.get('finishedOn'))||null,activities,applicationUnit,
-      applicationCount:applicationCount?Number(applicationCount):null,
-      tankCapacityLiters:data.get('capacity')?Number(data.get('capacity')):null,
+      finishedOn:String(data.get('finishedOn'))||null,activities,applicationUnit:spray?applicationUnit:null,
+      applicationCount:spray&&applicationCount?Number(applicationCount):null,
+      tankCapacityLiters:spray&&data.get('capacity')?Number(data.get('capacity')):null,
       areaType,partialPercent:areaType==='PARCIAL'?Number(data.get('partialPercent')):null,
-      notes:String(data.get('notes')).trim()||null,products:lines,operators,
+      notes:String(data.get('notes')).trim()||null,products:spray?lines:[],operators,
       ...(editing?{expectedVersion:editing.version}:{})};
     void run(()=>editing?updateCleaning(accessToken,editing.id,input)
       :createCleaning(accessToken,input),reset);
@@ -71,7 +79,12 @@ export function CleaningPanel({accessToken,canManage}:{accessToken:string;canMan
     {canManage&&showProduct&&<form className="movement-form" onSubmit={saveProduct}>
       <h3>Nuevo producto compartido en la cuenta</h3>
       <label><span>Nombre *</span><input name="name" required minLength={2} maxLength={160}/></label>
-      <label><span>Categoría</span><input name="category" maxLength={120}/></label>
+      <label><span>Categoría *</span><select name="category" required><option value="">Selecciona</option>
+        {categories.filter(item=>item.active).map(item=><option key={item.id} value={item.name}>{item.name}</option>)}
+      </select><small>Agrega categorías nuevas desde Catálogos.</small></label>
+      <label><span>Principio activo</span><textarea name="activeIngredient" maxLength={2000}/></label>
+      <label><span>Formulado por</span><input name="formulatedBy" maxLength={200}/></label>
+      <label className="movement-wide"><span>Descripción</span><textarea name="description" maxLength={2000}/></label>
       <button className="primary-button compact" disabled={busy}>Guardar producto</button></form>}
     {canManage&&showForm&&options&&<form className="movement-form" onSubmit={save}
       key={editing?.id??'new'}><h3>{editing?'Editar borrador':'Nueva limpieza'}</h3>
@@ -96,17 +109,17 @@ export function CleaningPanel({accessToken,canManage}:{accessToken:string;canMan
           onChange={(event)=>setActivities(event.target.checked
             ?[...activities,code as CleaningInput['activities'][number]]
             :activities.filter((item)=>item!==code))}/>{label}</label>)}</fieldset>
-      <label><span>Unidad de aplicación</span><select value={applicationUnit}
-        onChange={(event)=>setApplicationUnit(event.target.value as CleaningInput['applicationUnit'])}>
+      {activities.includes('FUMIGACION')&&<><label><span>Unidad de aplicación</span><select value={applicationUnit}
+        onChange={(event)=>setApplicationUnit(event.target.value as 'TANQUES'|'BOMBADAS')}>
         <option value="TANQUES">Tanques</option><option value="BOMBADAS">Bombadas</option></select></label>
       <label><span>Cantidad de {applicationUnit==='TANQUES'?'tanques':'bombadas'}</span>
         <input type="number" min="0.01" step="0.01" value={applicationCount}
           onChange={(event)=>setApplicationCount(event.target.value)}/></label>
       <label><span>Capacidad (litros)</span><input name="capacity" type="number" min="0.01"
-        step="0.01" defaultValue={editing?.tankCapacityLiters??''}/></label>
+        step="0.01" defaultValue={editing?.tankCapacityLiters??''}/></label></>}
       <label className="movement-wide"><span>Observaciones</span><textarea name="notes" maxLength={5000}
         defaultValue={editing?.notes??''}/></label>
-      <div className="movement-wide cleaning-lines"><div className="movement-card-top"><h3>Productos</h3>
+      {activities.includes('FUMIGACION')&&<div className="movement-wide cleaning-lines"><div className="movement-card-top"><h3>Productos</h3>
         <button type="button" className="secondary-button compact" onClick={()=>setLines([...lines,
           {productId:'',unitCode:'MILLILITER',quantityPerApplication:1}])}>+ Producto aplicado</button></div>
         {lines.map((line,index)=><div className="cleaning-line" key={index}>
@@ -123,7 +136,7 @@ export function CleaningPanel({accessToken,canManage}:{accessToken:string;canMan
           <strong>Total: {applicationCount?Number((Number(applicationCount)*line.quantityPerApplication)
             .toFixed(4)):'—'}</strong><button type="button" className="secondary-button compact"
               onClick={()=>setLines(lines.filter((_,i)=>i!==index))}>Quitar</button>
-        </div>)}</div>
+        </div>)}</div>}
       <div className="movement-wide cleaning-lines"><div className="movement-card-top"><h3>Operadores</h3>
         <button type="button" className="secondary-button compact" onClick={()=>setOperators([...operators,
           {name:'',function:null}])}>+ Operador</button></div>
@@ -137,7 +150,7 @@ export function CleaningPanel({accessToken,canManage}:{accessToken:string;canMan
           <button type="button" className="secondary-button compact"
             onClick={()=>setOperators(operators.filter((_,i)=>i!==index))}>Quitar</button></div>)}</div>
       <button className="primary-button compact" disabled={busy||!activities.length||!locationId
-        ||lines.length>0&&!applicationCount}>
+        ||activities.includes('FUMIGACION')&&lines.length>0&&!applicationCount}>
         {editing?'Guardar borrador':'Crear borrador'}</button>
     </form>}
     <div className="movement-list"><h3>Labores registradas</h3>
@@ -150,20 +163,23 @@ export function CleaningPanel({accessToken,canManage}:{accessToken:string;canMan
           <span className={`movement-status status-${item.status.toLowerCase()}`}>
             {item.status==='BORRADOR'?'Borrador':item.status==='COMPLETADO'?'Completado':'Cancelado'}</span></div>
         <p>Área {item.areaType==='TOTAL'?'total':`${item.partialPercent}%`} · {item.areaValue??'Sin área'}
-          {item.areaUnitCode?` ${item.areaUnitCode}`:''} · {item.applicationCount??0}
-          {item.applicationUnit==='TANQUES'?' tanques':' bombadas'}</p>
-        <details><summary>Productos y operadores</summary>
+          {item.areaUnitCode?` ${item.areaUnitCode}`:''}
+          {item.applicationCount!=null?` · ${item.applicationCount} ${item.applicationUnit==='TANQUES'?'tanques':'bombadas'}`:''}</p>
+        <details className="record-detail"><summary>Ver limpieza completa</summary>
+          {item.notes&&<p>{item.notes}</p>}
           {item.products.map((product)=><span className="movement-animal-name" key={product.productId}>
             {product.productName}: {product.totalQuantity} {product.unitCode} en total</span>)}
           {item.operators.map((operator)=><span className="movement-animal-name" key={operator.name}>
-            {operator.name}{operator.function?` · ${operator.function}`:''}</span>)}</details>
+            {operator.name}{operator.function?` · ${operator.function}`:''}</span>)}
+          {canViewMedia&&<RecordMedia accessToken={accessToken} entityType="CLEANING" entityId={item.id}
+            canManage={canManageMedia}/>}
         {canManage&&item.status==='BORRADOR'&&<div className="movement-actions">
           <button type="button" className="secondary-button compact" disabled={busy}
             onClick={()=>edit(item)}>Editar</button>
           <button type="button" className="primary-button compact" disabled={busy}
             onClick={()=>void run(()=>applyCleaning(accessToken,item.id))}>Completar</button>
           <button type="button" className="secondary-button compact" disabled={busy}
-            onClick={()=>void run(()=>cancelCleaning(accessToken,item.id))}>Cancelar</button></div>}
+            onClick={()=>void run(()=>cancelCleaning(accessToken,item.id))}>Cancelar</button></div>}</details>
       </article>)}</div>
   </section>;
 }

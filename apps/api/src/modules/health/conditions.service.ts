@@ -29,12 +29,20 @@ async function eligible(client:PoolClient,propertyId:string,accountId:string,ani
     [animalId,propertyId,accountId]);
   if(!row.rowCount)throw invalidRequest('HEALTH_ANIMAL_INVALID','El animal no está activo en esta propiedad.');
 }
+async function conditionKind(client:PoolClient,accountId:string,name:string){
+  const found=await client.query(`SELECT 1 FROM governed_catalog_item WHERE
+    catalog_code='HEALTH_CONDITION_TYPES' AND name=$1 AND active AND deleted_at IS NULL
+    AND (system_defined OR account_id=$2)`,[name,accountId]);
+  if(!found.rowCount)throw invalidRequest('HEALTH_CONDITION_TYPE_INVALID',
+    'Registra el tipo de problema en Catálogos antes de seleccionarlo.');
+}
 export async function createCondition(auth:AuthState,context:PropertyContext,input:ConditionInput,
   metadata:RequestMetadata){
   return inTransaction(async(client)=>{
     const {account_id,today}=await healthAccess(client,auth,context,'HEALTH_MANAGE');
     if(input.detectedOn>today)throw invalidRequest('HEALTH_FUTURE_DATE','La detección no puede ser futura.');
     await eligible(client,context.propertyId,account_id,input.animalId);
+    await conditionKind(client,account_id,input.kind);
     const result=await client.query<{id:string}>(`INSERT INTO health_condition(account_id,property_id,
       animal_id,kind,detected_on,description,created_by,updated_by)
       VALUES($1,$2,$3,$4,$5,$6,$7,$7) RETURNING id`,
@@ -47,8 +55,8 @@ export async function createCondition(auth:AuthState,context:PropertyContext,inp
   });
 }
 async function lock(client:PoolClient,context:PropertyContext,id:string){
-  const row=(await client.query<{animal_id:string;status:string;version:number;detected_on:string}>(
-    `SELECT animal_id,status,version::int,detected_on::text FROM health_condition
+  const row=(await client.query<{animal_id:string;status:string;version:number;detected_on:string;kind:string|null}>(
+    `SELECT animal_id,status,version::int,detected_on::text,kind FROM health_condition
       WHERE id=$1 AND property_id=$2 FOR UPDATE`,[id,context.propertyId])).rows[0];
   if(!row)throw new ApiError(404,'HEALTH_CONDITION_NOT_FOUND','Condición no encontrada en esta propiedad.');
   if(row.status==='RESUELTA')throw conflict('HEALTH_CONDITION_RESOLVED','La condición ya está resuelta.');
@@ -65,6 +73,7 @@ export async function updateCondition(auth:AuthState,context:PropertyContext,id:
       throw conflict('HEALTH_VERSION_CONFLICT','La condición cambió. Actualiza la pantalla.');
     if(input.detectedOn>today)throw invalidRequest('HEALTH_FUTURE_DATE','La detección no puede ser futura.');
     await eligible(client,context.propertyId,account_id,input.animalId);
+    if(input.kind!==current.kind)await conditionKind(client,account_id,input.kind);
     const before=await read(client,id);
     await client.query(`UPDATE health_condition SET kind=$2,detected_on=$3,description=$4,updated_by=$5
       WHERE id=$1`,[id,input.kind??null,input.detectedOn,input.description,auth.userId]);

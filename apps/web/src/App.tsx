@@ -253,15 +253,18 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
           canCreate={activeRole.permissions.includes('ANIMAL_CREATE')}
           canUpdate={activeRole.permissions.includes('ANIMAL_UPDATE')}
           canManageBrands={activeRole.permissions.includes('CATALOG_MANAGE')}
-          canViewCatalogs={activeRole.permissions.includes('CATALOG_VIEW')} />}
+          canViewCatalogs={activeRole.permissions.includes('CATALOG_VIEW')}
+          canViewMedia={activeProperty.enabledModules.includes('MULTIMEDIA')
+            && activeRole.permissions.includes('MEDIA_VIEW')}
+          canManageMedia={activeProperty.enabledModules.includes('MULTIMEDIA')
+            && activeRole.permissions.includes('MEDIA_MANAGE')} />}
       {section==='groups' && activeProperty && activeRole?.permissions.includes('GROUP_VIEW') &&
         <GroupPanel key={`groups:${activeProperty.id}:${activeRole.id}`} accessToken={session.accessToken}
           modules={activeProperty.enabledModules}
           canManage={activeRole.permissions.includes('GROUP_MANAGE')}
           canViewLocations={activeRole.permissions.includes('LOCATION_VIEW')}
           canManageLocations={activeRole.permissions.includes('LOCATION_MANAGE')}
-          canAssignAnimals={activeRole.permissions.includes('ANIMAL_VIEW')
-            && activeRole.permissions.includes('ANIMAL_UPDATE')} />}
+          />}
       {section==='reproduction' && activeProperty && activeProperty.enabledModules.includes('REPRODUCTION')
         && activeRole?.permissions.includes('REPRODUCTION_VIEW') &&
         <ReproductionPanel key={`reproduction:${activeProperty.id}:${activeRole.id}`}
@@ -286,14 +289,18 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
         && activeProperty.enabledModules.includes('PASTURES')
         && activeRole?.permissions.includes('CLEANING_VIEW') &&
         <CleaningPanel key={`cleanings:${activeProperty.id}:${activeRole.id}`}
-          accessToken={session.accessToken} canManage={activeRole.permissions.includes('CLEANING_MANAGE')} />}
+          accessToken={session.accessToken} canManage={activeRole.permissions.includes('CLEANING_MANAGE')}
+          canViewMedia={activeProperty.enabledModules.includes('MULTIMEDIA')
+            &&activeRole.permissions.includes('MEDIA_VIEW')}
+          canManageMedia={activeProperty.enabledModules.includes('MULTIMEDIA')
+            &&activeRole.permissions.includes('MEDIA_MANAGE')} />}
       {section==='activities' && activeProperty && activeProperty.enabledModules.includes('TASKS')
         && activeRole?.permissions.includes('ACTIVITY_VIEW') &&
         <ActivityPanel key={`activities:${activeProperty.id}:${activeRole.id}`}
           accessToken={session.accessToken} canManage={activeRole.permissions.includes('ACTIVITY_MANAGE')} />}
       {section==='media' && activeProperty && activeRole?.permissions.includes('MEDIA_VIEW') &&
         <MediaPanel key={`media:${activeProperty.id}:${activeRole.id}`} accessToken={session.accessToken}
-          modules={activeProperty.enabledModules} permissions={activeRole.permissions} />}
+          permissions={activeRole.permissions} />}
     </main>
     <footer className="app-footer">SGB · Sistema de Gestión Bovina</footer>
     </div>

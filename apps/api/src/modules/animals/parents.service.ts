@@ -1,8 +1,27 @@
 import { ApiError, conflict, forbidden, invalidRequest } from '../../core/errors.js';
 import { inTransaction } from '../../database/transaction.js';
+import type {PoolClient} from 'pg';
 import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.types.js';
 import type { ParentSelection } from './animals.schemas.js';
 import { readAnimal } from './animals.service.js';
+
+export async function insertInitialParents(client:PoolClient,context:PropertyContext,childId:string,
+  birthDate:string|null,mother:ParentSelection,father:ParentSelection,userId:string){
+  for(const [role,selection] of [['MOTHER',mother],['FATHER',father]] as const){
+    if(!selection)continue;
+    if('animalId' in selection){
+      const parent=await client.query(`SELECT 1 FROM animal WHERE id=$1 AND property_id=$2
+        AND record_status='CURRENT' AND sex=$3 AND id<>$4
+        AND ($5::date IS NULL OR birth_date IS NULL OR birth_date<$5::date) FOR SHARE`,
+        [selection.animalId,context.propertyId,role==='MOTHER'?'FEMALE':'MALE',childId,birthDate]);
+      if(!parent.rowCount)throw invalidRequest('INVALID_ANIMAL_PARENT','El padre o la madre no es válido para este animal.');
+    }
+    await client.query(`INSERT INTO animal_parentage(property_id,child_animal_id,role,
+      parent_animal_id,reported_parent_name,created_by) VALUES($1,$2,$3,$4,$5,$6)`,
+      [context.propertyId,childId,role,'animalId' in selection?selection.animalId:null,
+        'reportedName' in selection?selection.reportedName:null,userId]);
+  }
+}
 
 export async function updateAnimalParents(auth: AuthState, context: PropertyContext, id: string,
   input: { mother: ParentSelection; father: ParentSelection; expectedVersion: number },

@@ -1,10 +1,10 @@
 import {type FormEvent,useEffect,useMemo,useState} from 'react';
 import {ApiRequestError,applyMovement,cancelMovement,createMovement,getMovementOptions,
-  getMovements,updateMovement,type MovementInput,type MovementOptions,type MovementRecord} from './api';
+  getMovements,listCatalogItems,updateMovement,type CatalogItem,type MovementInput,type MovementOptions,type MovementRecord} from './api';
 
 const kinds:Record<MovementRecord['kind'],string>={
   UBICACION:'Cambiar potrero o corral',GRUPO:'Cambiar grupo',
-  PROPIEDAD:'Trasladar a otra propiedad',COMBINADO:'Cambiar grupo y ubicación',
+  PROPIEDAD:'Trasladar a otra propiedad',COMBINADO:'Traslado combinado anterior',
 };
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 const message=(error:unknown)=>error instanceof ApiRequestError ? error.message
@@ -15,6 +15,7 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel}:{
 }){
   const [records,setRecords]=useState<MovementRecord[]|null>(null);
   const [options,setOptions]=useState<MovementOptions|null>(null);
+  const [reasons,setReasons]=useState<CatalogItem[]>([]);
   const [revision,setRevision]=useState(0);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState<string|null>(null);
@@ -34,6 +35,8 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel}:{
       .catch((failure)=>{if(active)setError(message(failure));});
     return ()=>{active=false;};
   },[accessToken,revision]);
+  useEffect(()=>{let active=true;void listCatalogItems(accessToken,'MOVEMENT_REASONS')
+    .then(items=>{if(active)setReasons(items);}).catch(()=>{});return()=>{active=false;};},[accessToken]);
   const source=options?.groups.find((group)=>group.id===sourceGroupId);
   const cross=kind==='PROPIEDAD' || (kind==='COMBINADO'&&destinationPropertyId!==propertyId);
   const groupAnimals=useMemo(()=>options?.animals.filter((animal)=>animal.groupId===sourceGroupId)??[],
@@ -88,7 +91,8 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel}:{
         else if(next==='PROPIEDAD')setDestinationPropertyId(
           options.properties.find((property)=>property.id!==propertyId)?.id??'');
         setDestinationLocationId('');}}>
-        {Object.entries(kinds).map(([value,label])=><option key={value} value={value}>{label}</option>)}
+        {Object.entries(kinds).filter(([value])=>value!=='COMBINADO'||editing?.kind==='COMBINADO')
+          .map(([value,label])=><option key={value} value={value}>{label}</option>)}
       </select></label>
       <label><span>Grupo de origen *</span><select value={sourceGroupId} required onChange={(event)=>{
         const id=event.target.value;setSourceGroupId(id);setSelected([]);
@@ -122,9 +126,11 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel}:{
         </select></label>}
       <label><span>Fecha *</span><input type="date" name="movementOn" required max={today()}
         defaultValue={editing?.movementOn??today()}/></label>
-      <label className="movement-wide"><span>Motivo *</span><input name="reason" required
+      <label className="movement-wide"><span>Motivo *</span><input name="reason" list="movement-reasons" required
         minLength={2} maxLength={300} defaultValue={editing?.reason??''}
-        placeholder="Ej. Rotación de pastoreo"/></label>
+        placeholder="Selecciona o escribe un motivo"/>
+        <datalist id="movement-reasons">{reasons.filter(item=>item.active).map(item=><option
+          key={item.id} value={item.name}/>)}</datalist></label>
       <label className="movement-wide"><span>Observaciones</span>
         <textarea name="notes" maxLength={5000} defaultValue={editing?.notes??''}/></label>
       {sourceGroupId&&<div className="movement-selection movement-wide">
@@ -150,17 +156,19 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel}:{
     <div className="movement-list">
       <h3>Historial y borradores</h3>
       {records?.length===0&&<p className="muted">Todavía no hay movimientos en esta propiedad.</p>}
-      {records?.map((movement)=><article key={movement.id} className="movement-card">
+      {records?.map((movement)=><details key={movement.id} className="movement-card record-row">
+        <summary>
         <div className="movement-card-top"><div><strong>{kinds[movement.kind]}</strong>
           <small>{movement.movementOn} · {movement.animals.length} {movement.animals.length===1?'animal':'animales'}</small></div>
           <span className={`movement-status status-${movement.status.toLowerCase()}`}>
             {movement.status==='BORRADOR'?'Borrador':movement.status==='COMPLETADO'?'Completado':'Cancelado'}</span></div>
         <p><b>{movement.sourcePropertyName}</b> · {movement.sourceGroupName}
           {movement.sourceLocationName?` (${movement.sourceLocationName})`:''} → <b>{movement.destinationPropertyName}</b> · {movement.destinationGroupName}
-          {movement.destinationLocationName?` (${movement.destinationLocationName})`:''}</p>
+          {movement.destinationLocationName?` (${movement.destinationLocationName})`:''}</p></summary>
         <small>{movement.reason}</small>
-        <details><summary>Ver animales</summary>{movement.animals.map((animal)=><span
-          key={animal.id} className="movement-animal-name">{animal.name}</span>)}</details>
+        {movement.notes&&<p>{movement.notes}</p>}
+        <div>{movement.animals.map((animal)=><span
+          key={animal.id} className="movement-animal-name">{animal.name}</span>)}</div>
         {movement.status==='BORRADOR'&&movement.sourcePropertyId===propertyId&&
           <div className="movement-actions">
             {canManage&&<><button type="button" className="secondary-button compact" disabled={busy}
@@ -169,7 +177,7 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel}:{
             {canCancel&&<button type="button" className="secondary-button compact" disabled={busy}
               onClick={()=>void run(()=>cancelMovement(accessToken,movement.id))}>Cancelar borrador</button>}
           </div>}
-      </article>)}
+      </details>)}
     </div>
   </section>;
 }

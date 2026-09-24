@@ -4,6 +4,8 @@ import {
   listCatalogItems, setBrandActive, updateAnimalBrands, updateAnimalCatalogs,
   listOwners, listAccountUsers, createOwner, updateBrandOwners, updateAnimalOwners,
   updateAnimalDescription, updateAnimalParents,
+  listGroups, type LivestockGroup,
+  getMedia,uploadMedia,deleteMedia,type MediaItem,
   type Animal, type AnimalList, type CatalogItem, type LivestockBrand, type LivestockOwner, type ParentSelection,
 } from './api';
 
@@ -93,9 +95,9 @@ function BrandFields({ brands, selected }: { brands: LivestockBrand[]; selected?
 }
 
 function ParentField({ accessToken, child, role }: {
-  accessToken: string; child: Animal; role: 'mother' | 'father';
+  accessToken: string; child?: Animal; role: 'mother' | 'father';
 }) {
-  const current = child[role];
+  const current = child?.[role];
   const [mode, setMode] = useState<'none' | 'animal' | 'reported'>(
     current ? current.animalId ? 'animal' : 'reported' : 'none',
   );
@@ -113,9 +115,9 @@ function ParentField({ accessToken, child, role }: {
     return () => { active = false; window.clearTimeout(timer); };
   }, [accessToken, mode, search]);
   const label = role === 'mother' ? 'Madre' : 'Padre';
-  const eligible = candidates.filter((entry) => entry.id !== child.id
+  const eligible = candidates.filter((entry) => entry.id !== child?.id
     && entry.sex === (role === 'mother' ? 'FEMALE' : 'MALE')
-    && (!child.birthDate || !entry.birthDate || entry.birthDate < child.birthDate));
+    && (!child?.birthDate || !entry.birthDate || entry.birthDate < child.birthDate));
   return <fieldset className="animal-parent-field"><legend>{label}</legend>
     <label><span>Tipo de registro</span><select name={`${role}Mode`} value={mode}
       onChange={(event) => setMode(event.target.value as typeof mode)}>
@@ -142,9 +144,11 @@ function ParentField({ accessToken, child, role }: {
   </fieldset>;
 }
 
-export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs, canManageBrands }: {
+export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs, canManageBrands,
+  canViewMedia,canManageMedia }: {
   accessToken: string; canCreate: boolean; canUpdate: boolean;
   canViewCatalogs: boolean; canManageBrands: boolean;
+  canViewMedia:boolean;canManageMedia:boolean;
 }) {
   const [result, setResult] = useState<AnimalList | null>(null);
   const [searchInput, setSearchInput] = useState('');
@@ -158,7 +162,10 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
   const [choices, setChoices] = useState<AnimalChoices | null>(null);
   const [brands, setBrands] = useState<LivestockBrand[] | null>(null);
   const [owners, setOwners] = useState<LivestockOwner[]>([]);
+  const [groups,setGroups]=useState<LivestockGroup[]>([]);
   const [accountUsers, setAccountUsers] = useState<Array<{ id: string; name: string }>>([]);
+  const [animalMedia,setAnimalMedia]=useState<MediaItem[]>([]);
+  const [mediaRevision,setMediaRevision]=useState(0);
 
   useEffect(() => {
     let active = true;
@@ -186,8 +193,16 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     }).catch((failure) => { if (active) setError(message(failure)); });
     void listBrands(accessToken).then((value) => { if (active) setBrands(value); })
       .catch((failure) => { if (active) setError(message(failure)); });
+    void listGroups(accessToken).then(value=>{if(active)setGroups(value);})
+      .catch((failure)=>{if(active)setError(message(failure));});
     return () => { active = false; };
   }, [accessToken]);
+
+  useEffect(()=>{if(!selected||!canViewMedia){setAnimalMedia([]);return;}
+    let active=true;void getMedia(accessToken,'ANIMAL',selected.id).then(items=>{
+      if(active)setAnimalMedia(items);
+    }).catch(failure=>{if(active)setError(message(failure));});return()=>{active=false;};
+  },[accessToken,selected?.id,mediaRevision,canViewMedia]);
 
   function find(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -217,6 +232,11 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
     const breedIds = data.getAll('breedIds').map(String);
     const colorIds = data.getAll('colorIds').map(String);
     const brandIds = data.getAll('brandIds').map(String);
+    const parent=(role:'mother'|'father'):ParentSelection=>{
+      const mode=data.get(`${role}Mode`);
+      return mode==='animal'?{animalId:String(data.get(`${role}AnimalId`))}
+        :mode==='reported'?{reportedName:String(data.get(`${role}ReportedName`)).trim()}:null;
+    };
     let animalOwners: ReturnType<typeof ownerInput>;
     try { animalOwners = ownerInput(data); }
     catch (failure) { setError(failure instanceof Error ? failure.message : 'Propietarios inválidos.'); return; }
@@ -227,6 +247,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         description: String(data.get('description') || '').trim() || null,
         sex: String(data.get('sex')) as Animal['sex'],
         speciesCode: 'BOVINE',
+        groupId:String(data.get('groupId')),mother:parent('mother'),father:parent('father'),
         ...(earTagCode ? { earTagCode } : {}),
         ...(birthDate ? { birthDate } : {}),
         ...(entryDate ? { entryDate } : {}),
@@ -236,6 +257,16 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       });
       setSelected(created); setShowCreate(false); setSearchInput(''); setSearch(''); setPage(1);
       setRevision((value) => value + 1);
+      if(canManageMedia){
+        const photo=data.get('profilePhoto');const cover=data.get('coverPhoto');
+        try{
+          if(photo instanceof File&&photo.size)await uploadMedia(accessToken,{file:photo,
+            animalIds:[created.id],relationCode:'PROFILE'});
+          if(cover instanceof File&&cover.size)await uploadMedia(accessToken,{file:cover,
+            animalIds:[created.id],relationCode:'COVER'});
+          setMediaRevision(value=>value+1);
+        }catch(failure){setError(`El animal se registró, pero no se pudo subir una foto: ${message(failure)}`);}
+      }
     } catch (failure) { setError(message(failure)); }
     finally { setBusy(false); }
   }
@@ -441,6 +472,10 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       <label><span>Sexo *</span><select name="sex" required disabled={busy} defaultValue="">
         <option value="" disabled>Selecciona</option><option value="FEMALE">Hembra</option>
         <option value="MALE">Macho</option></select></label>
+      <label><span>Grupo *</span><select name="groupId" required disabled={busy} defaultValue="">
+        <option value="">Selecciona un grupo</option>{groups.filter(group=>group.active).map(group=><option
+          key={group.id} value={group.id}>{group.name}{group.location?` · ${group.location.name}`:''}</option>)}
+      </select><small>La ubicación se hereda del grupo cuando sus módulos están activos.</small></label>
       <label><span>Arete individual</span><input name="earTagCode" maxLength={80} disabled={busy} /></label>
       <label><span>Fecha de nacimiento</span><input type="date" name="birthDate" disabled={busy} /></label>
       <label><span>Fecha de ingreso</span><input type="date" name="entryDate" disabled={busy} />
@@ -453,6 +488,14 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       {choices && <CatalogFields choices={choices} />}
       <OwnerFields owners={owners} />
       {brands && <BrandFields brands={brands} />}
+      {canManageMedia&&<><label><span>Foto de perfil</span><input name="profilePhoto" type="file"
+        accept="image/jpeg,image/png,image/webp,image/heic"/></label>
+        <label><span>Foto de portada</span><input name="coverPhoto" type="file"
+          accept="image/jpeg,image/png,image/webp,image/heic"/></label></>}
+      <div className="animal-parent-grid animal-full-width">
+        <ParentField accessToken={accessToken} role="mother"/>
+        <ParentField accessToken={accessToken} role="father"/>
+      </div>
       <button className="primary-button compact" type="submit" disabled={busy || brands === null}>
         {busy ? 'Guardando…' : 'Registrar animal'}</button>
     </form>}
@@ -479,7 +522,16 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
           onClick={() => { setPage(page + 1); setSelected(null); }}>Siguiente</button>
       </div>}
     </>}
-    {selected && <div className="animal-detail"><h3>{selected.name}</h3>
+    {selected && <div className="animal-detail">
+      {canViewMedia&&<div className="animal-media-header">
+        {animalMedia.find(item=>item.relation_code==='COVER'&&item.kind==='IMAGE')&&<img
+          className="animal-cover" src={animalMedia.find(item=>item.relation_code==='COVER')!.url}
+          alt={`Portada de ${selected.name}`}/>}
+        {animalMedia.find(item=>item.relation_code==='PROFILE'&&item.kind==='IMAGE')&&<img
+          className="animal-profile" src={animalMedia.find(item=>item.relation_code==='PROFILE')!.thumbnailUrl??''}
+          alt={`Perfil de ${selected.name}`}/>}
+      </div>}
+      <h3>{selected.name}</h3>
       <p className="animal-description">{selected.description || 'Sin descripción.'}</p>
       <dl><div><dt>Arete individual</dt><dd>{selected.earTagCode || 'No registrado'}</dd></div>
         <div><dt>Grupo</dt><dd>{selected.group?.name || 'Sin grupo'}</dd></div>
@@ -498,6 +550,31 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         <div><dt>Colores</dt><dd>{selected.colors?.map((color) => color.name).join(', ') || 'No registrados'}</dd></div></dl>
       <dl className="animal-parent-summary"><div><dt>Madre</dt><dd>{selected.mother?.name || 'No registrada'}</dd></div>
         <div><dt>Padre</dt><dd>{selected.father?.name || 'No registrado'}</dd></div></dl>
+      {canViewMedia&&<div className="animal-photos"><h4>Fotos y videos</h4>
+        <div className="media-grid">{animalMedia.map(item=><article className="media-card" key={item.id}>
+          {item.kind==='IMAGE'?<a href={item.url} target="_blank" rel="noreferrer"><img
+            src={item.thumbnailUrl??item.url} alt={item.description??selected.name}/></a>:
+            <video src={item.url} controls preload="metadata"/>}
+          <div><small>{item.relation_code==='PROFILE'?'Perfil':item.relation_code==='COVER'?'Portada':
+            item.captured_on??'Galería'}</small>
+            {canManageMedia&&<button type="button" disabled={busy} onClick={()=>{
+              if(!window.confirm('¿Quitar esta foto de la ficha?'))return;
+              setBusy(true);void deleteMedia(accessToken,item.id).then(()=>setMediaRevision(n=>n+1))
+                .catch(failure=>setError(message(failure))).finally(()=>setBusy(false));
+            }}>Quitar</button>}</div></article>)}</div>
+        {canManageMedia&&<form className="animal-media-upload" onSubmit={event=>{
+          event.preventDefault();const form=event.currentTarget;const data=new FormData(form);
+          const file=data.get('file');if(!(file instanceof File)||!file.size)return;
+          setBusy(true);void uploadMedia(accessToken,{file,animalIds:[selected.id],
+            relationCode:String(data.get('role')) as 'GENERAL'|'PROFILE'|'COVER'})
+            .then(()=>{form.reset();setMediaRevision(n=>n+1);}).catch(failure=>setError(message(failure)))
+            .finally(()=>setBusy(false));
+        }}><select name="role" aria-label="Uso de la foto"><option value="GENERAL">Galería</option>
+          <option value="PROFILE">Perfil</option><option value="COVER">Portada</option></select>
+          <input name="file" type="file" accept="image/jpeg,image/png,image/webp,image/heic" required/>
+          <button className="secondary-button compact" disabled={busy}>Agregar foto</button></form>}
+      </div>}
+      {canUpdate&&<details className="animal-edit-section"><summary>Editar ficha del animal</summary>
       {canUpdate && <form className="animal-catalog-edit" key={`description:${selected.id}:${selected.version}`}
         onSubmit={(event) => void changeDescription(event)}>
         <h4>Descripción</h4>
@@ -534,6 +611,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         <button className="primary-button compact" type="submit" disabled={busy}>
           {busy ? 'Guardando…' : 'Guardar parentesco'}</button>
       </form>}
+      </details>}
     </div>}
   </section>;
 }

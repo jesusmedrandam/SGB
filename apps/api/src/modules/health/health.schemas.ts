@@ -1,7 +1,7 @@
 import {z} from 'zod';
 export const idSchema=z.object({id:z.uuid()});
-export const conditionSchema=z.object({animalId:z.uuid(),kind:z.string().trim().min(2).max(160)
-  .nullable().optional(),detectedOn:z.iso.date(),description:z.string().trim().min(2).max(2000),
+export const conditionSchema=z.object({animalId:z.uuid(),kind:z.string().trim().min(2).max(160),
+  detectedOn:z.iso.date(),description:z.string().trim().min(2).max(2000),
   expectedVersion:z.number().int().positive().optional()});
 export const resolutionSchema=z.object({resolvedOn:z.iso.date(),
   expectedVersion:z.number().int().positive().optional()});
@@ -9,6 +9,7 @@ export const medicineSchema=z.object({
   name:z.string().trim().min(2).max(160),
   kind:z.enum(['VACUNA','DESPARASITACION','ENFERMEDAD','OTRO']),
   activeIngredient:z.string().trim().max(2000).nullable().optional(),
+  treatmentCatalogItemId:z.uuid().nullable().optional(),
   defaultUnitCode:z.enum(['MILLIGRAM','GRAM','MILLILITER','LITER','UNIT','DOSE']),
   suggestedDose:z.string().trim().max(300).nullable().optional(),
   indications:z.string().trim().max(2000).nullable().optional(),

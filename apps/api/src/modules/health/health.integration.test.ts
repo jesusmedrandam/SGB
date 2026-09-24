@@ -5,6 +5,7 @@ import {pool} from '../../database/pool.js';
 import {register,login,verifyEmail,resendEmailVerification,getSessionOverview} from '../auth/auth.service.js';
 import {createAnimal} from '../animals/animals.service.js';
 import {assignAnimalToGroup,createGroup} from '../groups/groups.service.js';
+import {createCatalogItem} from '../catalogs/catalogs.service.js';
 import {applyCampaign,cancelCampaign,createCampaign,createMedicine,listCampaigns,
   listHealthOptions,listMedicines,updateCampaign} from './health.service.js';
 import {createCondition,listConditions,resolveCondition,updateCondition} from './conditions.service.js';
@@ -50,11 +51,12 @@ test('sanidad respeta propiedad, dosis, selección, borradores y aplicación ún
       AS today FROM property WHERE id=$1`,[property.id])).rows[0]!.today;
     const condition=await createCondition(auth,context,{animalId:first.id,kind:'Herida',
       detectedOn:today,description:'Lesión en una extremidad'},metadata);
+    await createCatalogItem(auth,context,'HEALTH_CONDITION_TYPES',{name:'Herida leve'},metadata);
     const changedCondition=await updateCondition(auth,context,condition.id,{animalId:first.id,
       kind:'Herida leve',detectedOn:today,description:'Herida revisada',
       expectedVersion:condition.version},metadata);
     await assert.rejects(()=>updateCondition(auth,context,condition.id,{animalId:second.id,
-      detectedOn:today,description:'Otro animal'},metadata),
+      kind:'Herida leve',detectedOn:today,description:'Otro animal'},metadata),
       (error:{code?:string})=>error.code==='HEALTH_ANIMAL_IMMUTABLE');
     const base={medicineId:medicine.id as string,administrationRoute:'INTRAMUSCULAR' as const,
       appliedOn:today,selectionMode:'GRUPO' as const,groupId:group.id,

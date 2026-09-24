@@ -77,15 +77,16 @@ export function ActivityPanel({accessToken,canManage}:{accessToken:string;canMan
     <div className="movement-list"><h3>Actividades e historial</h3>
       {!records&&!error&&<p className="muted">Cargando actividades…</p>}
       {records?.length===0&&<p className="muted">Aún no hay actividades registradas.</p>}
-      {records?.map((item)=><article className="movement-card" key={item.id}>
+      {records?.map((item)=><details className="movement-card record-row" key={item.id}>
+        <summary>
         <div className="movement-card-top"><div><strong>{item.title}</strong>
           <small>{kinds[item.kind]} · {item.occurredOn} · {item.animals.length} animales</small></div>
           <span className={`movement-status status-${item.status.toLowerCase()}`}>
-            {item.status==='BORRADOR'?'Borrador':item.status==='COMPLETADA'?'Completada':'Cancelada'}</span></div>
+            {item.status==='BORRADOR'?'Borrador':item.status==='COMPLETADA'?'Completada':'Cancelada'}</span></div></summary>
         {item.brandName&&<p>Marquilla: {item.brandName}</p>}
         {item.description&&<p>{item.description}</p>}
-        <details><summary>Ver animales</summary>{item.animals.map((animal)=><span
-          key={animal.id} className="movement-animal-name">{animal.name}</span>)}</details>
+        <div>{item.animals.map((animal)=><span
+          key={animal.id} className="movement-animal-name">{animal.name}</span>)}</div>
         {canManage&&item.status==='BORRADOR'&&<div className="movement-actions">
           <button className="secondary-button compact" type="button" disabled={busy}
             onClick={()=>edit(item)}>Editar</button>
@@ -93,6 +94,6 @@ export function ActivityPanel({accessToken,canManage}:{accessToken:string;canMan
             onClick={()=>void run(()=>applyActivity(accessToken,item.id))}>Aplicar</button>
           <button className="secondary-button compact" type="button" disabled={busy}
             onClick={()=>void run(()=>cancelActivity(accessToken,item.id))}>Cancelar</button></div>}
-      </article>)}</div>
+      </details>)}</div>
   </section>;
 }

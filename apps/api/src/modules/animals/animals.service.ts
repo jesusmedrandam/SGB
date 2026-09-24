@@ -4,6 +4,7 @@ import { pool } from '../../database/pool.js';
 import { inTransaction } from '../../database/transaction.js';
 import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.types.js';
 import type { AnimalCatalogSelection, CreateAnimalInput } from './animals.schemas.js';
+import {insertInitialParents} from './parents.service.js';
 
 interface AnimalRow {
   id: string;
@@ -229,6 +230,28 @@ export async function createAnimal(auth: AuthState, context: PropertyContext,
           input.birthDate ?? null, entryDate, input.initialWeight ?? null,
           input.initialWeightUnitCode ?? null, auth.userId],
       );
+      if(input.groupId){
+        const destination=await client.query<{location_id:string|null}>(`
+          SELECT gla.location_id FROM livestock_group g
+          LEFT JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
+          WHERE g.id=$1 AND g.property_id=$2 AND g.active FOR SHARE OF g`,
+          [input.groupId,context.propertyId]);
+        if(!destination.rows[0])throw invalidRequest('GROUP_UNAVAILABLE','Selecciona un grupo activo de esta propiedad.');
+        await client.query(`INSERT INTO animal_group_assignment(property_id,animal_id,group_id,
+          started_at,start_reason,created_by) VALUES($1,$2,$3,now(),'Registro del animal',$4)`,
+          [context.propertyId,result.rows[0]!.id,input.groupId,auth.userId]);
+        if(destination.rows[0].location_id){
+          const enabled=await client.query(`SELECT module_code FROM effective_property_module
+            WHERE property_id=$1 AND module_code IN ('PASTURES','CORRALS','MOVEMENTS') AND enabled`,
+            [context.propertyId]);
+          if(enabled.rowCount===3)await client.query(`INSERT INTO animal_location_assignment(
+            property_id,animal_id,location_id,started_at,start_reason,created_by)
+            VALUES($1,$2,$3,now(),'Ubicación del grupo',$4)`,
+            [context.propertyId,result.rows[0]!.id,destination.rows[0].location_id,auth.userId]);
+        }
+      }
+      await insertInitialParents(client,context,result.rows[0]!.id,input.birthDate??null,
+        input.mother??null,input.father??null,auth.userId);
       const selection = { breedId: input.breedId ?? null, breedIds: input.breedIds, colorIds: input.colorIds ?? [] };
       await validateSelections(client, context, 'BOVINE', selection);
       await insertSelections(client, auth, context, result.rows[0]!.id, selection);

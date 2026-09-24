@@ -1,11 +1,14 @@
 import {z} from 'zod';
 export const idSchema=z.object({id:z.uuid()});
 export const productSchema=z.object({name:z.string().trim().min(2).max(160),
-  category:z.string().trim().max(120).nullable().optional()});
+  category:z.string().trim().max(120).nullable().optional(),
+  activeIngredient:z.string().trim().max(2000).nullable().optional(),
+  formulatedBy:z.string().trim().max(200).nullable().optional(),
+  description:z.string().trim().max(2000).nullable().optional()});
 export const cleaningSchema=z.object({
   locationId:z.uuid(),startedOn:z.iso.date(),finishedOn:z.iso.date().nullable().optional(),
   activities:z.array(z.enum(['FUMIGACION','TALA_SELECTIVA','DESBROCE','OTRA'])).min(1).max(4),
-  applicationUnit:z.enum(['TANQUES','BOMBADAS']).default('TANQUES'),
+  applicationUnit:z.enum(['TANQUES','BOMBADAS']).nullable().optional(),
   applicationCount:z.number().finite().positive().max(100000).nullable().optional(),
   tankCapacityLiters:z.number().finite().positive().max(100000).nullable().optional(),
   areaType:z.enum(['TOTAL','PARCIAL']),partialPercent:z.number().finite().positive().lt(100)
@@ -22,6 +25,11 @@ export const cleaningSchema=z.object({
     ctx.addIssue({code:'custom',message:'La finalización no puede ser anterior al inicio.'});
   if((value.areaType==='PARCIAL')!==Boolean(value.partialPercent))
     ctx.addIssue({code:'custom',message:'Indica el porcentaje del potrero para un área parcial.'});
+  const spray=value.activities.includes('FUMIGACION');
+  if(!spray&&(value.applicationUnit||value.applicationCount||value.tankCapacityLiters||value.products.length))
+    ctx.addIssue({code:'custom',message:'Tanques, bombadas y productos solo corresponden a fumigación.'});
+  if(spray&&value.applicationCount&&!value.applicationUnit)
+    ctx.addIssue({code:'custom',message:'Elige tanques o bombadas para la aplicación.'});
   if(value.products.length&&!value.applicationCount)
     ctx.addIssue({code:'custom',message:'Indica tanques o bombadas para calcular el consumo.'});
   if(new Set(value.products.map((item)=>item.productId)).size!==value.products.length)

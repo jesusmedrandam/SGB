@@ -30,6 +30,7 @@ export async function healthAudit(client:PoolClient,auth:AuthState,context:Prope
 function medicine(row:Record<string,unknown>){return {
   id:row.id,name:row.name,kind:row.kind,activeIngredient:row.active_ingredient,
   defaultUnitCode:row.default_unit_code,suggestedDose:row.suggested_dose,
+  treatmentCatalogItemId:row.treatment_catalog_item_id,
   indications:row.indications,withdrawalMilkDays:row.withdrawal_milk_days,
   withdrawalMeatDays:row.withdrawal_meat_days,active:row.active};}
 export async function listMedicines(context:PropertyContext){
@@ -41,12 +42,19 @@ export async function createMedicine(auth:AuthState,context:PropertyContext,inpu
   metadata:RequestMetadata){
   return inTransaction(async(client)=>{
     const {account_id}=await healthAccess(client,auth,context,'HEALTH_MANAGE');
+    if(input.treatmentCatalogItemId){
+      const valid=await client.query(`SELECT 1 FROM governed_catalog_item ci WHERE ci.id=$1
+        AND ci.catalog_code='TREATMENT_TYPES' AND ci.active AND ci.deleted_at IS NULL
+        AND (ci.system_defined OR ci.account_id=$2)`,[input.treatmentCatalogItemId,account_id]);
+      if(!valid.rowCount)throw invalidRequest('TREATMENT_TYPE_INVALID','Selecciona un tipo de tratamiento válido.');
+    }
     const result=await client.query(`INSERT INTO health_medicine(account_id,name,kind,active_ingredient,
-      default_unit_code,suggested_dose,indications,withdrawal_milk_days,withdrawal_meat_days,created_by)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      default_unit_code,suggested_dose,indications,withdrawal_milk_days,withdrawal_meat_days,created_by,
+      treatment_catalog_item_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [account_id,input.name,input.kind,input.activeIngredient??null,input.defaultUnitCode,
         input.suggestedDose??null,input.indications??null,input.withdrawalMilkDays,
-        input.withdrawalMeatDays,auth.userId]);
+        input.withdrawalMeatDays,auth.userId,input.treatmentCatalogItemId??null]);
     const created=medicine(result.rows[0]!);
     await healthAudit(client,auth,context,metadata,'HEALTH_MEDICINE_CREATED','HEALTH_MEDICINE',
       result.rows[0]!.id,null,created);
