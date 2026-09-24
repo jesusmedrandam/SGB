@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react';
+import { Component, type FormEvent, type ReactNode, useEffect, useState } from 'react';
 import {
   ApiRequestError,
   acceptInvitation,
@@ -68,6 +68,46 @@ function errorMessage(error: unknown): string {
     : 'Ocurrió un error inesperado. Inténtalo nuevamente.';
 }
 
+function availableNavigation(overview:SessionOverview):NavigationItem[] {
+  const property=overview.properties.find(item=>item.id===overview.activeContext?.propertyId);
+  const role=property?.roles.find(item=>item.id===overview.activeContext?.roleId);
+  const has=(permission:string)=>Boolean(property&&role?.permissions.includes(permission));
+  const modules=property?.enabledModules??[];
+  const showGroups=has('GROUP_VIEW')&&(modules.includes('PASTURES')||modules.includes('CORRALS'));
+  return ([
+    {id:'home',label:'Panel',description:'Resumen de tu propiedad',icon:'home',group:'principal',enabled:true},
+    {id:'animals',label:'Animales',description:'Inventario y fichas',icon:'animals',group:'principal',enabled:has('ANIMAL_VIEW')},
+    {id:'groups',label:'Grupos y potreros',description:'Grupos y ubicaciones',icon:'groups',group:'principal',enabled:showGroups},
+    {id:'reproduction',label:'Reproducción',description:'Celos, preñeces y partos',icon:'reproduction',group:'operations',enabled:has('REPRODUCTION_VIEW')&&modules.includes('REPRODUCTION')},
+    {id:'production',label:'Producción',description:'Lactancias y ordeños',icon:'production',group:'operations',enabled:has('PRODUCTION_VIEW')&&modules.includes('PRODUCTION')},
+    {id:'movements',label:'Movimientos',description:'Grupos, potreros y traslados',icon:'movements',group:'operations',enabled:has('MOVEMENT_VIEW')&&modules.includes('MOVEMENTS')},
+    {id:'health',label:'Sanidad',description:'Medicamentos y tratamientos',icon:'health',group:'operations',enabled:has('HEALTH_VIEW')&&modules.includes('HEALTH')},
+    {id:'cleanings',label:'Limpieza de potreros',description:'Labores y productos',icon:'cleanings',group:'operations',enabled:has('CLEANING_VIEW')&&modules.includes('PASTURE_CLEANING')&&modules.includes('PASTURES')},
+    {id:'activities',label:'Actividades',description:'Herrajes, descornes y labores',icon:'activities',group:'operations',enabled:has('ACTIVITY_VIEW')&&modules.includes('TASKS')},
+    {id:'media',label:'Multimedia',description:'Fotos y videos',icon:'media',group:'operations',enabled:has('MEDIA_VIEW')&&modules.includes('MULTIMEDIA')},
+    {id:'catalogs',label:'Catálogos',description:'Razas, colores y marquillas',icon:'catalogs',group:'configuration',enabled:has('CATALOG_VIEW')},
+    {id:'team',label:'Equipo y roles',description:'Acceso a la propiedad',icon:'team',group:'configuration',enabled:has('MEMBERSHIP_VIEW')},
+    {id:'settings',label:'Configuración',description:'Propiedades y módulos',icon:'settings',group:'configuration',enabled:has('MODULE_VIEW')},
+    {id:'admin',label:'Administración',description:'Cuentas de la plataforma',icon:'admin',group:'configuration',enabled:overview.user.isSuperadmin},
+  ] satisfies NavigationItem[]).filter(item=>item.enabled);
+}
+
+function showHomeInAddress() {
+  const url=new URL(window.location.href);url.hash='home';
+  window.history.replaceState(window.history.state,'',url);
+}
+
+class DashboardRecovery extends Component<{children:ReactNode},{failed:boolean}> {
+  state={failed:false};
+  static getDerivedStateFromError(){return {failed:true};}
+  render(){return this.state.failed?<main className="loading-screen" role="alert">
+    <Brand/><h1>No se pudo abrir esta sección</h1>
+    <p>Regresa al panel para continuar usando la propiedad.</p>
+    <button type="button" className="primary-button compact" onClick={()=>{
+      showHomeInAddress();window.location.reload();}}>Volver al panel</button>
+  </main>:this.props.children;}
+}
+
 function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLogout, onContextChange,
   onPropertyCreated, onSettingsChanged, onOwnAccountCreated, theme, onToggleTheme }: {
   session: AppSession;
@@ -94,27 +134,13 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
   const [requestedSection, setRequestedSection] = useState<SectionId>(()=>
     window.location.hash.slice(1) as SectionId || 'home');
   const activeRole = activeProperty?.roles.find((role) => role.id === overview.activeContext?.roleId);
-  const has=(permission:string)=>Boolean(activeProperty && activeRole?.permissions.includes(permission));
-  const modules=activeProperty?.enabledModules??[];
-  const showGroups=has('GROUP_VIEW')&&(modules.includes('PASTURES')||modules.includes('CORRALS'));
-  const navigation=([
-    {id:'home',label:'Panel',description:'Resumen de tu propiedad',icon:'home',group:'principal',enabled:true},
-    {id:'animals',label:'Animales',description:'Inventario y fichas',icon:'animals',group:'principal',enabled:has('ANIMAL_VIEW')},
-    {id:'groups',label:'Grupos y potreros',description:'Grupos y ubicaciones',icon:'groups',group:'principal',enabled:showGroups},
-    {id:'reproduction',label:'Reproducción',description:'Celos, preñeces y partos',icon:'reproduction',group:'operations',enabled:has('REPRODUCTION_VIEW')&&modules.includes('REPRODUCTION')},
-    {id:'production',label:'Producción',description:'Lactancias y ordeños',icon:'production',group:'operations',enabled:has('PRODUCTION_VIEW')&&modules.includes('PRODUCTION')},
-    {id:'movements',label:'Movimientos',description:'Grupos, potreros y traslados',icon:'movements',group:'operations',enabled:has('MOVEMENT_VIEW')&&modules.includes('MOVEMENTS')},
-    {id:'health',label:'Sanidad',description:'Medicamentos y tratamientos',icon:'health',group:'operations',enabled:has('HEALTH_VIEW')&&modules.includes('HEALTH')},
-    {id:'cleanings',label:'Limpieza de potreros',description:'Labores y productos',icon:'cleanings',group:'operations',enabled:has('CLEANING_VIEW')&&modules.includes('PASTURE_CLEANING')&&modules.includes('PASTURES')},
-    {id:'activities',label:'Actividades',description:'Herrajes, descornes y labores',icon:'activities',group:'operations',enabled:has('ACTIVITY_VIEW')&&modules.includes('TASKS')},
-    {id:'media',label:'Multimedia',description:'Fotos y videos',icon:'media',group:'operations',enabled:has('MEDIA_VIEW')&&modules.includes('MULTIMEDIA')},
-    {id:'catalogs',label:'Catálogos',description:'Razas, colores y marquillas',icon:'catalogs',group:'configuration',enabled:has('CATALOG_VIEW')},
-    {id:'team',label:'Equipo y roles',description:'Acceso a la propiedad',icon:'team',group:'configuration',enabled:has('MEMBERSHIP_VIEW')},
-    {id:'settings',label:'Configuración',description:'Propiedades y módulos',icon:'settings',group:'configuration',enabled:has('MODULE_VIEW')},
-    {id:'admin',label:'Administración',description:'Cuentas de la plataforma',icon:'admin',group:'configuration',enabled:overview.user.isSuperadmin},
-  ] satisfies NavigationItem[]).filter((item)=>item.enabled);
+  const navigation=availableNavigation(overview);
+  const showGroups=navigation.some(item=>item.id==='groups');
   const section=navigation.some((item)=>item.id===requestedSection)?requestedSection:'home';
   const current=navigation.find((item)=>item.id===section)!;
+
+  useEffect(()=>{if(section!==requestedSection){showHomeInAddress();setRequestedSection('home');}},
+    [section,requestedSection]);
 
   useEffect(()=>{
     const onHashChange=()=>setRequestedSection(window.location.hash.slice(1) as SectionId || 'home');
@@ -284,6 +310,8 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
         && activeRole?.permissions.includes('MOVEMENT_VIEW') &&
         <MovementPanel key={`movements:${activeProperty.id}:${activeRole.id}`}
           accessToken={session.accessToken} propertyId={activeProperty.id}
+          canChangeLocation={activeProperty.enabledModules.includes('PASTURES')
+            &&activeProperty.enabledModules.includes('CORRALS')}
           canManage={activeRole.permissions.includes('MOVEMENT_MANAGE')}
           canCancel={activeRole.permissions.includes('MOVEMENT_CANCEL')} />}
       {section==='health' && activeProperty && activeProperty.enabledModules.includes('HEALTH')
@@ -342,8 +370,10 @@ export function App() {
     localStorage.setItem(themeStorageKey, theme);
   }, [theme]);
 
-  async function completeSession(payload: SessionPayload) {
+  async function completeSession(payload: SessionPayload, newLogin=false) {
     const overview = await getSessionOverview(payload.accessToken);
+    const requested=window.location.hash.slice(1);
+    if(newLogin||!availableNavigation(overview).some(item=>item.id===requested))showHomeInAddress();
     setSession({ ...payload, overview });
   }
 
@@ -401,7 +431,7 @@ export function App() {
 
   async function handleLogin(email: string, password: string) {
     setBusy(true); setError(null);
-    try { await completeSession(await login(email, password, deviceId())); }
+    try { await completeSession(await login(email, password, deviceId()),true); }
     catch (loginError) { setError(errorMessage(loginError)); }
     finally { setBusy(false); }
   }
@@ -497,11 +527,11 @@ export function App() {
       aria-label={theme === 'dark' ? 'Usar modo claro' : 'Usar modo oscuro'}>{theme === 'dark' ? '☀' : '☾'}</button></div>}
     {initializing ? <main className="loading-screen"><Brand /><span className="spinner large" />
       <p>Restaurando sesión segura…</p></main>
-      : session ? <Dashboard session={session} busy={busy} error={error} invitation={invitation}
+      : session ? <DashboardRecovery key={session.overview.activeContext?.propertyId??'none'}><Dashboard session={session} busy={busy} error={error} invitation={invitation}
         theme={theme} onToggleTheme={()=>setTheme((value)=>value==='dark'?'light':'dark')}
         onAcceptInvitation={handleAcceptInvitation} onLogout={handleLogout} onContextChange={handleContextChange}
         onPropertyCreated={handlePropertyCreated} onSettingsChanged={handleSettingsChanged}
-        onOwnAccountCreated={handleOwnAccountCreated} />
+        onOwnAccountCreated={handleOwnAccountCreated} /></DashboardRecovery>
         : <AuthScreen busy={busy} error={error} pendingRegistration={pendingRegistration}
           verificationState={verificationState} verificationMessage={verificationMessage}
           resendAccepted={resendAccepted} invitationToken={invitationToken} invitation={invitation}

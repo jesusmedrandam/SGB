@@ -9,9 +9,17 @@ const kinds:Record<MovementRecord['kind'],string>={
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 const message=(error:unknown)=>error instanceof ApiRequestError ? error.message
   : error instanceof Error ? error.message : 'No se pudo gestionar el movimiento.';
+function routeSide(record:MovementRecord,side:'source'|'destination'){
+  const group=side==='source'?record.sourceGroupName:record.destinationGroupName;
+  const location=side==='source'?record.sourceLocationName:record.destinationLocationName;
+  const property=side==='source'?record.sourcePropertyName:record.destinationPropertyName;
+  if(record.kind==='UBICACION')return location||group;
+  const groupAndLocation=group+(location?` (${location})`:'');
+  return record.kind==='GRUPO'?groupAndLocation:`${property} · ${groupAndLocation}`;
+}
 
-export function MovementPanel({accessToken,propertyId,canManage,canCancel}:{
-  accessToken:string;propertyId:string;canManage:boolean;canCancel:boolean;
+export function MovementPanel({accessToken,propertyId,canManage,canCancel,canChangeLocation}:{
+  accessToken:string;propertyId:string;canManage:boolean;canCancel:boolean;canChangeLocation:boolean;
 }){
   const [records,setRecords]=useState<MovementRecord[]|null>(null);
   const [options,setOptions]=useState<MovementOptions|null>(null);
@@ -21,7 +29,10 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel}:{
   const [error,setError]=useState<string|null>(null);
   const [formOpen,setFormOpen]=useState(false);
   const [editing,setEditing]=useState<MovementRecord|null>(null);
-  const [kind,setKind]=useState<MovementRecord['kind']>('UBICACION');
+  const [viewingId,setViewingId]=useState<string|null>(null);
+  const [search,setSearch]=useState('');
+  const [order,setOrder]=useState<'NEWEST'|'OLDEST'|'AZ'|'ZA'>('NEWEST');
+  const [kind,setKind]=useState<MovementRecord['kind']>(canChangeLocation?'UBICACION':'GRUPO');
   const [mode,setMode]=useState<MovementRecord['selectionMode']>('GRUPO');
   const [sourceGroupId,setSourceGroupId]=useState('');
   const [destinationPropertyId,setDestinationPropertyId]=useState(propertyId);
@@ -30,13 +41,16 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel}:{
   const [selected,setSelected]=useState<string[]>([]);
 
   useEffect(()=>{let active=true;
-    void Promise.all([getMovements(accessToken),getMovementOptions(accessToken)])
-      .then(([movements,choices])=>{if(active){setRecords(movements);setOptions(choices);}})
+    void getMovements(accessToken).then(movements=>{if(active){setRecords(movements);setError(null);}})
       .catch((failure)=>{if(active)setError(message(failure));});
     return ()=>{active=false;};
   },[accessToken,revision]);
-  useEffect(()=>{let active=true;void listCatalogItems(accessToken,'MOVEMENT_REASONS')
-    .then(items=>{if(active)setReasons(items);}).catch(()=>{});return()=>{active=false;};},[accessToken]);
+  useEffect(()=>{if(!canManage)return;let active=true;
+    void getMovementOptions(accessToken).then(choices=>{if(active)setOptions(choices);})
+      .catch(failure=>{if(active)setError(message(failure));});
+    return()=>{active=false;};},[accessToken,revision,canManage]);
+  useEffect(()=>{if(!canManage)return;let active=true;void listCatalogItems(accessToken,'MOVEMENT_REASONS')
+    .then(items=>{if(active)setReasons(items);}).catch(()=>{});return()=>{active=false;};},[accessToken,canManage]);
   const source=options?.groups.find((group)=>group.id===sourceGroupId);
   const cross=kind==='PROPIEDAD' || (kind==='COMBINADO'&&destinationPropertyId!==propertyId);
   const groupAnimals=useMemo(()=>options?.animals.filter((animal)=>animal.groupId===sourceGroupId)??[],
@@ -46,15 +60,32 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel}:{
   const locations=options?.locations.filter((location)=>location.propertyId===propertyId
     && location.id!==source?.locationId
     && !options.groups.some((group)=>group.locationId===location.id))??[];
-  function reset(){setEditing(null);setFormOpen(false);setKind('UBICACION');setMode('GRUPO');
+  const visible=useMemo(()=>{
+    const term=search.trim().toLocaleLowerCase();
+    const rows=(records??[]).filter(item=>[item.reason,item.sourceGroupName,item.destinationGroupName,
+      item.sourceLocationName,item.destinationLocationName,item.sourcePropertyName,
+      item.destinationPropertyName,...item.animals.map(animal=>animal.name)].join(' ')
+      .toLocaleLowerCase().includes(term));
+    return rows.sort((a,b)=>order==='AZ'||order==='ZA'
+      ? (order==='AZ'?1:-1)*a.reason.localeCompare(b.reason,'es')
+      : (order==='NEWEST'?-1:1)*a.movementOn.localeCompare(b.movementOn));
+  },[records,search,order]);
+  const viewing=records?.find(item=>item.id===viewingId);
+  useEffect(()=>{if(!formOpen&&!viewing)return;
+    const onKey=(event:KeyboardEvent)=>{if(event.key==='Escape'&&!busy){
+      if(formOpen)reset();else setViewingId(null);
+    }};
+    window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);
+  },[formOpen,viewing,busy]);
+  function reset(){setEditing(null);setFormOpen(false);setKind(canChangeLocation?'UBICACION':'GRUPO');setMode('GRUPO');
     setSourceGroupId('');setDestinationPropertyId(propertyId);setDestinationGroupId('');
     setDestinationLocationId('');setSelected([]);}
   function beginEdit(movement:MovementRecord){
-    setEditing(movement);setFormOpen(true);setKind(movement.kind);setMode(movement.selectionMode);
+    setViewingId(null);setEditing(movement);setFormOpen(true);setKind(movement.kind);setMode(movement.selectionMode);
     setSourceGroupId(movement.sourceGroupId);setDestinationPropertyId(movement.destinationPropertyId);
     setDestinationGroupId(movement.destinationGroupId);
     setDestinationLocationId(movement.destinationLocationId??'');
-    setSelected(movement.animals.map((item)=>item.id));window.scrollTo({top:0,behavior:'smooth'});
+    setSelected(movement.animals.map((item)=>item.id));
   }
   async function run(operation:()=>Promise<unknown>,onSuccess?:()=>void){
     setBusy(true);setError(null);
@@ -73,17 +104,26 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel}:{
       ...(editing?{expectedVersion:editing.version}:{})};
     void run(()=>editing?updateMovement(accessToken,editing.id,input):createMovement(accessToken,input),reset);
   }
-  return <section className="section-block movements-panel">
-    <div className="section-heading"><div><span className="eyebrow">Operaciones</span>
-      <h2>Movimientos</h2><p className="muted">Borradores y traslados de la propiedad activa. El historial se conserva.</p></div>
-      {canManage&&<button className="primary-button compact" type="button"
-        onClick={()=>formOpen?reset():setFormOpen(true)}>{formOpen?'Cerrar':'+ Movimiento'}</button>}
+  return <section className="movements-panel">
+    <div className="movement-toolbar"><label className="movement-search"><span className="sr-only">Buscar movimiento</span>
+      <span aria-hidden="true">⌕</span><input type="search" placeholder="Buscar movimiento…"
+        value={search} onChange={event=>setSearch(event.target.value)}/></label>
+      <span className="movement-count" title="Movimientos encontrados">{visible.length}</span>
+      <button type="button" className="movement-sort" aria-label="Cambiar orden" title={order==='NEWEST'?'Más recientes':order==='OLDEST'?'Más antiguos':order==='AZ'?'Motivo A–Z':'Motivo Z–A'}
+        onClick={()=>setOrder(value=>value==='NEWEST'?'OLDEST':value==='OLDEST'?'AZ':value==='AZ'?'ZA':'NEWEST')}>↕</button>
+      {canManage&&<button className="movement-add primary-button compact" type="button"
+        onClick={()=>{reset();setFormOpen(true);}}>+ Movimiento</button>}
     </div>
     {error&&<div role="alert" className="form-error admin-error">{error}</div>}
     {!records&&!error&&<p className="muted">Cargando movimientos…</p>}
-    {canManage&&formOpen&&options&&<form className="movement-form" onSubmit={save}
+    {canManage&&formOpen&&options&&<div className="movement-overlay" role="presentation"
+      onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)reset();}}>
+      <div className="movement-dialog" role="dialog" aria-modal="true" aria-label={editing?'Editar borrador':'Nuevo movimiento'}>
+      <div className="movement-dialog-heading"><h2>{editing?'Editar borrador':'Nuevo movimiento'}</h2>
+        <button type="button" onClick={reset} disabled={busy} aria-label="Cerrar formulario">×</button></div>
+      {error&&<div role="alert" className="form-error movement-dialog-error">{error}</div>}
+      <form className="movement-form" onSubmit={save}
       key={editing?.id??'new'}>
-      <h3>{editing?'Editar borrador':'Nuevo movimiento'}</h3>
       <label><span>Tipo *</span><select value={kind} onChange={(event)=>{
         const next=event.target.value as MovementRecord['kind'];setKind(next);
         if(next==='UBICACION'){setMode('GRUPO');setDestinationPropertyId(propertyId);
@@ -91,7 +131,8 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel}:{
         else if(next==='PROPIEDAD')setDestinationPropertyId(
           options.properties.find((property)=>property.id!==propertyId)?.id??'');
         setDestinationLocationId('');}}>
-        {Object.entries(kinds).filter(([value])=>value!=='COMBINADO'||editing?.kind==='COMBINADO')
+        {Object.entries(kinds).filter(([value])=>
+          (value!=='UBICACION'||canChangeLocation)&&(value!=='COMBINADO'||editing?.kind==='COMBINADO'))
           .map(([value,label])=><option key={value} value={value}>{label}</option>)}
       </select></label>
       <label><span>Grupo de origen *</span><select value={sourceGroupId} required onChange={(event)=>{
@@ -152,32 +193,55 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel}:{
         {busy?'Guardando…':editing?'Guardar borrador':'Crear borrador'}</button>
         {editing&&<button type="button" className="secondary-button compact" onClick={reset}>Cancelar edición</button>}
       </div>
-    </form>}
-    <div className="movement-list">
-      <h3>Historial y borradores</h3>
-      {records?.length===0&&<p className="muted">Todavía no hay movimientos en esta propiedad.</p>}
-      {records?.map((movement)=><details key={movement.id} className="movement-card record-row">
-        <summary>
-        <div className="movement-card-top"><div><strong>{kinds[movement.kind]}</strong>
-          <small>{movement.movementOn} · {movement.animals.length} {movement.animals.length===1?'animal':'animales'}</small></div>
-          <span className={`movement-status status-${movement.status.toLowerCase()}`}>
-            {movement.status==='BORRADOR'?'Borrador':movement.status==='COMPLETADO'?'Completado':'Cancelado'}</span></div>
-        <p><b>{movement.sourcePropertyName}</b> · {movement.sourceGroupName}
-          {movement.sourceLocationName?` (${movement.sourceLocationName})`:''} → <b>{movement.destinationPropertyName}</b> · {movement.destinationGroupName}
-          {movement.destinationLocationName?` (${movement.destinationLocationName})`:''}</p></summary>
-        <small>{movement.reason}</small>
-        {movement.notes&&<p>{movement.notes}</p>}
-        <div>{movement.animals.map((animal)=><span
-          key={animal.id} className="movement-animal-name">{animal.name}</span>)}</div>
-        {movement.status==='BORRADOR'&&movement.sourcePropertyId===propertyId&&
-          <div className="movement-actions">
-            {canManage&&<><button type="button" className="secondary-button compact" disabled={busy}
-              onClick={()=>beginEdit(movement)}>Editar</button><button type="button" className="primary-button compact"
-              disabled={busy} onClick={()=>void run(()=>applyMovement(accessToken,movement.id))}>Aplicar</button></>}
+      </form></div></div>}
+    {records&&<div className="movement-record-list">
+      <div className="movement-list-head" aria-hidden="true"><span>Movimiento</span><span>Fecha</span>
+        <span>Origen y destino</span><span>Estado</span><span/></div>
+      {visible.map(movement=><button type="button" className="movement-list-row" key={movement.id}
+        onClick={()=>setViewingId(movement.id)}>
+        <span className="movement-list-title"><strong>{movement.reason||kinds[movement.kind]}</strong>
+          <small>{movement.animals.length} {movement.animals.length===1?'animal':'animales'} · {kinds[movement.kind]}</small></span>
+        <span>{movement.movementOn}</span>
+        <span className="movement-list-route">↔ {routeSide(movement,'source')} → {routeSide(movement,'destination')}</span>
+        <span><span className={`movement-status status-${movement.status.toLowerCase()}`}>
+          {movement.status==='BORRADOR'?'Borrador':movement.status==='COMPLETADO'?'Completado':'Cancelado'}</span></span>
+        <span className="movement-list-chevron" aria-hidden="true">›</span>
+      </button>)}
+      {!visible.length&&<div className="movement-list-empty">{records.length
+        ?'No hay movimientos con esa búsqueda.':'Aún no hay movimientos en esta propiedad.'}</div>}
+    </div>}
+    {viewing&&<div className="movement-overlay" role="presentation"
+      onMouseDown={event=>{if(event.target===event.currentTarget)setViewingId(null);}}>
+      <div className="movement-dialog" role="dialog" aria-modal="true" aria-labelledby="movement-detail-title">
+        <div className="movement-dialog-heading"><h2 id="movement-detail-title">Detalle del movimiento</h2>
+          <button type="button" onClick={()=>setViewingId(null)} aria-label="Cerrar detalle">×</button></div>
+        {error&&<div role="alert" className="form-error movement-dialog-error">{error}</div>}
+        <div className="movement-detail">
+          <div className="movement-detail-title"><span className="movement-detail-icon">↔</span>
+            <div><h3>{viewing.reason||kinds[viewing.kind]}</h3><small>{viewing.movementOn} · {kinds[viewing.kind]}</small></div>
+            <span className={`movement-status status-${viewing.status.toLowerCase()}`}>
+              {viewing.status==='BORRADOR'?'Borrador':viewing.status==='COMPLETADO'?'Completado':'Cancelado'}</span></div>
+          <div className="movement-detail-route"><div><small>Origen</small><strong>{viewing.sourcePropertyName}</strong>
+            <span>{viewing.sourceGroupName}{viewing.sourceLocationName?` · ${viewing.sourceLocationName}`:''}</span></div>
+            <div><small>Destino</small><strong>{viewing.destinationPropertyName}</strong>
+              <span>{viewing.destinationGroupName}{viewing.destinationLocationName?` · ${viewing.destinationLocationName}`:''}</span></div></div>
+          <details className="movement-detail-animals"><summary>Animales implicados ({viewing.animals.length})</summary>
+            <div>{viewing.animals.map(animal=><span key={animal.id}>{animal.name}</span>)}</div></details>
+          {viewing.notes&&<div className="movement-detail-notes"><strong>Observaciones</strong><p>{viewing.notes}</p></div>}
+        </div>
+        <div className="movement-dialog-actions"><button type="button" className="secondary-button compact"
+          onClick={()=>setViewingId(null)}>Cerrar</button>
+          {viewing.status==='BORRADOR'&&viewing.sourcePropertyId===propertyId&&<>
             {canCancel&&<button type="button" className="secondary-button compact" disabled={busy}
-              onClick={()=>void run(()=>cancelMovement(accessToken,movement.id))}>Cancelar borrador</button>}
-          </div>}
-      </details>)}
-    </div>
+              onClick={()=>void run(()=>cancelMovement(accessToken,viewing.id))}>Cancelar movimiento</button>}
+            {canManage&&(viewing.kind!=='UBICACION'||canChangeLocation)&&<><button type="button" className="secondary-button compact" disabled={busy}
+              onClick={()=>beginEdit(viewing)}>Editar</button><button type="button" className="primary-button compact"
+                disabled={busy} onClick={()=>void run(()=>applyMovement(accessToken,viewing.id))}>Aplicar</button></>}
+          </>}
+        </div>
+      </div>
+    </div>}
+    {canManage&&<button type="button" className="movement-fab" aria-label="Nuevo movimiento"
+      onClick={()=>{reset();setFormOpen(true);}}>＋</button>}
   </section>;
 }
