@@ -49,6 +49,17 @@ test('borrador, rotación de grupo, selección manual y traslado conservan histo
     const groupTwo=await createGroup(auth,context,{name:'Grupo secundario',locationId:groupPasture.id},metadata);
     const destGroup=await createGroup(auth,destinationContext,
       {name:'Grupo de destino',locationId:destPasture.id},metadata);
+    const newGroup=await createGroup(auth,context,{name:'Grupo recién creado'},metadata);
+    const initialPasture=await createLocation(auth,context,
+      {kind:'PASTURE',name:'Potrero para grupo nuevo'},metadata);
+    const firstPlacement=await createMovement(auth,context,{kind:'UBICACION',selectionMode:'GRUPO',
+      sourceGroupId:newGroup.id,destinationGroupId:newGroup.id,destinationPropertyId:property.id,
+      destinationLocationId:initialPasture.id,movementOn:date(),reason:'Primera ubicación',
+      animalIds:[]},metadata);
+    assert.equal(firstPlacement.animals.length,0);
+    await applyMovement(auth,context,firstPlacement.id,metadata);
+    assert.equal((await listGroups(context)).find(entry=>entry.id===newGroup.id)?.location?.id,
+      initialPasture.id);
     const first=await createAnimal(auth,context,{name:'Vaca a trasladar',sex:'FEMALE',
       speciesCode:'BOVINE'},metadata);
     const other=await createAnimal(auth,context,{name:'Vaca que permanece',sex:'FEMALE',

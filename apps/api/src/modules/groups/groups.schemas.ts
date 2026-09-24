@@ -3,8 +3,8 @@ import { z } from 'zod';
 export const idSchema = z.object({ id: z.uuid() });
 const name = z.string().trim().min(1).max(160);
 const description = z.string().trim().max(5000).nullable().optional();
-export const createGroupSchema = z.object({
-  name, description, locationId: z.uuid().nullable().optional(),
+export const createGroupSchema = z.strictObject({
+  name, description,
 });
 export const updateGroupSchema = z.object({
   name, description, expectedVersion: z.number().int().positive(),

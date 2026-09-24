@@ -137,8 +137,8 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     assert.equal(animal.description, 'Vaca mansa del ordeño');
     assert.deepEqual(animal.brands.map((entry) => entry.id), [brand.id]);
     assert.equal((await getAnimal(ownerContext, animal.id)).id, animal.id);
-    assert.equal((await listAnimals(ownerContext, 1, 'tag-')).items[0]?.id, animal.id);
-    assert.equal((await listAnimals(ownerContext, 1, 'm7l-')).items[0]?.id, animal.id);
+    assert.equal((await listAnimals(ownerContext, {page:1,search:'tag-'})).items[0]?.id, animal.id);
+    assert.equal((await listAnimals(ownerContext, {page:1,search:'m7l-'})).items[0]?.id, animal.id);
     const anotherBrand = await createBrand(ownerAuth, ownerContext, `ABC-${suffix}`, metadata);
     const withBrands = await updateAnimalBrands(ownerAuth, ownerContext, animal.id,
       [brand.id, anotherBrand.id], animal.version, metadata);
@@ -331,6 +331,9 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       { animalId: animal.id, expectedAnimalVersion: described.version }, metadata);
     assert.equal(grouped.group?.id, firstGroup.id);
     assert.equal(grouped.location?.id, pastureA.id);
+    assert.deepEqual((await listAnimals(ownerContext,{page:1,search:'',groupId:firstGroup.id,
+      sex:'FEMALE',locationId:pastureA.id})).items.map(item=>item.id),[animal.id]);
+    assert.equal((await listAnimals(ownerContext,{page:1,search:'',groupId:secondGroup.id})).items.length,0);
     assert.equal((await listGroups(ownerContext)).find((entry) => entry.id === firstGroup.id)?.animalCount, 1);
     const moved = await setGroupLocation(ownerAuth, ownerContext, firstGroup.id,
       { locationId: pastureB.id, expectedVersion: firstGroup.version }, metadata);
@@ -645,7 +648,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       [{ partyId: ownerOne.id, percent: 100, isPrimary: true }], secondAnimal.version, metadata),
       (error: { code?: string }) => error.code === 'ANIMAL_VERSION_CONFLICT');
 
-    assert.equal((await listAnimals(ownerContext, 1, '')).items.some((row) => row.id === secondAnimal.id), false);
+    assert.equal((await listAnimals(ownerContext, {page:1,search:''})).items.some((row) => row.id === secondAnimal.id), false);
     assert.equal((await listCatalogItems(secondContext, 'BREEDS')).some((row) => row.id === breed.id), true);
     assert.equal((await listBrands(secondContext)).some((row) => row.id === anotherBrand.id), true);
     await setCatalogItemActive(ownerAuth, secondContext, 'COLORS', color.id, false, metadata);

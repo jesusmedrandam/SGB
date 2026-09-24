@@ -77,6 +77,7 @@ export interface Animal {
   initialWeight: number | null;
   initialWeightUnitCode: string | null;
   availabilityStatusCode: string;
+  profilePhotoUrl?:string|null;
   classification: {code:string;name:string}|null;
   version: number;
   breed?: { id: string; name: string } | null;
@@ -318,6 +319,17 @@ export function resendVerification(email: string) {
   });
 }
 
+export function requestPasswordReset(email:string){
+  return request<{accepted:true}>('/auth/forgot-password',{
+    method:'POST',body:JSON.stringify({email}),
+  });
+}
+export function resetPassword(token:string,password:string){
+  return request<{reset:true}>('/auth/reset-password',{
+    method:'POST',body:JSON.stringify({token,password}),
+  });
+}
+
 export function refreshSession() {
   return request<SessionPayload>('/auth/refresh', { method: 'POST' });
 }
@@ -357,9 +369,13 @@ export function getCatalogReference(accessToken: string) {
   return request<CatalogReference>('/catalogs/reference', { headers: bearer(accessToken) });
 }
 
-export function getAnimals(accessToken: string, page = 1, search = '',classification='') {
+export type AnimalFilters = Partial<Record<'sex'|'status'|'groupId'|'locationId'|'ownerId'|
+  'breedId'|'colorId'|'brandId'|'birthFrom'|'birthTo',string>>;
+export function getAnimals(accessToken: string, page = 1, search = '',classification='',
+  filters:AnimalFilters={}) {
   const query = new URLSearchParams({ page: String(page), search });
   if(classification)query.set('classification',classification);
+  for(const [key,value] of Object.entries(filters))if(value)query.set(key,value);
   return request<AnimalList>(`/animals?${query}`, { headers: bearer(accessToken) });
 }
 export function getAnimalSummary(accessToken:string){return request<AnimalSummary>('/animals/summary',{
@@ -404,7 +420,7 @@ export function listGroups(accessToken: string) {
 }
 
 export function createGroup(accessToken: string, input: {
-  name: string; description: string | null; locationId: string | null;
+  name: string; description: string | null;
 }) {
   return request<LivestockGroup>('/groups', {
     method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
@@ -424,22 +440,6 @@ export function setGroupState(accessToken: string, id: string, input: {
 }) {
   return request<LivestockGroup>(`/groups/${encodeURIComponent(id)}/state`, {
     method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
-  });
-}
-
-export function setGroupLocation(accessToken: string, id: string, input: {
-  locationId: string | null; expectedVersion: number;
-}) {
-  return request<LivestockGroup>(`/groups/${encodeURIComponent(id)}/location`, {
-    method: 'PATCH', headers: bearer(accessToken), body: JSON.stringify(input),
-  });
-}
-
-export function assignAnimalToGroup(accessToken: string, id: string, input: {
-  animalId: string; expectedAnimalVersion: number;
-}) {
-  return request<Animal>(`/groups/${encodeURIComponent(id)}/animals`, {
-    method: 'POST', headers: bearer(accessToken), body: JSON.stringify(input),
   });
 }
 

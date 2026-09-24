@@ -2,10 +2,10 @@ import { Router, type Request } from 'express';
 import { asyncHandler } from '../../core/async-handler.js';
 import { authenticate, requirePermission, requirePropertyContext } from '../auth/auth.middleware.js';
 import type { RequestMetadata } from '../auth/auth.types.js';
-import { assignAnimalSchema, createGroupSchema, createLocationSchema,
-  groupLocationSchema, groupStateSchema, idSchema, updateGroupSchema, updateLocationSchema } from './groups.schemas.js';
-import { assignAnimalToGroup, createGroup, createLocation, listGroups, listLocations,
-  setGroupLocation, setGroupState, updateGroup, updateLocation } from './groups.service.js';
+import { createGroupSchema, createLocationSchema,
+  groupStateSchema, idSchema, updateGroupSchema, updateLocationSchema } from './groups.schemas.js';
+import { createGroup, createLocation, listGroups, listLocations,
+  setGroupState, updateGroup, updateLocation } from './groups.service.js';
 
 const metadata = (request: Request): RequestMetadata => ({
   ipAddress: request.ip || null, userAgent: request.header('user-agent')?.slice(0, 1000) ?? null,
@@ -33,20 +33,6 @@ groupsRouter.patch('/:id/state', requirePermission('GROUP_MANAGE'), asyncHandler
   response.json({ ok: true, data: await setGroupState(
     request.auth!, request.propertyContext!, id, input, metadata(request)) });
 }));
-groupsRouter.patch('/:id/location', requirePermission('GROUP_MANAGE'), requirePermission('LOCATION_MANAGE'),
-  requirePermission('ANIMAL_UPDATE'), asyncHandler(async (request, response) => {
-    const { id } = idSchema.parse(request.params);
-    const input = groupLocationSchema.parse(request.body);
-    response.json({ ok: true, data: await setGroupLocation(
-      request.auth!, request.propertyContext!, id, input, metadata(request)) });
-  }));
-groupsRouter.post('/:id/animals', requirePermission('ANIMAL_UPDATE'), requirePermission('GROUP_VIEW'),
-  asyncHandler(async (request, response) => {
-    const { id } = idSchema.parse(request.params);
-    const input = assignAnimalSchema.parse(request.body);
-    response.json({ ok: true, data: await assignAnimalToGroup(
-      request.auth!, request.propertyContext!, id, input, metadata(request)) });
-  }));
 
 export const locationsRouter = Router();
 locationsRouter.use(authenticate, requirePropertyContext);

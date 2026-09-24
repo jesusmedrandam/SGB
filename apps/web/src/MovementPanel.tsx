@@ -18,8 +18,9 @@ function routeSide(record:MovementRecord,side:'source'|'destination'){
   return record.kind==='GRUPO'?groupAndLocation:`${property} · ${groupAndLocation}`;
 }
 
-export function MovementPanel({accessToken,propertyId,canManage,canCancel,canChangeLocation}:{
+export function MovementPanel({accessToken,propertyId,canManage,canCancel,canChangeLocation,initialAnimalId}:{
   accessToken:string;propertyId:string;canManage:boolean;canCancel:boolean;canChangeLocation:boolean;
+  initialAnimalId?:string|undefined;
 }){
   const [records,setRecords]=useState<MovementRecord[]|null>(null);
   const [options,setOptions]=useState<MovementOptions|null>(null);
@@ -39,6 +40,12 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
   const [destinationGroupId,setDestinationGroupId]=useState('');
   const [destinationLocationId,setDestinationLocationId]=useState('');
   const [selected,setSelected]=useState<string[]>([]);
+  const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
+  useEffect(()=>{if(!initialAnimalId||initialAnimalId===prefilledAnimalId||!options||!canManage)return;
+    const animal=options.animals.find(item=>item.id===initialAnimalId);
+    if(animal?.groupId){setKind('GRUPO');setSourceGroupId(animal.groupId);setMode('MANUAL');setSelected([animal.id]);
+      setDestinationGroupId('');setDestinationLocationId('');setFormOpen(true);setPrefilledAnimalId(animal.id);}
+  },[initialAnimalId,prefilledAnimalId,options?.animals,canManage]);
 
   useEffect(()=>{let active=true;
     void getMovements(accessToken).then(movements=>{if(active){setRecords(movements);setError(null);}})
@@ -176,7 +183,7 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
         <textarea name="notes" maxLength={5000} defaultValue={editing?.notes??''}/></label>
       {sourceGroupId&&<div className="movement-selection movement-wide">
         <strong>{mode==='GRUPO'?`Grupo completo · ${groupAnimals.length} animales`:'Selecciona los animales del grupo'}</strong>
-        {!groupAnimals.length&&<p className="muted">El grupo de origen no tiene animales activos.</p>}
+        {!groupAnimals.length&&<p className="muted">El grupo no tiene animales activos. Puedes asignar su primera ubicación.</p>}
         {mode==='MANUAL'&&<><button type="button" className="secondary-button compact"
           onClick={()=>setSelected(selected.length===groupAnimals.length?[]:groupAnimals.map((animal)=>animal.id))}>
           {selected.length===groupAnimals.length?'Quitar selección':'Seleccionar todos'}</button>
@@ -187,7 +194,7 @@ export function MovementPanel({accessToken,propertyId,canManage,canCancel,canCha
         </>}
       </div>}
       <div className="movement-actions movement-wide"><button className="primary-button compact" disabled={busy
-        || !sourceGroupId || !groupAnimals.length || mode==='MANUAL'&&!selected.length
+        || !sourceGroupId || kind!=='UBICACION'&&!groupAnimals.length || mode==='MANUAL'&&!selected.length
         || kind!=='UBICACION'&&!destinationGroupId || kind==='UBICACION'&&!destinationLocationId
         || kind==='PROPIEDAD'&&!cross}>
         {busy?'Guardando…':editing?'Guardar borrador':'Crear borrador'}</button>

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 export type ShellIconName = 'home'|'animals'|'groups'|'reproduction'|'production'|'movements'|'health'|'cleanings'|'activities'|'media'|'catalogs'|
-  'team'|'settings'|'admin'|'menu'|'close'|'moon'|'sun'|'logout'|'chevron';
+  'team'|'settings'|'admin'|'menu'|'close'|'moon'|'sun'|'logout'|'chevron'|'camera'|'edit';
 
 const shapes: Record<ShellIconName, ReactNode> = {
   home: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
@@ -24,6 +24,8 @@ const shapes: Record<ShellIconName, ReactNode> = {
   sun: <><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></>,
   logout: <><path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4m5-4 4-4-4-4m4 4H9"/></>,
   chevron: <path d="m9 18 6-6-6-6"/>,
+  camera: <><path d="M4 6h4l2-3h4l2 3h4a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="4"/></>,
+  edit: <><path d="m4 17 11-11 3 3L7 20l-4 1 1-4ZM14 7l3-3a2 2 0 0 1 3 3l-3 3"/></>,
 };
 
 export function ShellIcon({name,size=19}:{name:ShellIconName;size?:number}) {

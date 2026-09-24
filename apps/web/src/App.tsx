@@ -19,6 +19,7 @@ import {
 } from './api';
 import { AuthScreen, type VerificationState } from './AuthScreen';
 import { AnimalPanel } from './AnimalPanel';
+import type { Animal } from './api';
 import { Brand } from './Brand';
 import { GroupPanel } from './GroupPanel';
 import { CatalogPanel } from './CatalogPanel';
@@ -130,6 +131,7 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
   const [roleId, setRoleId] = useState(overview.activeContext?.roleId || property?.roles[0]?.id || '');
   const [showOwnAccount, setShowOwnAccount] = useState(false);
   const [animalClassification,setAnimalClassification]=useState('');
+  const [actionAnimal,setActionAnimal]=useState<{section:SectionId;animal:Animal}|null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [requestedSection, setRequestedSection] = useState<SectionId>(()=>
     window.location.hash.slice(1) as SectionId || 'home');
@@ -148,6 +150,7 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
     return ()=>window.removeEventListener('hashchange',onHashChange);
   },[]);
   function openSection(id:SectionId,classification=''){
+    setActionAnimal(null);
     setAnimalClassification(classification);
     setRequestedSection(id);setMenuOpen(false);
     window.location.hash=id==='home'?'home':id;
@@ -283,6 +286,15 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
           initialClassification={animalClassification}
           canCreate={activeRole.permissions.includes('ANIMAL_CREATE')}
           canUpdate={activeRole.permissions.includes('ANIMAL_UPDATE')}
+          canViewLocations={activeRole.permissions.includes('LOCATION_VIEW')}
+          modules={activeProperty.enabledModules.filter(code=>{
+            const permission:Record<string,string>={MOVEMENTS:'MOVEMENT_MANAGE',HEALTH:'HEALTH_MANAGE',
+              REPRODUCTION:'REPRODUCTION_MANAGE',PRODUCTION:'PRODUCTION_MANAGE'};
+            return !permission[code]||activeRole.permissions.includes(permission[code]);
+          })}
+          onNavigate={(destination,animal)=>{
+            openSection(destination);setActionAnimal({section:destination,animal});
+          }}
           canManageBrands={activeRole.permissions.includes('CATALOG_MANAGE')}
           canViewCatalogs={activeRole.permissions.includes('CATALOG_VIEW')}
           canViewMedia={activeProperty.enabledModules.includes('MULTIMEDIA')
@@ -300,16 +312,19 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
         && activeRole?.permissions.includes('REPRODUCTION_VIEW') &&
         <ReproductionPanel key={`reproduction:${activeProperty.id}:${activeRole.id}`}
           accessToken={session.accessToken}
+          initialAnimalId={actionAnimal?.section==='reproduction'?actionAnimal.animal.id:undefined}
           canManage={activeRole.permissions.includes('REPRODUCTION_MANAGE')} />}
       {section==='production' && activeProperty && activeProperty.enabledModules.includes('PRODUCTION')
         && activeRole?.permissions.includes('PRODUCTION_VIEW') &&
         <ProductionPanel key={`production:${activeProperty.id}:${activeRole.id}`}
           accessToken={session.accessToken}
+          initialAnimalId={actionAnimal?.section==='production'?actionAnimal.animal.id:undefined}
           canManage={activeRole.permissions.includes('PRODUCTION_MANAGE')} />}
       {section==='movements' && activeProperty && activeProperty.enabledModules.includes('MOVEMENTS')
         && activeRole?.permissions.includes('MOVEMENT_VIEW') &&
         <MovementPanel key={`movements:${activeProperty.id}:${activeRole.id}`}
           accessToken={session.accessToken} propertyId={activeProperty.id}
+          initialAnimalId={actionAnimal?.section==='movements'?actionAnimal.animal.id:undefined}
           canChangeLocation={activeProperty.enabledModules.includes('PASTURES')
             &&activeProperty.enabledModules.includes('CORRALS')}
           canManage={activeRole.permissions.includes('MOVEMENT_MANAGE')}
@@ -317,6 +332,7 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
       {section==='health' && activeProperty && activeProperty.enabledModules.includes('HEALTH')
         && activeRole?.permissions.includes('HEALTH_VIEW') &&
         <HealthPanel key={`health:${activeProperty.id}:${activeRole.id}`}
+          initialAnimalId={actionAnimal?.section==='health'?actionAnimal.animal.id:undefined}
           accessToken={session.accessToken} canManage={activeRole.permissions.includes('HEALTH_MANAGE')} />}
       {section==='cleanings' && activeProperty && activeProperty.enabledModules.includes('PASTURE_CLEANING')
         && activeProperty.enabledModules.includes('PASTURES')

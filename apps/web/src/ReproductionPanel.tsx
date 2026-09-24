@@ -14,8 +14,8 @@ const errorMessage = (error: unknown) => error instanceof ApiRequestError
   ? error.message : error instanceof Error ? error.message : 'No fue posible guardar el evento.';
 const optional = (form: FormData, name: string) => String(form.get(name) || '').trim() || null;
 
-export function ReproductionPanel({ accessToken, canManage }: {
-  accessToken: string; canManage: boolean;
+export function ReproductionPanel({ accessToken, canManage, initialAnimalId }: {
+  accessToken: string; canManage: boolean; initialAnimalId?:string|undefined;
 }) {
   const [records, setRecords] = useState<ReproductionRecords | null>(null);
   const [candidates, setCandidates] = useState<ReproductionCandidate[]>([]);
@@ -27,6 +27,11 @@ export function ReproductionPanel({ accessToken, canManage }: {
   const [error, setError] = useState<string | null>(null);
   const [activeForm, setActiveForm] = useState<'HEAT'|'PREGNANCY'|'SERVICE'|'BIRTH'|'LOSS'|null>(null);
   const females = candidates.filter((animal) => animal.sex === 'FEMALE');
+  const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
+  useEffect(()=>{if(!initialAnimalId||initialAnimalId===prefilledAnimalId||!canManage||
+    !candidates.some(animal=>animal.id===initialAnimalId&&animal.sex==='FEMALE'))return;
+    setCowId(initialAnimalId);setActiveForm('HEAT');setPrefilledAnimalId(initialAnimalId);
+  },[initialAnimalId,prefilledAnimalId,candidates,canManage]);
   const males = candidates.filter((animal) => animal.sex === 'MALE');
   const confirmed = records?.pregnancies.filter((pregnancy) => pregnancy.status === 'CONFIRMED') ?? [];
 
@@ -177,7 +182,7 @@ export function ReproductionPanel({ accessToken, canManage }: {
     {canManage && activeForm && <div className="reproduction-forms">
       <form className="group-new-form" onSubmit={heat} hidden={activeForm!=='HEAT'}>
         <h3>Registrar celo</h3>
-        <label><span>Vaca *</span><select name="cowId" required defaultValue="">
+        <label><span>Vaca *</span><select name="cowId" required defaultValue={initialAnimalId??''}>
           <option value="" disabled>Selecciona la vaca</option>
           {females.map((animal) => <option key={animal.id} value={animal.id}>{animal.name}</option>)}
         </select></label>

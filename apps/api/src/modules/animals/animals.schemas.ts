@@ -9,7 +9,13 @@ export const animalListSchema = z.object({
   page: z.coerce.number().int().min(1).max(10000).default(1),
   search: z.string().trim().max(80).default(''),
   classification:z.enum(['VACA','VACONA','TERNERA','TORO','TORETE','TERNERO']).optional(),
-});
+  sex:z.enum(['FEMALE','MALE']).optional(),
+  status:z.enum(['ACTIVE','INACTIVE','DEAD','MISSING']).optional(),
+  groupId:z.uuid().optional(),locationId:z.uuid().optional(),ownerId:z.uuid().optional(),
+  breedId:z.uuid().optional(),colorId:z.uuid().optional(),brandId:z.uuid().optional(),
+  birthFrom:z.iso.date().optional(),birthTo:z.iso.date().optional(),
+}).refine(value=>!value.birthFrom||!value.birthTo||value.birthFrom<=value.birthTo,
+  {message:'La fecha inicial debe ser anterior a la fecha final.',path:['birthTo']});
 
 const catalogSelectionSchema = z.object({
   breedId: z.uuid().nullable().optional(),

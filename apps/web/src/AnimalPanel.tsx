@@ -5,6 +5,7 @@ import {
   listOwners, listAccountUsers, createOwner, updateBrandOwners, updateAnimalOwners,
   updateAnimalDescription, updateAnimalParents,
   listGroups, type LivestockGroup,
+  listLocations,type PhysicalLocation,type AnimalFilters,
   getMedia,uploadMedia,deleteMedia,type MediaItem,
   getAnimalClassificationPolicy,type AnimalClassificationPolicy,
   type Animal, type AnimalList, type CatalogItem, type LivestockBrand, type LivestockOwner, type ParentSelection,
@@ -147,10 +148,12 @@ function ParentField({ accessToken, child, role }: {
 }
 
 export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs, canManageBrands,
-  canViewMedia,canManageMedia,initialClassification }: {
+  canViewMedia,canManageMedia,initialClassification,canViewLocations,modules,onNavigate }: {
   accessToken: string; canCreate: boolean; canUpdate: boolean;
   canViewCatalogs: boolean; canManageBrands: boolean;
   canViewMedia:boolean;canManageMedia:boolean;initialClassification?:string;
+  canViewLocations:boolean;modules:string[];
+  onNavigate:(section:'movements'|'health'|'reproduction'|'production',animal:Animal)=>void;
 }) {
   const [result, setResult] = useState<AnimalList | null>(null);
   const [searchInput, setSearchInput] = useState('');
@@ -167,6 +170,9 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
   const [brands, setBrands] = useState<LivestockBrand[] | null>(null);
   const [owners, setOwners] = useState<LivestockOwner[]>([]);
   const [groups,setGroups]=useState<LivestockGroup[]>([]);
+  const [locations,setLocations]=useState<PhysicalLocation[]>([]);
+  const [filters,setFilters]=useState<AnimalFilters>({});
+  const [advancedOpen,setAdvancedOpen]=useState(false);
   const [accountUsers, setAccountUsers] = useState<Array<{ id: string; name: string }>>([]);
   const [animalMedia,setAnimalMedia]=useState<MediaItem[]>([]);
   const [mediaRevision,setMediaRevision]=useState(0);
@@ -178,11 +184,11 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
 
   useEffect(() => {
     let active = true;
-    void getAnimals(accessToken, page, search,classification).then((list) => {
+    void getAnimals(accessToken, page, search,classification,filters).then((list) => {
       if (active) { setResult(list); setError(null); }
     }).catch((failure) => { if (active) setError(message(failure)); });
     return () => { active = false; };
-  }, [accessToken, page, search, classification,revision]);
+  }, [accessToken, page, search, classification,filters,revision]);
 
   useEffect(() => {
     if (!canViewCatalogs) return;
@@ -204,8 +210,14 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       .catch((failure) => { if (active) setError(message(failure)); });
     void listGroups(accessToken).then(value=>{if(active)setGroups(value);})
       .catch((failure)=>{if(active)setError(message(failure));});
+    if(canViewLocations)void listLocations(accessToken).then(value=>{if(active)setLocations(value);})
+      .catch((failure)=>{if(active)setError(message(failure));});
     return () => { active = false; };
-  }, [accessToken]);
+  }, [accessToken,canViewLocations]);
+
+  function setFilter(key:keyof AnimalFilters,value:string){
+    setFilters(current=>({...current,[key]:value||undefined}));setPage(1);
+  }
 
   useEffect(()=>{if(!selected||!canViewMedia){setAnimalMedia([]);return;}
     let active=true;void getMedia(accessToken,'ANIMAL',selected.id).then(items=>{
@@ -509,25 +521,71 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         {busy ? 'Guardando…' : 'Registrar animal'}</button>
     </form>}
     <form className="animal-search" onSubmit={find} role="search">
-      <label><span>Buscar por nombre, arete o marquilla</span><input value={searchInput} maxLength={80}
+      <label><span className="sr-only">Buscar por nombre, arete o marquilla</span><input value={searchInput}
+        placeholder="Buscar nombre, arete o marquilla…" maxLength={80}
         onChange={(event) => setSearchInput(event.target.value)} /></label>
       <button className="secondary-button compact" type="submit">Buscar</button>
-      <label><span>Clasificación</span><select value={classification} onChange={event=>{
+      <button type="button" className="secondary-button compact" aria-expanded={advancedOpen}
+        onClick={()=>setAdvancedOpen(open=>!open)}>⚙ Filtros{Object.values(filters).filter(Boolean).length
+          ? ` (${Object.values(filters).filter(Boolean).length})`:''}</button>
+    </form>
+    <div className="animal-quick-filters" role="group" aria-label="Sexo">
+      {([['','Todos'],['FEMALE','Hembras'],['MALE','Machos']] as const).map(([value,label])=><button
+        key={value} type="button" className={filters.sex===value||!filters.sex&&!value?'active':''}
+        aria-pressed={filters.sex===value||!filters.sex&&!value}
+        onClick={()=>setFilter('sex',value)}>{label}</button>)}
+      <label><span className="sr-only">Clasificación</span><select value={classification} onChange={event=>{
         setClassification(event.target.value);setPage(1);}}><option value="">Todas</option>
         {(['VACA','VACONA','TERNERA','TORO','TORETE','TERNERO'] as const)
           .map(code=><option key={code} value={code}>{classificationNames?.[code]
             ??code.charAt(0)+code.slice(1).toLowerCase()}</option>)}
       </select></label>
-    </form>
+    </div>
+    {advancedOpen&&<div className="animal-advanced-filters">
+      <div className="animal-filter-grid">
+        <label><span>Grupo</span><select value={filters.groupId??''} onChange={event=>setFilter('groupId',event.target.value)}>
+          <option value="">Todos</option>{groups.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
+        </select></label>
+        <label><span>Estado</span><select value={filters.status??''} onChange={event=>setFilter('status',event.target.value)}>
+          <option value="">Todos</option><option value="ACTIVE">Activo</option><option value="INACTIVE">Inactivo</option>
+          <option value="DEAD">Fallecido</option><option value="MISSING">Desaparecido</option>
+        </select></label>
+        {canViewLocations&&modules.includes('MOVEMENTS')&&<label><span>Potrero o corral</span>
+          <select value={filters.locationId??''} onChange={event=>setFilter('locationId',event.target.value)}>
+            <option value="">Todos</option>{locations.map(item=><option key={item.id} value={item.id}>
+              {item.kind==='PASTURE'?'Potrero':'Corral'}: {item.name}</option>)}
+          </select></label>}
+        <label><span>Propietario</span><select value={filters.ownerId??''} onChange={event=>setFilter('ownerId',event.target.value)}>
+          <option value="">Todos</option>{owners.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
+        </select></label>
+        {canViewCatalogs&&(['breedId','colorId'] as const).map(key=><label key={key}><span>{key==='breedId'?'Raza':'Color'}</span>
+          <select value={filters[key]??''} onChange={event=>setFilter(key,event.target.value)}><option value="">Todos</option>
+            {choices?.[key==='breedId'?'BREEDS':'COLORS'].map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
+          </select></label>)}
+        <label><span>Marquilla</span><select value={filters.brandId??''} onChange={event=>setFilter('brandId',event.target.value)}>
+          <option value="">Todas</option>{brands?.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
+        </select></label>
+        <label><span>Nacimiento desde</span><input type="date" value={filters.birthFrom??''}
+          max={filters.birthTo||undefined} onChange={event=>setFilter('birthFrom',event.target.value)}/></label>
+        <label><span>Nacimiento hasta</span><input type="date" value={filters.birthTo??''}
+          min={filters.birthFrom||undefined} onChange={event=>setFilter('birthTo',event.target.value)}/></label>
+      </div><button type="button" className="text-button" onClick={()=>{setFilters({});setClassification('');setPage(1);}}>
+        Limpiar filtros</button>
+    </div>}
     {!result && !error && <p className="muted">Cargando animales…</p>}
     {result && <>
       {result.items.length === 0 && <p className="muted">No hay animales con ese criterio en esta propiedad.</p>}
       <div className="animal-list">{result.items.map((entry) => <button type="button" key={entry.id}
         className="animal-row" onClick={() => void open(entry.id)} disabled={busy}>
-        <span><strong>{entry.name}</strong><small>{[entry.earTagCode && `Arete: ${entry.earTagCode}`,
-          entry.brands.length && `Marquillas: ${entry.brands.map((brand) => brand.name).join(', ')}`]
-          .filter(Boolean).join(' · ') || 'Sin identificación registrada'}</small></span>
-        <span>{entry.classification?.name??(entry.sex === 'FEMALE' ? 'Hembra' : 'Macho')}</span>
+        <span className="animal-row-avatar">{entry.profilePhotoUrl?<img src={entry.profilePhotoUrl} alt=""/>
+          :<ShellIcon name="animals" size={24}/>}</span>
+        <span className="animal-row-content"><strong>{entry.name}</strong>
+          <small>{entry.description||'Sin descripción'}</small>
+          <small>{entry.sex==='FEMALE'?'Hembra':'Macho'} · {entry.group?.name||'Sin grupo'}
+            {entry.location?` · ${entry.location.name}`:''}</small>
+          <small>{entry.earTagCode?`Arete ${entry.earTagCode}`:'Sin arete'} · {entry.birthDate||'Sin fecha de nacimiento'}</small>
+        </span>
+        <span className="animal-row-category">{entry.classification?.name??'Animal'}</span>
       </button>)}</div>
       {(page > 1 || result.hasMore) && <div className="animal-pages">
         <button className="secondary-button compact" type="button" disabled={page === 1}
@@ -553,10 +611,36 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       <div className="animal-profile-action-strip">
         <span className="animal-classification-badge">{selected.classification?.name||'Animal'}</span>
         <span>{selected.sex==='FEMALE'?'Hembra':'Macho'} · {selected.group?.name||'Sin grupo'}</span>
-        {canUpdate&&<button type="button" className="secondary-button compact" onClick={()=>{
+        <div className="animal-profile-buttons">
+        {canManageMedia&&<input id="animal-profile-photo-input" type="file" hidden
+          accept="image/jpeg,image/png,image/webp,image/heic" onChange={event=>{
+            const file=event.currentTarget.files?.[0];if(!file)return;
+            event.currentTarget.value='';setBusy(true);
+            void uploadMedia(accessToken,{file,animalIds:[selected.id],relationCode:'PROFILE'})
+              .then(()=>setMediaRevision(value=>value+1)).catch(failure=>setError(message(failure)))
+              .finally(()=>setBusy(false));
+          }}/>}
+        {canManageMedia&&<button type="button" className="secondary-button compact" aria-label="Cambiar foto"
+          title="Cambiar foto" onClick={()=>{
+          document.getElementById('animal-profile-photo-input')?.click();}}><ShellIcon name="camera"/></button>}
+        {canUpdate&&<button type="button" className="secondary-button compact" aria-label="Editar ficha"
+          title="Editar ficha" onClick={()=>{
           const panel=document.getElementById('animal-edit-panel') as HTMLDetailsElement|null;
           if(panel){panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});}
-        }}>Editar ficha</button>}
+        }}><ShellIcon name="edit"/></button>}
+        {selected.availabilityStatusCode==='ACTIVE'&&modules.includes('MOVEMENTS')&&<button type="button"
+          className="secondary-button compact" aria-label="Registrar movimiento" title="Registrar movimiento"
+          onClick={()=>onNavigate('movements',selected)}><ShellIcon name="movements"/></button>}
+        {selected.availabilityStatusCode==='ACTIVE'&&modules.includes('HEALTH')&&<button type="button"
+          className="secondary-button compact" aria-label="Registrar sanidad" title="Registrar sanidad"
+          onClick={()=>onNavigate('health',selected)}><ShellIcon name="health"/></button>}
+        {selected.sex==='FEMALE'&&selected.availabilityStatusCode==='ACTIVE'&&modules.includes('PRODUCTION')&&<button
+          type="button" className="secondary-button compact" aria-label="Registrar producción"
+          title="Registrar producción" onClick={()=>onNavigate('production',selected)}><ShellIcon name="production"/></button>}
+        {selected.sex==='FEMALE'&&selected.availabilityStatusCode==='ACTIVE'&&modules.includes('REPRODUCTION')&&<button
+          type="button" className="secondary-button compact" aria-label="Registrar reproducción"
+          title="Registrar reproducción" onClick={()=>onNavigate('reproduction',selected)}><ShellIcon name="reproduction"/></button>}
+        </div>
       </div>
       <div className="animal-data-card"><h4>Información</h4>
       <dl><div><dt>Arete individual</dt><dd>{selected.earTagCode || 'No registrado'}</dd></div>

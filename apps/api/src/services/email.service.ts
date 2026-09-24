@@ -81,6 +81,24 @@ export async function sendVerificationEmail(input: {
   });
 }
 
+export async function sendPasswordResetEmail(input:{email:string;displayName:string;token:string;
+  expiresAt:Date}):Promise<EmailDelivery>{
+  const link=frontendUrl({'reset-password':input.token});
+  const expires=new Intl.DateTimeFormat('es-EC',{dateStyle:'long',timeStyle:'short',
+    timeZone:'America/Guayaquil'}).format(input.expiresAt);
+  return sendTransactionalEmail({email:input.email,displayName:input.displayName,
+    subject:'Recupera tu acceso a SGB',tag:'sgb-password-reset',
+    htmlContent:`<html><body style="font-family:Arial,sans-serif;color:#173126;line-height:1.6">
+      <div style="max-width:560px;margin:auto;padding:28px;border:1px solid #d8e2dc;border-radius:18px">
+        <p style="font-weight:800;color:#087a4b">SGB · Gestión bovina</p>
+        <h1>Recuperar acceso</h1>
+        <p>Hola, ${escapeHtml(input.displayName)}. Solicitaron restablecer la contraseña de tu cuenta.</p>
+        <p style="margin:28px 0"><a href="${escapeHtml(link)}" style="display:inline-block;padding:13px 20px;border-radius:12px;background:#087a4b;color:white;text-decoration:none;font-weight:700">Cambiar contraseña</a></p>
+        <p style="font-size:13px;color:#64756c">El enlace vence el ${escapeHtml(expires)} y solo se puede usar una vez. Si no lo solicitaste, ignora este correo.</p>
+      </div></body></html>`,
+  });
+}
+
 export async function sendPropertyInvitationEmail(input: {
   email: string;
   displayName: string;

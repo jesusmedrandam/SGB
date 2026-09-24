@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Brand } from './Brand';
 import type { InvitationPreview, RegistrationResult } from './api';
+import {requestPasswordReset,resetPassword,ApiRequestError} from './api';
 
 export type VerificationState = 'NONE' | 'CHECKING' | 'VERIFIED' | 'INVALID';
 
@@ -23,7 +24,8 @@ interface Props {
   onUseLogin: () => void;
 }
 
-type Mode = 'LOGIN' | 'REGISTER' | 'PENDING' | 'VERIFY_RESULT' | 'INVITATION';
+type Mode = 'LOGIN' | 'REGISTER' | 'PENDING' | 'VERIFY_RESULT' | 'INVITATION' |
+  'RECOVER' | 'RESET';
 
 const frequencyNames: Record<string, string> = {
   HOURLY: 'Por hora', DAILY: 'Diario', WEEKLY: 'Semanal', BIWEEKLY: 'Quincenal',
@@ -31,8 +33,16 @@ const frequencyNames: Record<string, string> = {
 };
 
 export function AuthScreen(props: Props) {
-  const [mode, setMode] = useState<Mode>(props.verificationState !== 'NONE'
+  const [resetToken,setResetToken]=useState(()=>new URLSearchParams(window.location.search)
+    .get('reset-password')||'');
+  const [mode, setMode] = useState<Mode>(resetToken?'RESET':props.verificationState !== 'NONE'
     ? 'VERIFY_RESULT' : props.invitationToken ? 'INVITATION' : 'LOGIN');
+  const [recoveryEmail,setRecoveryEmail]=useState('');
+  const [resetNewPassword,setResetNewPassword]=useState('');
+  const [resetConfirm,setResetConfirm]=useState('');
+  const [recoveryBusy,setRecoveryBusy]=useState(false);
+  const [recoveryError,setRecoveryError]=useState<string|null>(null);
+  const [recoveryMessage,setRecoveryMessage]=useState<string|null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -41,6 +51,11 @@ export function AuthScreen(props: Props) {
   const [registerEmail, setRegisterEmail] = useState('');
   const [registerPassword, setRegisterPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
+
+  useEffect(()=>{if(!resetToken)return;
+    const url=new URL(window.location.href);url.searchParams.delete('reset-password');
+    window.history.replaceState(null,'',url);
+  },[]);
 
   useEffect(() => {
     if (props.pendingRegistration) setMode('PENDING');
@@ -59,7 +74,30 @@ export function AuthScreen(props: Props) {
 
   function useLogin() {
     props.onUseLogin();
+    setRecoveryError(null);setRecoveryMessage(null);setResetToken('');
+    const url=new URL(window.location.href);url.searchParams.delete('reset-password');
+    window.history.replaceState(null,'',url);
     setMode('LOGIN');
+  }
+
+  async function submitRecovery(event:FormEvent){
+    event.preventDefault();setRecoveryBusy(true);setRecoveryError(null);
+    try {await requestPasswordReset(recoveryEmail.trim());
+      setRecoveryMessage('Si la cuenta existe y está activa, recibirás un enlace para cambiar la contraseña. Revisa también spam.');
+    }catch(failure){setRecoveryError(failure instanceof ApiRequestError?failure.message:'No se pudo solicitar la recuperación.');}
+    finally{setRecoveryBusy(false);}
+  }
+  async function submitReset(event:FormEvent){
+    event.preventDefault();if(resetNewPassword!==resetConfirm||resetNewPassword.length<12)return;
+    setRecoveryBusy(true);setRecoveryError(null);
+    try{await resetPassword(resetToken,resetNewPassword);
+      setResetNewPassword('');setResetConfirm('');setResetToken('');
+      const url=new URL(window.location.href);url.searchParams.delete('reset-password');
+      window.history.replaceState(null,'',url);
+      setRecoveryMessage('Contraseña actualizada. Inicia sesión de nuevo en todos tus dispositivos.');
+      setMode('RECOVER');
+    }catch(failure){setRecoveryError(failure instanceof ApiRequestError?failure.message:'El enlace no se pudo usar.');}
+    finally{setRecoveryBusy(false);}
   }
 
   async function submitLogin(event: FormEvent) {
@@ -153,8 +191,46 @@ export function AuthScreen(props: Props) {
               {props.busy ? <><span className="spinner" />Ingresando…</> : 'Ingresar'}
             </button>
           </form>
+          <button type="button" className="text-button auth-back" onClick={()=>{
+            setRecoveryEmail(email);setRecoveryMessage(null);setRecoveryError(null);setMode('RECOVER');
+          }}>¿Olvidaste tu contraseña?</button>
           <p className="security-note">La sesión se protege de forma independiente en cada dispositivo.</p>
         </>}
+
+        {mode==='RECOVER'&&<div className="verification-card">
+          <span className="eyebrow">Recuperación de cuenta</span><h2>Recuperar acceso</h2>
+          {recoveryMessage?<p className="form-success" role="status">{recoveryMessage}</p>
+            :<><p>Escribe el correo de tu cuenta y te enviaremos un enlace de un solo uso.</p>
+              <form className="login-form" onSubmit={submitRecovery}>
+                <label><span>Correo electrónico</span><input type="email" value={recoveryEmail}
+                  onChange={event=>setRecoveryEmail(event.target.value)} required autoComplete="email"
+                  disabled={recoveryBusy}/></label>
+                {recoveryError&&<div className="form-error" role="alert">{recoveryError}</div>}
+                <button className="primary-button" disabled={recoveryBusy}>
+                  {recoveryBusy?'Enviando…':'Enviar enlace'}</button>
+              </form></>}
+          <button type="button" className="text-button auth-back" onClick={useLogin}>
+            Volver a iniciar sesión</button>
+        </div>}
+
+        {mode==='RESET'&&<div className="verification-card">
+          <span className="eyebrow">Recuperación de cuenta</span><h2>Nueva contraseña</h2>
+          <p>Elige una contraseña de al menos 12 caracteres, con una letra y un número.</p>
+          <form className="login-form" onSubmit={submitReset}>
+            <label><span>Contraseña nueva</span><input type="password" autoComplete="new-password"
+              value={resetNewPassword} onChange={event=>setResetNewPassword(event.target.value)}
+              minLength={12} maxLength={128} required disabled={recoveryBusy}/></label>
+            <label><span>Confirmar contraseña</span><input type="password" autoComplete="new-password"
+              value={resetConfirm} onChange={event=>setResetConfirm(event.target.value)}
+              required disabled={recoveryBusy}/></label>
+            {recoveryError&&<div className="form-error" role="alert">{recoveryError}</div>}
+            <button className="primary-button" disabled={recoveryBusy||resetNewPassword!==resetConfirm||
+              !/[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(resetNewPassword)||!/[0-9]/.test(resetNewPassword)}>
+              {recoveryBusy?'Guardando…':'Cambiar contraseña'}</button>
+          </form>
+          <button type="button" className="text-button auth-back" onClick={useLogin}>
+            Volver a iniciar sesión</button>
+        </div>}
 
         {mode === 'REGISTER' && <>
           <div className="auth-tabs" role="tablist">

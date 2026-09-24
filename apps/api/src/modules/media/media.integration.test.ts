@@ -49,7 +49,7 @@ test('multimedia respeta propiedad, tipo de registro y permisos antes de cargar'
       names:{...defaults.names,VACA:'Madres'}},metadata);
     assert.equal((await getAnimal(context,animal.id)).classification?.name,'Madres');
     assert.equal((await getAnimal(context,calf.id)).classification?.code,'TERNERO');
-    assert.deepEqual((await listAnimals(context,1,'','TERNERO')).items.map(item=>item.id),[calf.id]);
+    assert.deepEqual((await listAnimals(context,{page:1,search:'',classification:'TERNERO'})).items.map(item=>item.id),[calf.id]);
     assert.equal((await getAnimalSummary(context)).classifications.find(row=>row.code==='VACA')?.count,1);
     const assigned=await pool.query<{group_id:string}>(`SELECT group_id FROM animal_group_assignment
       WHERE animal_id=$1 AND ended_at IS NULL`,[calf.id]);

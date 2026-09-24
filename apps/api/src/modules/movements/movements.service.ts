@@ -169,9 +169,9 @@ async function resolve(client:PoolClient,auth:AuthState,context:PropertyContext,
     throw invalidRequest('MOVEMENT_SAME_GROUP','Selecciona otro grupo de destino.');
   const destinationLocationId=input.kind==='UBICACION'
     ? input.destinationLocationId??null : destination.location_id;
-  if(input.kind==='UBICACION' && (!source.location_id || !destinationLocationId
+  if(input.kind==='UBICACION' && (!destinationLocationId
     || source.location_id===destinationLocationId))
-    throw invalidRequest('MOVEMENT_LOCATION_INVALID','Elige otra ubicación para el grupo completo.');
+    throw invalidRequest('MOVEMENT_LOCATION_INVALID','Elige una ubicación diferente para el grupo completo.');
   if(input.kind!=='UBICACION' && input.destinationLocationId
     && input.destinationLocationId!==destinationLocationId)
     throw invalidRequest('MOVEMENT_LOCATION_INVALID','La ubicación de destino la determina el grupo de destino.');
@@ -197,7 +197,8 @@ async function resolve(client:PoolClient,auth:AuthState,context:PropertyContext,
      ORDER BY a.id FOR UPDATE OF a,aga`,[context.propertyId,accountId,source.id]);
   const selectedIds=input.selectionMode==='GRUPO'
     ? current.rows.map((animal)=>animal.id) : input.animalIds;
-  if(!selectedIds.length || selectedIds.length>500 || new Set(selectedIds).size!==selectedIds.length)
+  if((!selectedIds.length && input.kind!=='UBICACION') || selectedIds.length>500
+    || new Set(selectedIds).size!==selectedIds.length)
     throw invalidRequest('MOVEMENT_SELECTION_INVALID','Selecciona entre uno y 500 animales del grupo de origen.');
   const selected=new Set(selectedIds);
   const animals=current.rows.filter((animal)=>selected.has(animal.id));

@@ -34,8 +34,8 @@ animalsRouter.put('/classification',requirePermission('CATALOG_MANAGE'),asyncHan
     classificationSchema.parse(req.body),metadata(req))});
 }));
 animalsRouter.get('/', requirePermission('ANIMAL_VIEW'), asyncHandler(async (request, response) => {
-  const { page, search,classification } = animalListSchema.parse(request.query);
-  response.json({ ok: true, data: await listAnimals(request.propertyContext!, page, search,classification) });
+  const filters = animalListSchema.parse(request.query);
+  response.json({ ok: true, data: await listAnimals(request.propertyContext!, filters) });
 }));
 animalsRouter.get('/:id', requirePermission('ANIMAL_VIEW'), asyncHandler(async (request, response) => {
   const { id } = animalIdSchema.parse(request.params);

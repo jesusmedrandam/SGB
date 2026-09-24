@@ -14,7 +14,8 @@ const message=(error:unknown)=>error instanceof ApiRequestError?error.message:
   error instanceof Error?error.message:'No se pudo guardar el registro sanitario.';
 type HealthTab='conditions'|'treatments'|'campaigns';
 
-export function HealthPanel({accessToken,canManage}:{accessToken:string;canManage:boolean}){
+export function HealthPanel({accessToken,canManage,initialAnimalId}:{accessToken:string;canManage:boolean;
+  initialAnimalId?:string|undefined}){
   const [medicines,setMedicines]=useState<HealthMedicine[]>([]);
   const [options,setOptions]=useState<HealthOptions|null>(null);
   const [campaigns,setCampaigns]=useState<HealthCampaign[]|null>(null);
@@ -42,6 +43,11 @@ export function HealthPanel({accessToken,canManage}:{accessToken:string;canManag
   const [selected,setSelected]=useState<string[]>([]);
   const [doses,setDoses]=useState<Record<string,string>>({});
   const [conditionIds,setConditionIds]=useState<Record<string,string>>({});
+  const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
+  useEffect(()=>{if(!initialAnimalId||initialAnimalId===prefilledAnimalId||
+    !options?.animals.some(item=>item.id===initialAnimalId)||!canManage)return;
+    setTab('conditions');setShowCondition(true);setPrefilledAnimalId(initialAnimalId);
+  },[initialAnimalId,prefilledAnimalId,options?.animals,canManage]);
 
   useEffect(()=>{let active=true;
     void Promise.allSettled([getHealthMedicines(accessToken),getHealthOptions(accessToken),
@@ -187,7 +193,7 @@ export function HealthPanel({accessToken,canManage}:{accessToken:string;canManag
       <form className="movement-form" onSubmit={saveCondition}
       key={editingCondition?.id??'condition-new'}>
       <label><span>Animal *</span><select name="animalId" required
-        defaultValue={editingCondition?.animalId??''} disabled={Boolean(editingCondition)}>
+        defaultValue={editingCondition?.animalId??initialAnimalId??''} disabled={Boolean(editingCondition)}>
         <option value="">Selecciona</option>{options.animals.map((animal)=><option
           key={animal.id} value={animal.id}>{animal.name}</option>)}</select></label>
       <label><span>Tipo de problema *</span><select name="kind" required

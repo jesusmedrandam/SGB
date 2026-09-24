@@ -11,7 +11,8 @@ function ShiftSelect(){return <select name="shift" defaultValue="SINGLE">
   {Object.entries(shiftName).map(([code,label])=><option key={code} value={code}>{label}</option>)}
 </select>;}
 
-export function ProductionPanel({accessToken,canManage}:{accessToken:string;canManage:boolean}){
+export function ProductionPanel({accessToken,canManage,initialAnimalId}:{accessToken:string;
+  canManage:boolean;initialAnimalId?:string|undefined}){
   const [records,setRecords]=useState<ProductionRecords|null>(null);
   const [revision,setRevision]=useState(0);
   const [busy,setBusy]=useState(false);
@@ -25,6 +26,11 @@ export function ProductionPanel({accessToken,canManage}:{accessToken:string;canM
     return ()=>{active=false;};
   },[accessToken,revision]);
   const milkingCows=records?.cows.filter((row)=>row.inMilking)??[];
+  const [prefilledAnimalId,setPrefilledAnimalId]=useState<string|null>(null);
+  useEffect(()=>{if(!initialAnimalId||initialAnimalId===prefilledAnimalId||!records||!canManage)return;
+    if(records.cows.some(row=>row.id===initialAnimalId&&row.inMilking)){
+      setActiveForm('MILK');setPrefilledAnimalId(initialAnimalId);}
+  },[initialAnimalId,prefilledAnimalId,records,canManage]);
   const daily=useMemo(()=>({
     milk:records?.milk.filter((row)=>row.producedOn===date)??[],
     tanks:records?.tanks.filter((row)=>row.producedOn===date)??[],
@@ -78,7 +84,8 @@ export function ProductionPanel({accessToken,canManage}:{accessToken:string;canM
       </form>
       <form className="group-new-form" onSubmit={milk} hidden={activeForm!=='MILK'}>
         <h3>Registrar ordeño</h3>
-        <label><span>Vaca en ordeño *</span><select name="cowId" required defaultValue="">
+        <label><span>Vaca en ordeño *</span><select name="cowId" required
+          defaultValue={milkingCows.some(row=>row.id===initialAnimalId)?initialAnimalId:''}>
           <option value="" disabled>Selecciona la vaca</option>
           {milkingCows.map((row)=><option key={row.id} value={row.id}>
             {row.name}{row.lactationId?' · con lactancia':' · sin lactancia'}</option>)}

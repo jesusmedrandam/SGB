@@ -5,7 +5,7 @@ import { pool } from '../../database/pool.js';
 import { inTransaction } from '../../database/transaction.js';
 import { hashPassword, verifyPassword } from '../../security/password.js';
 import { hashToken, issueToken, type IssuedToken } from '../../security/tokens.js';
-import { sendVerificationEmail } from '../../services/email.service.js';
+import { sendVerificationEmail,sendPasswordResetEmail } from '../../services/email.service.js';
 import type { LoginInput, RegisterInput } from './auth.schemas.js';
 import type { AuthState, RequestMetadata } from './auth.types.js';
 
@@ -411,6 +411,53 @@ export async function verifyEmail(token: string, metadata: RequestMetadata): Pro
        ) VALUES($1,'EMAIL_VERIFIED','APP_USER',$2,$3,$4)`,
       [verification.user_id, verification.user_id, metadata.ipAddress, metadata.userAgent],
     );
+  });
+}
+
+export async function requestPasswordReset(email:string,metadata:RequestMetadata){
+  const token=issueToken('reset');
+  const expiresAt=addMilliseconds(30*60*1000);
+  const pending=await inTransaction(async client=>{
+    const user=(await client.query<{id:string;email:string;display_name:string}>(
+      `SELECT id,email::text,display_name FROM app_user
+       WHERE email=$1 AND status='ACTIVE' AND deleted_at IS NULL FOR UPDATE`,[email])).rows[0];
+    if(!user)return null;
+    const recent=await client.query(`SELECT 1 FROM password_reset_token
+      WHERE user_id=$1 AND created_at>now()-interval '60 seconds' LIMIT 1`,[user.id]);
+    if(recent.rowCount)return null;
+    await client.query(`UPDATE password_reset_token SET consumed_at=now()
+      WHERE user_id=$1 AND consumed_at IS NULL`,[user.id]);
+    await client.query(`INSERT INTO password_reset_token(user_id,token_hash,expires_at)
+      VALUES($1,$2,$3)`,[user.id,token.hash,expiresAt]);
+    await client.query(`INSERT INTO audit_event(actor_user_id,action,entity_type,entity_id,
+      ip_address,user_agent) VALUES($1,'PASSWORD_RESET_REQUESTED','APP_USER',$1,$2,$3)`,
+      [user.id,metadata.ipAddress,metadata.userAgent]);
+    return user;
+  });
+  if(!pending)return;
+  await sendPasswordResetEmail({email:pending.email,displayName:pending.display_name,
+    token:token.value,expiresAt});
+}
+
+export async function resetPassword(token:string,password:string,metadata:RequestMetadata){
+  const passwordHash=await hashPassword(password);
+  await inTransaction(async client=>{
+    const current=(await client.query<{id:string;user_id:string}>(
+      `SELECT prt.id,prt.user_id FROM password_reset_token prt
+       JOIN app_user u ON u.id=prt.user_id
+       WHERE prt.token_hash=$1 AND prt.consumed_at IS NULL AND prt.expires_at>now()
+         AND u.status='ACTIVE' AND u.deleted_at IS NULL FOR UPDATE OF prt,u`,
+      [hashToken(token)])).rows[0];
+    if(!current)throw unauthorized('El enlace de recuperación no es válido o expiró.');
+    await client.query(`UPDATE app_user SET password_hash=$2,failed_login_count=0,
+      locked_until=NULL WHERE id=$1`,[current.user_id,passwordHash]);
+    await client.query(`UPDATE password_reset_token SET consumed_at=now()
+      WHERE user_id=$1 AND consumed_at IS NULL`,[current.user_id]);
+    await client.query(`UPDATE user_session SET revoked_at=now()
+      WHERE user_id=$1 AND revoked_at IS NULL`,[current.user_id]);
+    await client.query(`INSERT INTO audit_event(actor_user_id,action,entity_type,entity_id,
+      ip_address,user_agent) VALUES($1,'PASSWORD_RESET_COMPLETED','APP_USER',$1,$2,$3)`,
+      [current.user_id,metadata.ipAddress,metadata.userAgent]);
   });
 }
 

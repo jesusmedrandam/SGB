@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import {
   ApiRequestError, createGroup, createLocation,listCatalogItems,
-  listGroups, listLocations, setGroupLocation, setGroupState, updateGroup, updateLocation,
+  listGroups, listLocations, setGroupState, updateGroup, updateLocation,
   type CatalogItem,type LivestockGroup, type PhysicalLocation, type LocationInput,
 } from './api';
 
@@ -137,7 +137,6 @@ export function GroupPanel({ accessToken, modules, canManage, canViewLocations,
       await createGroup(accessToken, {
         name: String(data.get('name')).trim(),
         description: String(data.get('description') || '').trim() || null,
-        locationId: String(data.get('locationId') || '') || null,
       });
       form.reset();
     });
@@ -170,16 +169,6 @@ export function GroupPanel({ accessToken, modules, canManage, canViewLocations,
       expectedVersion: entry.version,
     }));
   }
-
-  function moveGroup(event: FormEvent<HTMLFormElement>, entry: LivestockGroup) {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    void run(() => setGroupLocation(accessToken, entry.id, {
-      locationId: String(data.get('locationId') || '') || null,
-      expectedVersion: entry.version,
-    }));
-  }
-
 
   return <section className="section-block group-panel">
     <div className="section-heading"><div><span className="eyebrow">Núcleo ganadero</span>
@@ -215,14 +204,15 @@ export function GroupPanel({ accessToken, modules, canManage, canViewLocations,
               {place.kind==='CORRAL'?` · Cubierto: ${place.covered?'Sí':'No'}`:''}</small>
             {place.grasses.length > 0 && <small>Pastos: {place.grasses.map((grass) =>
               `${grass.name}${grass.percent != null ? ` (${grass.percent}%)` : ''}`).join(', ')}</small>}
-            {canManageLocations && <form className="group-new-form"
+            {canManageLocations && <details className="group-edit-toggle"><summary>Editar potrero o corral</summary>
+            <form className="group-new-form"
               key={`${place.id}:${place.version}`} onSubmit={(event) => editLocation(event, place)}>
               <label><span>Nombre</span><input name="name" required defaultValue={place.name} /></label>
               <label><span>Descripción</span><textarea name="description"
                 defaultValue={place.description ?? ''} /></label>
               <LocationFields place={place} grassCatalog={grassCatalog} />
               <button className="secondary-button compact" disabled={busy}>Guardar ubicación</button>
-            </form>}</details>)}</div>}
+            </form></details>}</details>)}</div>}
     </div>}
     {canManage && <details className="group-create-toggle"><summary>+ Crear grupo</summary>
       <form className="group-new-form" onSubmit={addGroup}>
@@ -231,16 +221,10 @@ export function GroupPanel({ accessToken, modules, canManage, canViewLocations,
         placeholder="Ej. Paridas" /></label>
       <label className="group-description"><span>Descripción</span>
         <textarea name="description" rows={2} maxLength={5000} disabled={busy} /></label>
-      {canPlace && canManageLocations && canViewLocations && <label><span>Ubicación inicial</span>
-        <select name="locationId" disabled={busy} defaultValue="">
-          <option value="">Sin ubicación</option>
-          {locations.filter((place) => place.active && !place.group)
-            .map((place) => <option key={place.id} value={place.id}>{label(place)}</option>)}
-        </select></label>}
+      {canPlace && <small>La primera ubicación se asigna desde Movimientos.</small>}
       <button className="primary-button compact" type="submit" disabled={busy}>Crear grupo</button>
     </form></details>}
-    {!canPlace && <p className="muted">Para ubicar grupos se necesitan activos los módulos Potreros,
-      Corrales y Movimientos en la cuenta y la propiedad.</p>}
+    {canPlace && <p className="muted">Las rotaciones y los cambios de potrero o corral se registran en Movimientos.</p>}
     <h3>Grupos de esta propiedad</h3>
     {groups === null ? <p className="muted">Cargando grupos…</p>
       : groups.length === 0 ? <p className="muted">Todavía no hay grupos.</p>
@@ -254,29 +238,15 @@ export function GroupPanel({ accessToken, modules, canManage, canViewLocations,
                 onClick={() => void run(() => setGroupState(accessToken, entry.id, {
                   active: !entry.active, expectedVersion: entry.version,
                 }))}>{entry.active ? 'Archivar' : 'Reactivar'}</button>}
-            {entry.active && canManage && <form className="group-inline-form" key={`edit:${entry.version}`}
+            {entry.active && canManage && <details className="group-edit-toggle"><summary>Editar grupo</summary>
+            <form className="group-inline-form" key={`edit:${entry.version}`}
               onSubmit={(event) => editGroup(event, entry)}>
               <label><span>Nombre</span><input name="name" defaultValue={entry.name}
                 required maxLength={160} disabled={busy} /></label>
               <label><span>Descripción</span><textarea name="description" rows={2}
                 defaultValue={entry.description || ''} maxLength={5000} disabled={busy} /></label>
               <button className="secondary-button compact" type="submit" disabled={busy}>Guardar grupo</button>
-            </form>}
-            {entry.active && canManage && canManageLocations && canViewLocations
-              && (canPlace || entry.location) && <form className="group-inline-form"
-                key={`place:${entry.version}`} onSubmit={(event) => moveGroup(event, entry)}>
-                <label><span>Ubicación del grupo</span><select name="locationId"
-                  defaultValue={entry.location?.id || ''} disabled={busy}>
-                  <option value="">Sin ubicación</option>
-                  {canPlace && locations.filter((place) => place.active
-                    && (!place.group || place.group.id === entry.id)).map((place) =>
-                    <option key={place.id} value={place.id}>{label(place)}</option>)}
-                  {!canPlace && entry.location && <option value={entry.location.id}>
-                    {label(entry.location)}</option>}
-                </select></label>
-                <button className="secondary-button compact" type="submit" disabled={busy}>
-                  Guardar ubicación</button>
-              </form>}
+            </form></details>}
           </details>)}</div>}
   </section>;
 }

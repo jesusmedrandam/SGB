@@ -1,9 +1,13 @@
 import type { PoolClient } from 'pg';
+import {v2 as cloudinary} from 'cloudinary';
+import {env} from '../../config.js';
 import { ApiError, conflict, forbidden, invalidRequest } from '../../core/errors.js';
 import { pool } from '../../database/pool.js';
 import { inTransaction } from '../../database/transaction.js';
 import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.types.js';
 import type { AnimalCatalogSelection, CreateAnimalInput } from './animals.schemas.js';
+import { animalListSchema } from './animals.schemas.js';
+import type { z } from 'zod';
 import {insertInitialParents} from './parents.service.js';
 
 interface AnimalRow {
@@ -21,12 +25,21 @@ interface AnimalRow {
   version: string;
   classification: {code:string;name:string}|null;
   brands: Array<{ id: string; name: string }>;
+  group_id?: string | null; group_name?: string | null;
+  location_id?: string | null; location_name?: string | null;
+  location_kind?: 'PASTURE' | 'CORRAL' | null;
+  profile_photo_asset:string|null;
 }
 
 const animalFields = `id, name, description, ear_tag_code, sex, species_code,
   birth_date::text AS birth_date, entry_date::text AS entry_date,
   initial_weight::text AS initial_weight, initial_weight_unit_code,
   availability_status_code, version::text AS version,
+  (SELECT so.provider_asset_id FROM media_attachment ma
+     JOIN storage_object so ON so.id=ma.storage_object_id AND so.status='AVAILABLE'
+     WHERE ma.entity_type='ANIMAL' AND ma.entity_id=animal.id AND ma.deleted_at IS NULL
+       AND ma.relation_code='PROFILE' AND so.kind='IMAGE'
+     ORDER BY ma.created_at DESC LIMIT 1) AS profile_photo_asset,
   (SELECT json_build_object('code',catalog.code,'name',COALESCE(custom.name,catalog.name))
     FROM animal_classification_catalog catalog
     LEFT JOIN account_animal_classification_name custom
@@ -46,7 +59,12 @@ function animal(row: AnimalRow) {
     initialWeight: row.initial_weight === null ? null : Number(row.initial_weight),
     initialWeightUnitCode: row.initial_weight_unit_code,
     availabilityStatusCode: row.availability_status_code, version: Number(row.version),
-    classification:row.classification, brands: row.brands };
+    classification:row.classification, brands: row.brands,
+    profilePhotoUrl:row.profile_photo_asset&&env.CLOUDINARY_CLOUD_NAME
+      ? cloudinary.url(row.profile_photo_asset,{secure:true,cloud_name:env.CLOUDINARY_CLOUD_NAME,
+        width:120,height:120,crop:'fill',quality:'auto',fetch_format:'auto'}) : null,
+    group:row.group_id ? {id:row.group_id,name:row.group_name!}:null,
+    location:row.location_id ? {id:row.location_id,name:row.location_name!,kind:row.location_kind!}:null };
 }
 
 interface SelectionRow { catalog_code: 'BREEDS' | 'COLORS'; id: string; name: string }
@@ -106,21 +124,42 @@ export async function readAnimal(client: PoolClient, context: PropertyContext, i
       .map((choice) => ({ id: choice.id, name: choice.name })) };
 }
 
-export async function listAnimals(context: PropertyContext, page: number, search: string,
-  classification?:string) {
+export async function listAnimals(context: PropertyContext, filters: z.infer<typeof animalListSchema>) {
+  const {page,search,classification,sex,status,groupId,locationId,ownerId,breedId,colorId,
+    brandId,birthFrom,birthTo}=filters;
   const result = await pool.query<AnimalRow>(
-    `SELECT ${animalFields} FROM animal
-     WHERE property_id = $1 AND record_status = 'CURRENT'
+    `SELECT ${animalFields}, pos.group_id, pos.group_name, pos.location_id, pos.location_name,
+       pos.location_kind FROM animal
+     LEFT JOIN animal_current_position pos ON pos.animal_id=animal.id AND pos.property_id=animal.property_id
+     WHERE animal.property_id = $1 AND animal.record_status = 'CURRENT'
        AND ($4::varchar IS NULL OR classify_animal(animal.id,
          (now() AT TIME ZONE (SELECT timezone FROM property WHERE id=animal.property_id))::date)=$4)
-       AND ($2 = '' OR strpos(lower(name), lower($2)) > 0
-            OR strpos(lower(coalesce(ear_tag_code::text, '')), lower($2)) > 0
+       AND ($5::varchar IS NULL OR animal.sex=$5)
+       AND ($6::varchar IS NULL OR animal.availability_status_code=$6)
+       AND ($7::uuid IS NULL OR pos.group_id=$7)
+       AND ($8::uuid IS NULL OR pos.location_id=$8)
+       AND ($9::uuid IS NULL OR EXISTS(SELECT 1 FROM animal_ownership ao
+         WHERE ao.animal_id=animal.id AND ao.party_id=$9 AND ao.valid_until IS NULL))
+       AND ($10::uuid IS NULL OR EXISTS(SELECT 1 FROM animal_catalog_assignment aca
+         WHERE aca.animal_id=animal.id AND aca.catalog_code='BREEDS'
+           AND aca.catalog_item_id=$10 AND aca.ended_at IS NULL))
+       AND ($11::uuid IS NULL OR EXISTS(SELECT 1 FROM animal_catalog_assignment aca
+         WHERE aca.animal_id=animal.id AND aca.catalog_code='COLORS'
+           AND aca.catalog_item_id=$11 AND aca.ended_at IS NULL))
+       AND ($12::uuid IS NULL OR EXISTS(SELECT 1 FROM animal_brand_assignment aba
+         WHERE aba.animal_id=animal.id AND aba.brand_id=$12 AND aba.ended_at IS NULL))
+       AND ($13::date IS NULL OR animal.birth_date >= $13)
+       AND ($14::date IS NULL OR animal.birth_date <= $14)
+       AND ($2 = '' OR strpos(lower(animal.name), lower($2)) > 0
+            OR strpos(lower(coalesce(animal.ear_tag_code::text, '')), lower($2)) > 0
             OR EXISTS (SELECT 1 FROM animal_brand_assignment aba
                  JOIN livestock_brand b ON b.id = aba.brand_id
                  WHERE aba.animal_id = animal.id AND aba.ended_at IS NULL
                    AND strpos(lower(b.name), lower($2)) > 0))
-     ORDER BY lower(name), id LIMIT 41 OFFSET $3`,
-    [context.propertyId, search, (page - 1) * 40,classification??null],
+     ORDER BY lower(animal.name), animal.id LIMIT 41 OFFSET $3`,
+    [context.propertyId, search, (page - 1) * 40,classification??null,sex??null,status??null,
+      groupId??null,locationId??null,ownerId??null,breedId??null,colorId??null,brandId??null,
+      birthFrom??null,birthTo??null],
   );
   return { items: result.rows.slice(0, 40).map(animal), page, hasMore: result.rows.length > 40 };
 }

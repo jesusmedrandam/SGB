@@ -10,6 +10,7 @@ import {
   loginSchema,
   registerSchema,
   resendVerificationSchema,
+  requestPasswordResetSchema,resetPasswordSchema,
   verifyEmailSchema,
 } from './auth.schemas.js';
 import {
@@ -20,6 +21,7 @@ import {
   refreshSession,
   register,
   resendEmailVerification,
+  requestPasswordReset,resetPassword,
   verifyEmail,
 } from './auth.service.js';
 import type { RequestMetadata } from './auth.types.js';
@@ -109,6 +111,17 @@ authRouter.post('/verify-email', authLimiter, asyncHandler(async (request, respo
   const { token } = verifyEmailSchema.parse(request.body);
   await verifyEmail(token, metadata(request));
   response.json({ ok: true, data: { verified: true } });
+}));
+
+authRouter.post('/forgot-password',verificationLimiter,asyncHandler(async(request,response)=>{
+  const {email}=requestPasswordResetSchema.parse(request.body);
+  await requestPasswordReset(email,metadata(request));
+  response.status(202).json({ok:true,data:{accepted:true}});
+}));
+authRouter.post('/reset-password',authLimiter,asyncHandler(async(request,response)=>{
+  const {token,password}=resetPasswordSchema.parse(request.body);
+  await resetPassword(token,password,metadata(request));
+  response.json({ok:true,data:{reset:true}});
 }));
 
 authRouter.post('/login', authLimiter, asyncHandler(async (request, response) => {
