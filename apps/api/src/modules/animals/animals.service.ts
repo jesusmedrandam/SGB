@@ -134,7 +134,7 @@ export async function listAnimals(context: PropertyContext, filters: z.infer<typ
      WHERE animal.property_id = $1 AND animal.record_status = 'CURRENT'
        AND ($4::varchar IS NULL OR classify_animal(animal.id,
          (now() AT TIME ZONE (SELECT timezone FROM property WHERE id=animal.property_id))::date)=$4)
-       AND ($5::varchar IS NULL OR animal.sex=$5)
+       AND ($5::varchar IS NULL OR animal.sex::text=$5)
        AND ($6::varchar IS NULL OR animal.availability_status_code=$6)
        AND ($7::uuid IS NULL OR pos.group_id=$7)
        AND ($8::uuid IS NULL OR pos.location_id=$8)
