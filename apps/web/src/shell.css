@@ -237,3 +237,138 @@ textarea { border-radius: 12px; }
 @media (prefers-reduced-motion: reduce) {
   .sidebar, .dashboard-module-card { transition: none !important; }
 }
+
+/* SGB anterior: fondo cálido, panel con métricas y ficha social de animales. */
+:root { --bg:#f4f7f5;--surface-soft:#f7faf8;--text:#17231d;--muted:#65756c;
+  --border:#dfe8e2;--primary:#16834f;--primary-dark:#0e633b;--primary-soft:#e1f5e9;
+  --shadow:0 12px 30px rgba(19,51,34,.08); }
+:root[data-theme="dark"] { --bg:#0c1210;--surface:#18211d;--surface-soft:#202b24;
+  --text:#f2f8f4;--muted:#a2b0a6;--border:#35443a;--primary:#39b77a;
+  --primary-dark:#2d9d68;--primary-soft:#183c28; }
+.livestock-shell .topbar { background:color-mix(in srgb,var(--surface) 94%,transparent);
+  backdrop-filter:blur(14px); }
+.livestock-shell .dashboard { max-width:1460px; }
+.livestock-shell .welcome-card { align-items:center; margin-bottom:16px;
+  background:linear-gradient(120deg,var(--surface),var(--surface-soft));box-shadow:var(--shadow); }
+.livestock-shell .welcome-card h1 { font-size:clamp(1.55rem,2.7vw,2.4rem); }
+.livestock-shell .access-badge { min-width:0; }
+.livestock-shell .dashboard-module-grid { grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px; }
+.livestock-shell .dashboard-module-card { min-height:112px;align-content:center;
+  border-radius:17px;box-shadow:var(--shadow); }
+.livestock-shell .section-block { min-width:0; }
+.livestock-shell .section-heading { align-items:center; }
+.livestock-shell .section-heading > div:first-child { min-width:0; }
+.livestock-shell .section-heading h2 { line-height:1.15; }
+.livestock-shell .movement-card,.livestock-shell .group-locations,.livestock-shell .team-block,
+.livestock-shell .catalog-section,.livestock-shell .animal-data-card,.livestock-shell .media-card {
+  background:var(--surface);border-color:var(--border);box-shadow:0 5px 20px rgba(19,51,34,.04); }
+.livestock-shell .movement-list { gap:9px; }
+.livestock-shell .movement-card { border-radius:15px; }
+.context-switcher { display:grid!important;grid-template-columns:1fr;align-items:start!important;
+  gap:0!important;padding:0!important;margin-top:14px!important; }
+.context-switcher > summary { display:flex;align-items:center;flex-wrap:wrap;gap:6px 13px;
+  padding:13px 18px;cursor:pointer;list-style:none; }
+.context-switcher > summary span { color:var(--muted);font-size:.76rem; }
+.context-switcher > summary strong { font-size:.95rem; }
+.context-switcher > summary small { margin-left:auto;color:var(--primary);font-weight:800; }
+.context-switcher .context-controls { margin:0 16px 16px; }
+.home-herd { margin:18px 0 10px;padding:20px;border:1px solid var(--border);
+  border-radius:20px;background:var(--surface);box-shadow:var(--shadow); }
+.home-herd-heading { display:flex;align-items:center;gap:11px; }
+.home-herd-heading > div { flex:1;min-width:0; }
+.home-herd-heading h2 { margin:0;font-size:1.2rem; }
+.home-herd-heading p { margin:2px 0 0;color:var(--muted);font-size:.75rem; }
+.home-herd-total { display:grid;justify-items:center;min-width:86px;padding:6px 10px;
+  border:1px solid var(--border);border-radius:11px;color:var(--primary);
+  background:var(--primary-soft); }
+.home-herd-total strong { font-size:1.5rem;line-height:1.15; }
+.home-herd-total small { font-size:.68rem; }
+.home-herd-facts { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:15px 0; }
+.home-herd-facts button,.home-classification-grid button,.home-group-grid button { display:grid;
+  align-content:center;gap:2px;min-width:0;padding:11px;border:1px solid var(--border);
+  border-radius:12px;color:var(--text);background:var(--surface-alt,var(--surface-soft));text-align:left; }
+.home-herd-facts button:hover,.home-classification-grid button:hover,.home-group-grid button:hover {
+  border-color:var(--primary);background:var(--primary-soft); }
+.home-herd-facts strong,.home-classification-grid strong,.home-group-grid strong { font-size:1.15rem; }
+.home-herd-facts small,.home-classification-grid small,.home-group-grid small { min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:.72rem; }
+.home-herd-sections { display:grid;grid-template-columns:1.2fr 1fr;gap:16px;
+  border-top:1px solid var(--border);padding-top:14px; }
+.home-herd-sections h3 { margin:0 0 9px;font-size:.83rem; }
+.home-classification-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px; }
+.home-group-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-height:180px;overflow:auto; }
+.animal-detail { max-width:1050px;margin:0 auto;padding:0!important;border:0!important;
+  border-radius:0!important;background:transparent!important;box-shadow:none!important; }
+.animal-back { margin-bottom:12px;padding:6px 0;border:0;color:var(--primary);
+  background:transparent;font-weight:800; }
+.animal-social-cover { position:relative;height:clamp(250px,35vw,380px);margin:0 0 77px;
+  border-radius:23px;background:radial-gradient(circle at 75% 22%,#64d99555,transparent 34%),
+    linear-gradient(145deg,#132a20,#20764b);box-shadow:var(--shadow); }
+.animal-social-cover .animal-cover { width:100%;height:100%;max-height:none;object-fit:cover;
+  border-radius:inherit; }
+.animal-cover-shade { position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:linear-gradient(180deg,transparent 30%,#06130ddd); }
+.animal-cover-name { position:absolute;left:160px;right:20px;bottom:17px;color:#fff; }
+.animal-cover-name h3 { margin:0 0 4px;font-size:clamp(1.45rem,3vw,2.3rem);
+  text-shadow:0 2px 12px #0009; }
+.animal-cover-name p { margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:#ffffffd6;font-size:.83rem; }
+.animal-social-cover .animal-profile { position:absolute;left:24px;bottom:-54px;
+  display:grid;place-items:center;width:116px;height:116px;border:5px solid var(--surface);
+  border-radius:29px;overflow:hidden;color:var(--primary);background:var(--surface-soft);
+  box-shadow:0 10px 25px #061b1045; }
+.animal-social-cover .animal-profile-photo { width:100%;height:100%;object-fit:cover; }
+.animal-profile-action-strip { display:flex;align-items:center;flex-wrap:wrap;gap:9px;
+  margin:-52px 0 18px;padding-left:156px;min-height:52px;color:var(--muted);font-size:.82rem; }
+.animal-profile-action-strip button { margin-left:auto; }
+.animal-classification-badge { padding:7px 11px;border-radius:999px;color:var(--primary-dark);
+  background:var(--primary-soft);font-weight:800; }
+.animal-data-card { padding:19px;border:1px solid var(--border);border-radius:17px; }
+.animal-data-card h4 { margin:0 0 12px;font-size:1rem; }
+.animal-data-card dl { grid-template-columns:repeat(3,minmax(0,1fr));gap:0!important; }
+.animal-data-card dl > div { min-width:0;padding:10px 12px;border-bottom:1px solid var(--border); }
+.animal-data-card dd { overflow-wrap:anywhere; }
+.animal-detail .animal-photos,.animal-detail .animal-edit-section { margin-top:16px;
+  padding:18px;border:1px solid var(--border);border-radius:17px;background:var(--surface); }
+.animal-detail .animal-photos { display:block; }
+.animal-detail .animal-photos h4 { margin:0 0 12px; }
+.animal-detail .animal-edit-section > summary { cursor:pointer;color:var(--primary);font-weight:800; }
+.animal-list { gap:7px; }
+.animal-row { border-radius:12px;box-shadow:0 4px 14px rgba(19,51,34,.04); }
+.animal-row::after { content:'›';padding-left:10px;color:var(--primary);font-size:1.3rem; }
+.animal-search { max-width:840px; }
+.animal-search label:last-child { flex:0 1 195px; }
+.classification-section { margin-bottom:12px; }
+.classification-form { display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px; }
+.classification-form label { display:grid;gap:5px;min-width:0; }
+.classification-form label span { font-size:.74rem;font-weight:750; }
+.classification-form button { align-self:end; }
+.record-line { display:block!important; }
+.record-line > summary { display:flex;align-items:center;justify-content:space-between;gap:9px;
+  cursor:pointer;list-style:none; }
+.record-line > summary::after { content:'Ver detalles ›';margin-left:auto;color:var(--primary);
+  font-size:.7rem;font-weight:800;white-space:nowrap; }
+.record-line[open] > summary::after { content:'Cerrar'; }
+.record-line > small,.record-line > .secondary-button { display:block;margin:10px 0 0; }
+.record-line > .group-inline-form { margin-top:10px; }
+@media(max-width:760px){
+  .livestock-shell .dashboard-module-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .livestock-shell .dashboard-module-card { min-height:105px;grid-template-columns:35px minmax(0,1fr);
+    gap:7px;padding:10px; }
+  .livestock-shell .dashboard-module-card > svg:last-child { display:none; }
+  .livestock-shell .dashboard-module-copy strong { font-size:.81rem; }
+  .livestock-shell .stat-icon { width:35px;height:35px; }
+  .home-herd { padding:14px; }
+  .home-herd-sections { grid-template-columns:1fr; }
+  .home-classification-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .animal-social-cover { height:245px;margin:0 -8px 65px;border-radius:0 0 23px 23px; }
+  .animal-social-cover .animal-profile { left:14px;bottom:-43px;width:95px;height:95px;border-radius:24px; }
+  .animal-cover-name { left:118px;right:10px;bottom:15px; }
+  .animal-cover-name h3 { font-size:1.45rem; }
+  .animal-profile-action-strip { margin:-35px 0 15px;padding-left:0;padding-top:38px; }
+  .animal-profile-action-strip button { margin-left:0; }
+  .animal-data-card dl { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .animal-search { max-width:none;flex-wrap:wrap; }
+  .animal-search label:first-child { flex:1 1 65%; }
+  .animal-search label:last-child { flex:1 1 100%; }
+}

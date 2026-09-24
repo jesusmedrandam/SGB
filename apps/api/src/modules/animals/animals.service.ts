@@ -19,6 +19,7 @@ interface AnimalRow {
   initial_weight_unit_code: string | null;
   availability_status_code: string;
   version: string;
+  classification: {code:string;name:string}|null;
   brands: Array<{ id: string; name: string }>;
 }
 
@@ -26,6 +27,13 @@ const animalFields = `id, name, description, ear_tag_code, sex, species_code,
   birth_date::text AS birth_date, entry_date::text AS entry_date,
   initial_weight::text AS initial_weight, initial_weight_unit_code,
   availability_status_code, version::text AS version,
+  (SELECT json_build_object('code',catalog.code,'name',COALESCE(custom.name,catalog.name))
+    FROM animal_classification_catalog catalog
+    LEFT JOIN account_animal_classification_name custom
+      ON custom.account_id=animal.account_id AND custom.code=catalog.code
+    WHERE catalog.code=classify_animal(animal.id,
+      (now() AT TIME ZONE (SELECT timezone FROM property WHERE id=animal.property_id))::date))
+    AS classification,
   COALESCE((SELECT json_agg(json_build_object('id', b.id, 'name', b.name)
        ORDER BY lower(b.name), b.id)
      FROM animal_brand_assignment aba JOIN livestock_brand b ON b.id = aba.brand_id
@@ -37,7 +45,8 @@ function animal(row: AnimalRow) {
     speciesCode: row.species_code, birthDate: row.birth_date, entryDate: row.entry_date,
     initialWeight: row.initial_weight === null ? null : Number(row.initial_weight),
     initialWeightUnitCode: row.initial_weight_unit_code,
-    availabilityStatusCode: row.availability_status_code, version: Number(row.version), brands: row.brands };
+    availabilityStatusCode: row.availability_status_code, version: Number(row.version),
+    classification:row.classification, brands: row.brands };
 }
 
 interface SelectionRow { catalog_code: 'BREEDS' | 'COLORS'; id: string; name: string }
@@ -97,10 +106,13 @@ export async function readAnimal(client: PoolClient, context: PropertyContext, i
       .map((choice) => ({ id: choice.id, name: choice.name })) };
 }
 
-export async function listAnimals(context: PropertyContext, page: number, search: string) {
+export async function listAnimals(context: PropertyContext, page: number, search: string,
+  classification?:string) {
   const result = await pool.query<AnimalRow>(
     `SELECT ${animalFields} FROM animal
      WHERE property_id = $1 AND record_status = 'CURRENT'
+       AND ($4::varchar IS NULL OR classify_animal(animal.id,
+         (now() AT TIME ZONE (SELECT timezone FROM property WHERE id=animal.property_id))::date)=$4)
        AND ($2 = '' OR strpos(lower(name), lower($2)) > 0
             OR strpos(lower(coalesce(ear_tag_code::text, '')), lower($2)) > 0
             OR EXISTS (SELECT 1 FROM animal_brand_assignment aba
@@ -108,7 +120,7 @@ export async function listAnimals(context: PropertyContext, page: number, search
                  WHERE aba.animal_id = animal.id AND aba.ended_at IS NULL
                    AND strpos(lower(b.name), lower($2)) > 0))
      ORDER BY lower(name), id LIMIT 41 OFFSET $3`,
-    [context.propertyId, search, (page - 1) * 40],
+    [context.propertyId, search, (page - 1) * 40,classification??null],
   );
   return { items: result.rows.slice(0, 40).map(animal), page, hasMore: result.rows.length > 40 };
 }
@@ -224,7 +236,7 @@ export async function createAnimal(auth: AuthState, context: PropertyContext,
         `INSERT INTO animal(account_id, property_id, species_code, name, description, sex, ear_tag_code,
            birth_date, entry_date, initial_weight, initial_weight_unit_code, created_by, updated_by)
          VALUES($1,$2,'BOVINE',$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)
-         RETURNING ${animalFields}`,
+         RETURNING id`,
         [accountId, context.propertyId, input.name, input.description || null,
           input.sex, input.earTagCode ?? null,
           input.birthDate ?? null, entryDate, input.initialWeight ?? null,

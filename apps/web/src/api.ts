@@ -77,6 +77,7 @@ export interface Animal {
   initialWeight: number | null;
   initialWeightUnitCode: string | null;
   availabilityStatusCode: string;
+  classification: {code:string;name:string}|null;
   version: number;
   breed?: { id: string; name: string } | null;
   breeds: Array<{ id: string; name: string }>;
@@ -93,6 +94,14 @@ export interface LivestockBrand { id: string; name: string; active: boolean; own
 export interface LivestockOwner { id: string; name: string; kind: string; active: boolean }
 
 export interface AnimalList { items: Animal[]; page: number; hasMore: boolean }
+export interface AnimalSummary {
+  total:number;classifications:Array<{code:string;label:string;count:number}>;
+  groups:Array<{name:string;count:number}>;sex:Array<{sex:'FEMALE'|'MALE';count:number}>;
+}
+export interface AnimalClassificationPolicy {
+  femaleAdultMonths:number;maleAdultMonths:number;
+  names:{VACA:string;VACONA:string;TERNERA:string;TORO:string;TORETE:string;TERNERO:string};
+}
 
 export interface LivestockGroup {
   id: string; name: string; description: string | null; active: boolean;
@@ -348,9 +357,19 @@ export function getCatalogReference(accessToken: string) {
   return request<CatalogReference>('/catalogs/reference', { headers: bearer(accessToken) });
 }
 
-export function getAnimals(accessToken: string, page = 1, search = '') {
+export function getAnimals(accessToken: string, page = 1, search = '',classification='') {
   const query = new URLSearchParams({ page: String(page), search });
+  if(classification)query.set('classification',classification);
   return request<AnimalList>(`/animals?${query}`, { headers: bearer(accessToken) });
+}
+export function getAnimalSummary(accessToken:string){return request<AnimalSummary>('/animals/summary',{
+  headers:bearer(accessToken)});}
+export function getAnimalClassificationPolicy(accessToken:string){
+  return request<AnimalClassificationPolicy>('/animals/classification',{headers:bearer(accessToken)});
+}
+export function updateAnimalClassificationPolicy(accessToken:string,input:AnimalClassificationPolicy){
+  return request<AnimalClassificationPolicy>('/animals/classification',{
+    method:'PUT',headers:bearer(accessToken),body:JSON.stringify(input)});
 }
 
 export function getAnimal(accessToken: string, id: string) {

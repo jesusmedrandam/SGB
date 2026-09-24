@@ -1,7 +1,8 @@
 import { type FormEvent, useEffect, useState } from 'react';
 import {
   ApiRequestError, createCatalogItem, getCatalogReference, listCatalogItems, setCatalogItemActive,
-  type CatalogItem, type CatalogReference, type EditableCatalogCode,
+  getAnimalClassificationPolicy,updateAnimalClassificationPolicy,
+  type CatalogItem, type CatalogReference, type EditableCatalogCode,type AnimalClassificationPolicy,
 } from './api';
 
 const catalogs: Array<{ code: EditableCatalogCode; name: string }> = [
@@ -13,12 +14,14 @@ const catalogs: Array<{ code: EditableCatalogCode; name: string }> = [
   { code: 'MEDIA_TAGS', name: 'Etiquetas multimedia' },
   { code: 'MOVEMENT_REASONS', name: 'Motivos de movimiento' },
 ];
+const classificationCodes=['VACA','VACONA','TERNERA','TORO','TORETE','TERNERO'] as const;
 
 export function CatalogPanel({ accessToken, canManage }: { accessToken: string; canManage: boolean }) {
   const [reference, setReference] = useState<CatalogReference | null>(null);
   const [items, setItems] = useState<Partial<Record<EditableCatalogCode, CatalogItem[]>>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [classification,setClassification]=useState<AnimalClassificationPolicy|null>(null);
 
   useEffect(() => {
     let active = true;
@@ -30,6 +33,21 @@ export function CatalogPanel({ accessToken, canManage }: { accessToken: string; 
       }).catch((failure) => { if (active) setError(message(failure)); });
     return () => { active = false; };
   }, [accessToken]);
+  useEffect(()=>{let active=true;void getAnimalClassificationPolicy(accessToken)
+    .then(value=>{if(active)setClassification(value);})
+    .catch(failure=>{if(active)setError(message(failure));});
+    return()=>{active=false;};},[accessToken]);
+
+  async function saveClassification(event:FormEvent<HTMLFormElement>){
+    event.preventDefault();const data=new FormData(event.currentTarget);
+    const names=Object.fromEntries(classificationCodes.map(code=>
+      [code,String(data.get(code)).trim()])) as AnimalClassificationPolicy['names'];
+    const input:AnimalClassificationPolicy={femaleAdultMonths:Number(data.get('femaleAdultMonths')),
+      maleAdultMonths:Number(data.get('maleAdultMonths')),names};
+    setBusy(true);setError(null);
+    try{setClassification(await updateAnimalClassificationPolicy(accessToken,input));}
+    catch(failure){setError(message(failure));}finally{setBusy(false);}
+  }
 
   async function create(event: FormEvent<HTMLFormElement>, code: EditableCatalogCode) {
     event.preventDefault();
@@ -64,6 +82,21 @@ export function CatalogPanel({ accessToken, canManage }: { accessToken: string; 
       <p className="muted">Especies disponibles: {reference.species.map((species) => species.name).join(', ') || 'ninguna'}.
         Unidades de peso: {reference.units.filter((unit) => unit.contextCode === 'ANIMAL_WEIGHT')
           .map((unit) => unit.symbol).join(', ')}.</p>
+      {classification&&<details className="team-block catalog-section classification-section">
+        <summary><strong>Clasificación de animales</strong><small>Compartida en todas las propiedades de la cuenta</small></summary>
+        <div className="catalog-content"><p className="muted">Las vacas tienen crías registradas; los toros tienen crías o figuran como padres en una preñez confirmada. Los demás se clasifican por sexo y edad.</p>
+          <form className="classification-form" key={JSON.stringify(classification)} onSubmit={saveClassification}>
+            <label><span>Hembras adultas desde (meses)</span><input name="femaleAdultMonths" type="number"
+              min="1" max="120" required defaultValue={classification.femaleAdultMonths} disabled={!canManage||busy}/></label>
+            <label><span>Machos adultos desde (meses)</span><input name="maleAdultMonths" type="number"
+              min="1" max="120" required defaultValue={classification.maleAdultMonths} disabled={!canManage||busy}/></label>
+            {classificationCodes.map(code=><label key={code}><span>{code}</span><input name={code}
+              minLength={2} maxLength={80} required defaultValue={classification.names[code]}
+              disabled={!canManage||busy}/></label>)}
+            {canManage&&<button className="primary-button compact" disabled={busy}>Guardar para la cuenta</button>}
+          </form><small>Sin fecha de nacimiento, hembras y machos sin descendencia se consideran adultos.</small>
+        </div>
+      </details>}
       <div className="catalog-grid">{catalogs.map(({ code, name }) => <details className="team-block catalog-section" key={code}>
         <summary><strong>{name}</strong><small>{(items[code]??[]).length} opciones</small></summary>
         <div className="catalog-content">

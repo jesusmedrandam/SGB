@@ -313,50 +313,50 @@ export function ReproductionPanel({ accessToken, canManage }: {
     {records && <div className="reproduction-records">
       <div><h3>Servicios asistidos</h3>
         {records.services.length === 0 && <p className="muted">Sin servicios registrados.</p>}
-        {records.services.map((item) => <article key={item.id} className="group-location-item">
-          <strong>{item.cowName} · {item.occurredOn}</strong>
+        {records.services.map((item) => <details key={item.id} className="group-location-item record-line">
+          <summary><strong>{item.cowName} · {item.occurredOn}</strong></summary>
           <small>{item.kind === 'INSEMINATION' ? 'Inseminación' : 'Transferencia'}
             {item.cancelled ? ' · Cancelado' : ''}{item.hasPregnancy ? ' · Con preñez' : ''}</small>
           {canManage && !item.cancelled && !item.hasPregnancy &&
             <button className="secondary-button compact" disabled={busy}
               onClick={() => { if (window.confirm('¿Cancelar este servicio? Se conservará en el historial.'))
                 void run(() => cancelService(accessToken, item.id)); }}>Cancelar servicio</button>}
-        </article>)}</div>
+        </details>)}</div>
       <div><h3>Preñeces y próximos partos</h3>
         {records.pregnancies.length === 0 && <p className="muted">Sin preñeces registradas.</p>}
-        {records.pregnancies.map((item) => <article key={item.id} className="group-location-item">
-          <strong>{item.cowName} · {item.status === 'CONFIRMED' ? 'Confirmada'
+        {records.pregnancies.map((item) => <details key={item.id} className="group-location-item record-line">
+          <summary><strong>{item.cowName} · {item.status === 'CONFIRMED' ? 'Confirmada'
             : item.status === 'BORN' ? 'Parto registrado'
-              : item.status === 'LOST' ? 'Pérdida' : 'Cancelada'}</strong>
+              : item.status === 'LOST' ? 'Pérdida' : 'Cancelada'}</strong></summary>
           <small>Confirmada {item.confirmedOn} · Parto estimado {item.expectedBirthOn || 'sin estimación'}</small>
           {canManage && item.status === 'CONFIRMED' && <button className="secondary-button compact"
             disabled={busy} onClick={() => {
               if (window.confirm('¿Cancelar esta preñez? Se conservará en el historial.'))
                 void run(() => cancelPregnancy(accessToken, item.id));
             }}>Cancelar preñez</button>}
-        </article>)}</div>
+        </details>)}</div>
       <div><h3>Celos</h3>
         {records.heats.length === 0 && <p className="muted">Sin celos registrados.</p>}
-        {records.heats.map((item) => <article key={item.id} className="group-location-item">
-          <strong>{item.cowName} · {item.startsOn}</strong>
+        {records.heats.map((item) => <details key={item.id} className="group-location-item record-line">
+          <summary><strong>{item.cowName} · {item.startsOn}</strong></summary>
           <small>{item.isFalse ? 'Celo falso' : 'Celo'}{item.cancelled ? ' · Cancelado' : ''}
             {item.endsOn ? ` · Fin: ${item.endsOn}` : ''}</small>
           {canManage && !item.cancelled && <button className="secondary-button compact" disabled={busy}
             onClick={() => { if (window.confirm('¿Cancelar este celo? Se conservará en el historial.'))
               void run(() => cancelHeat(accessToken, item.id)); }}>Cancelar celo</button>}
-        </article>)}</div>
+        </details>)}</div>
       <div><h3>Partos</h3>
         {records.births.length === 0 && <p className="muted">Sin partos registrados.</p>}
-        {records.births.map((item) => <article key={item.id} className="group-location-item">
-          <strong>{item.motherName} · {item.occurredOn}</strong>
+        {records.births.map((item) => <details key={item.id} className="group-location-item record-line">
+          <summary><strong>{item.motherName} · {item.occurredOn}</strong></summary>
           <small>{item.liveCount} vivas · {item.stillbornCount} nacidas muertas
             {item.calves.length ? ` · ${item.calves.map((calf) => calf.name).join(', ')}` : ''}</small>
-        </article>)}</div>
+        </details>)}</div>
       <div><h3>Pérdidas</h3>
         {records.losses.length === 0 && <p className="muted">Sin pérdidas registradas.</p>}
-        {records.losses.map((item) => <article key={item.id} className="group-location-item">
-          <strong>{item.cowName} · {item.occurredOn}</strong><small>{item.notes}</small>
-        </article>)}</div>
+        {records.losses.map((item) => <details key={item.id} className="group-location-item record-line">
+          <summary><strong>{item.cowName} · {item.occurredOn}</strong></summary><small>{item.notes}</small>
+        </details>)}</div>
     </div>}
   </section>;
 }

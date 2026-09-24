@@ -8,6 +8,14 @@ import { updateAnimalParents } from './parents.service.js';
 import { updateAnimalDescription } from './description.service.js';
 import { setAnimalOwners } from './owners.service.js';
 import { z } from 'zod';
+import {getAnimalSummary,getClassificationPolicy,updateClassificationPolicy}
+  from './classification.service.js';
+
+const classificationSchema=z.object({femaleAdultMonths:z.number().int().min(1).max(120),
+  maleAdultMonths:z.number().int().min(1).max(120),
+  names:z.object({VACA:z.string().trim().min(2).max(80),VACONA:z.string().trim().min(2).max(80),
+    TERNERA:z.string().trim().min(2).max(80),TORO:z.string().trim().min(2).max(80),
+    TORETE:z.string().trim().min(2).max(80),TERNERO:z.string().trim().min(2).max(80)})});
 
 const metadata = (request: Request): RequestMetadata => ({
   ipAddress: request.ip || null, userAgent: request.header('user-agent')?.slice(0, 1000) ?? null,
@@ -15,9 +23,19 @@ const metadata = (request: Request): RequestMetadata => ({
 
 export const animalsRouter = Router();
 animalsRouter.use(authenticate, requirePropertyContext);
+animalsRouter.get('/summary',requirePermission('ANIMAL_VIEW'),asyncHandler(async(req,res)=>{
+  res.json({ok:true,data:await getAnimalSummary(req.propertyContext!)});
+}));
+animalsRouter.get('/classification',requirePermission('ANIMAL_VIEW'),asyncHandler(async(req,res)=>{
+  res.json({ok:true,data:await getClassificationPolicy(req.propertyContext!)});
+}));
+animalsRouter.put('/classification',requirePermission('CATALOG_MANAGE'),asyncHandler(async(req,res)=>{
+  res.json({ok:true,data:await updateClassificationPolicy(req.auth!,req.propertyContext!,
+    classificationSchema.parse(req.body),metadata(req))});
+}));
 animalsRouter.get('/', requirePermission('ANIMAL_VIEW'), asyncHandler(async (request, response) => {
-  const { page, search } = animalListSchema.parse(request.query);
-  response.json({ ok: true, data: await listAnimals(request.propertyContext!, page, search) });
+  const { page, search,classification } = animalListSchema.parse(request.query);
+  response.json({ ok: true, data: await listAnimals(request.propertyContext!, page, search,classification) });
 }));
 animalsRouter.get('/:id', requirePermission('ANIMAL_VIEW'), asyncHandler(async (request, response) => {
   const { id } = animalIdSchema.parse(request.params);

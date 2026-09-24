@@ -8,6 +8,7 @@ export const updateAnimalDescriptionSchema = z.object({
 export const animalListSchema = z.object({
   page: z.coerce.number().int().min(1).max(10000).default(1),
   search: z.string().trim().max(80).default(''),
+  classification:z.enum(['VACA','VACONA','TERNERA','TORO','TORETE','TERNERO']).optional(),
 });
 
 const catalogSelectionSchema = z.object({

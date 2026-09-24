@@ -33,6 +33,7 @@ import { CleaningPanel } from './CleaningPanel';
 import { ActivityPanel } from './ActivityPanel';
 import { MediaPanel } from './MediaPanel';
 import { ShellIcon, type ShellIconName } from './ShellIcon';
+import {HomeSummary} from './HomeSummary';
 
 type Theme = 'light' | 'dark';
 type AppSession = SessionPayload & { overview: SessionOverview };
@@ -88,6 +89,7 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
   const property = overview.properties.find((item) => item.id === propertyId);
   const [roleId, setRoleId] = useState(overview.activeContext?.roleId || property?.roles[0]?.id || '');
   const [showOwnAccount, setShowOwnAccount] = useState(false);
+  const [animalClassification,setAnimalClassification]=useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [requestedSection, setRequestedSection] = useState<SectionId>(()=>
     window.location.hash.slice(1) as SectionId || 'home');
@@ -118,7 +120,8 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
     window.addEventListener('hashchange',onHashChange);
     return ()=>window.removeEventListener('hashchange',onHashChange);
   },[]);
-  function openSection(id:SectionId){
+  function openSection(id:SectionId,classification=''){
+    setAnimalClassification(classification);
     setRequestedSection(id);setMenuOpen(false);
     window.location.hash=id==='home'?'home':id;
     window.scrollTo({top:0,behavior:'instant'});
@@ -198,6 +201,10 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
             : `Trabajando en ${activeProperty?.name || 'tu espacio de SGB'}.`}</p></div>
         <div className="access-badge"><span>✓</span><div><strong>Acceso verificado</strong><small>{overview.user.email}</small></div></div>
       </section>
+      {activeProperty&&activeRole?.permissions.includes('ANIMAL_VIEW')&&<HomeSummary
+        key={activeProperty.id} accessToken={session.accessToken}
+        onAnimals={()=>openSection('animals')} onGroups={()=>openSection('groups')}
+        onClassification={code=>openSection('animals',code)}/>}
       {!overview.ownedAccount && <section className="context-card">
         <div><span className="eyebrow">Tu cuenta</span><h2>Propiedad propia</h2>
           <p className="muted">Puedes administrar tu propia finca y seguir colaborando en las demás.</p></div>
@@ -210,9 +217,9 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
           onClick={() => setShowOwnAccount(true)}>Crear propiedad propia</button>}
       </section>}
 
-      {overview.properties.length > 0 && <section className="context-card">
-        <div><span className="eyebrow">Contexto activo</span><h2>Propiedad y rol</h2>
-          <p className="muted">Cada operación se limita a la combinación seleccionada.</p></div>
+      {overview.properties.length > 0 && <details className="context-card context-switcher">
+        <summary><span>Propiedad y rol activos</span><strong>{activeProperty?.name??'Selecciona una propiedad'}</strong>
+          <small>{activeRole?.name??'Sin rol'} · Cambiar</small></summary>
         <div className="context-controls">
           <label><span>Propiedad</span><select value={propertyId} onChange={(event) => setPropertyId(event.target.value)}>
             {overview.properties.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -221,7 +228,7 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
           <button className="primary-button compact" type="button" disabled={busy || !propertyId || !roleId}
             onClick={() => onContextChange(propertyId, roleId)}>Aplicar</button>
         </div>
-      </section>}
+      </details>}
 
       <section className="dashboard-modules section-block" aria-labelledby="module-heading">
         <div className="section-heading"><div><span className="eyebrow">Tu espacio de trabajo</span>
@@ -232,11 +239,6 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
           <span className="dashboard-module-copy"><strong>{item.label}</strong><small>{item.description}</small></span>
           <ShellIcon name="chevron" size={17}/>
         </button>)}</div>
-      </section>
-      <section className="summary-grid" aria-label="Tu acceso">
-        <article><span>Propiedades disponibles</span><strong>{overview.properties.length}</strong></article>
-        <article><span>Módulos habilitados</span><strong>{activeProperty?.enabledModules.length??0}</strong></article>
-        <article><span>Rol activo</span><strong>{activeRole?.name??'Sin rol'}</strong></article>
       </section>
       </>}
       {section==='admin' && overview.user.isSuperadmin && <SuperadminPanel accessToken={session.accessToken} />}
@@ -250,6 +252,7 @@ function Dashboard({ session, busy, error, invitation, onAcceptInvitation, onLog
           canManage={activeRole.permissions.includes('CATALOG_MANAGE')} />}
       {section==='animals' && activeProperty && activeRole?.permissions.includes('ANIMAL_VIEW') &&
         <AnimalPanel key={`${activeProperty.id}:${activeRole.id}`} accessToken={session.accessToken}
+          initialClassification={animalClassification}
           canCreate={activeRole.permissions.includes('ANIMAL_CREATE')}
           canUpdate={activeRole.permissions.includes('ANIMAL_UPDATE')}
           canManageBrands={activeRole.permissions.includes('CATALOG_MANAGE')}

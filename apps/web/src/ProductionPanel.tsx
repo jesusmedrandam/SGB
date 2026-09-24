@@ -109,18 +109,18 @@ export function ProductionPanel({accessToken,canManage}:{accessToken:string;canM
     {records&&<div className="production-forms">
       <div><h3>Vacas aptas para ordeño</h3>
         {!records.cows.length&&<p className="muted">No hay vacas con parto reciente.</p>}
-        {records.cows.map((cow)=><article key={cow.id} className="group-location-item">
-          <strong>{cow.name}</strong>
+        {records.cows.map((cow)=><details key={cow.id} className="group-location-item record-line">
+          <summary><strong>{cow.name}</strong></summary>
           <small>{cow.inMilking?'En ordeño':'Sin ordeño'}{cow.lactationId?' · con lactancia':''}</small>
           {canManage&&<button className="secondary-button compact" disabled={busy}
             onClick={()=>void run(()=>setCowMilking(accessToken,cow.id,!cow.inMilking))}>
             {cow.inMilking?'Pausar ordeño':'Activar ordeño'}</button>}
-        </article>)}
+        </details>)}
       </div>
       <div><h3>Lactancias</h3>
         {!records.lactations.length&&<p className="muted">Sin lactancias registradas.</p>}
-        {records.lactations.map((row)=><article key={row.id} className="group-location-item">
-          <strong>{row.cowName} · {row.startedOn}</strong>
+        {records.lactations.map((row)=><details key={row.id} className="group-location-item record-line">
+          <summary><strong>{row.cowName} · {row.startedOn}</strong></summary>
           <small>{row.endedOn?`Cerrada ${row.endedOn}`:row.inMilking?'En ordeño':'Pausada'}</small>
           {canManage&&!row.endedOn&&<div className="group-inline-form">
             <button className="secondary-button compact" disabled={busy}
@@ -131,7 +131,7 @@ export function ProductionPanel({accessToken,canManage}:{accessToken:string;canM
                 if(endedOn)void run(()=>finishLactation(accessToken,row.id,endedOn));}}>
               Cerrar lactancia</button>
           </div>}
-        </article>)}</div>
+        </details>)}</div>
       <div><h3>Resumen del día</h3>
         <label><span>Fecha</span><input type="date" value={date}
           onChange={(event)=>setDate(event.target.value)}/></label>

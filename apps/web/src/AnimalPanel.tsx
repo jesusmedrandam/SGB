@@ -6,8 +6,10 @@ import {
   updateAnimalDescription, updateAnimalParents,
   listGroups, type LivestockGroup,
   getMedia,uploadMedia,deleteMedia,type MediaItem,
+  getAnimalClassificationPolicy,type AnimalClassificationPolicy,
   type Animal, type AnimalList, type CatalogItem, type LivestockBrand, type LivestockOwner, type ParentSelection,
 } from './api';
+import {ShellIcon} from './ShellIcon';
 
 interface AnimalChoices { BREEDS: CatalogItem[]; COLORS: CatalogItem[] }
 
@@ -145,14 +147,16 @@ function ParentField({ accessToken, child, role }: {
 }
 
 export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs, canManageBrands,
-  canViewMedia,canManageMedia }: {
+  canViewMedia,canManageMedia,initialClassification }: {
   accessToken: string; canCreate: boolean; canUpdate: boolean;
   canViewCatalogs: boolean; canManageBrands: boolean;
-  canViewMedia:boolean;canManageMedia:boolean;
+  canViewMedia:boolean;canManageMedia:boolean;initialClassification?:string;
 }) {
   const [result, setResult] = useState<AnimalList | null>(null);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const [classification,setClassification]=useState(initialClassification??'');
+  const [classificationNames,setClassificationNames]=useState<AnimalClassificationPolicy['names']|null>(null);
   const [page, setPage] = useState(1);
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState<Animal | null>(null);
@@ -166,14 +170,19 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
   const [accountUsers, setAccountUsers] = useState<Array<{ id: string; name: string }>>([]);
   const [animalMedia,setAnimalMedia]=useState<MediaItem[]>([]);
   const [mediaRevision,setMediaRevision]=useState(0);
+  useEffect(()=>{setClassification(initialClassification??'');setPage(1);setSelected(null);},
+    [initialClassification]);
+  useEffect(()=>{let active=true;void getAnimalClassificationPolicy(accessToken)
+    .then(value=>{if(active)setClassificationNames(value.names);})
+    .catch(()=>{});return()=>{active=false;};},[accessToken]);
 
   useEffect(() => {
     let active = true;
-    void getAnimals(accessToken, page, search).then((list) => {
+    void getAnimals(accessToken, page, search,classification).then((list) => {
       if (active) { setResult(list); setError(null); }
     }).catch((failure) => { if (active) setError(message(failure)); });
     return () => { active = false; };
-  }, [accessToken, page, search, revision]);
+  }, [accessToken, page, search, classification,revision]);
 
   useEffect(() => {
     if (!canViewCatalogs) return;
@@ -404,14 +413,14 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
   return <section className="section-block animal-panel">
     <div className="section-heading"><div><span className="eyebrow">Núcleo ganadero</span><h2>Animales</h2>
       <p className="muted">Registros de la propiedad activa.</p></div>
-      {canCreate && <button className="primary-button compact" type="button" disabled={busy}
+      {canCreate&&!selected && <button className="primary-button compact" type="button" disabled={busy}
         onClick={() => {
           setShowCreate((value) => !value);
           if (canViewCatalogs) void loadAnimalChoices(accessToken).then(setChoices).catch(() => setChoices(null));
         }}>{showCreate ? 'Cerrar' : '+ Animal'}</button>}
     </div>
     {error && <div className="form-error admin-error" role="alert">{error}</div>}
-    <details className="animal-reference-config">
+    {!selected&&<><details className="animal-reference-config">
       <summary>Propietarios y marquillas <span>Administrar opciones compartidas</span></summary>
     <div className="animal-brand-manager">
       <h3>Propietarios de la cuenta</h3>
@@ -503,6 +512,12 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
       <label><span>Buscar por nombre, arete o marquilla</span><input value={searchInput} maxLength={80}
         onChange={(event) => setSearchInput(event.target.value)} /></label>
       <button className="secondary-button compact" type="submit">Buscar</button>
+      <label><span>Clasificación</span><select value={classification} onChange={event=>{
+        setClassification(event.target.value);setPage(1);}}><option value="">Todas</option>
+        {(['VACA','VACONA','TERNERA','TORO','TORETE','TERNERO'] as const)
+          .map(code=><option key={code} value={code}>{classificationNames?.[code]
+            ??code.charAt(0)+code.slice(1).toLowerCase()}</option>)}
+      </select></label>
     </form>
     {!result && !error && <p className="muted">Cargando animales…</p>}
     {result && <>
@@ -512,7 +527,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         <span><strong>{entry.name}</strong><small>{[entry.earTagCode && `Arete: ${entry.earTagCode}`,
           entry.brands.length && `Marquillas: ${entry.brands.map((brand) => brand.name).join(', ')}`]
           .filter(Boolean).join(' · ') || 'Sin identificación registrada'}</small></span>
-        <span>{entry.sex === 'FEMALE' ? 'Hembra' : 'Macho'}</span>
+        <span>{entry.classification?.name??(entry.sex === 'FEMALE' ? 'Hembra' : 'Macho')}</span>
       </button>)}</div>
       {(page > 1 || result.hasMore) && <div className="animal-pages">
         <button className="secondary-button compact" type="button" disabled={page === 1}
@@ -521,18 +536,29 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         <button className="secondary-button compact" type="button" disabled={!result.hasMore}
           onClick={() => { setPage(page + 1); setSelected(null); }}>Siguiente</button>
       </div>}
-    </>}
+    </>}</>}
     {selected && <div className="animal-detail">
-      {canViewMedia&&<div className="animal-media-header">
-        {animalMedia.find(item=>item.relation_code==='COVER'&&item.kind==='IMAGE')&&<img
+      <button type="button" className="animal-back" onClick={()=>setSelected(null)}>‹ Volver a animales</button>
+      <div className="animal-social-cover">
+        {canViewMedia&&animalMedia.find(item=>item.relation_code==='COVER'&&item.kind==='IMAGE')&&<img
           className="animal-cover" src={animalMedia.find(item=>item.relation_code==='COVER')!.url}
           alt={`Portada de ${selected.name}`}/>}
-        {animalMedia.find(item=>item.relation_code==='PROFILE'&&item.kind==='IMAGE')&&<img
-          className="animal-profile" src={animalMedia.find(item=>item.relation_code==='PROFILE')!.thumbnailUrl??''}
-          alt={`Perfil de ${selected.name}`}/>}
-      </div>}
-      <h3>{selected.name}</h3>
-      <p className="animal-description">{selected.description || 'Sin descripción.'}</p>
+        <div className="animal-cover-shade"/><div className="animal-cover-name"><h3>{selected.name}</h3>
+          <p>{selected.description||'Sin descripción'}</p></div>
+        <div className="animal-profile">
+        {canViewMedia&&animalMedia.find(item=>item.relation_code==='PROFILE'&&item.kind==='IMAGE')?<img
+          className="animal-profile-photo" src={animalMedia.find(item=>item.relation_code==='PROFILE')!.thumbnailUrl??''}
+          alt={`Perfil de ${selected.name}`}/>:<ShellIcon name="animals" size={46}/>}</div>
+      </div>
+      <div className="animal-profile-action-strip">
+        <span className="animal-classification-badge">{selected.classification?.name||'Animal'}</span>
+        <span>{selected.sex==='FEMALE'?'Hembra':'Macho'} · {selected.group?.name||'Sin grupo'}</span>
+        {canUpdate&&<button type="button" className="secondary-button compact" onClick={()=>{
+          const panel=document.getElementById('animal-edit-panel') as HTMLDetailsElement|null;
+          if(panel){panel.open=true;panel.scrollIntoView({behavior:'smooth',block:'start'});}
+        }}>Editar ficha</button>}
+      </div>
+      <div className="animal-data-card"><h4>Información</h4>
       <dl><div><dt>Arete individual</dt><dd>{selected.earTagCode || 'No registrado'}</dd></div>
         <div><dt>Grupo</dt><dd>{selected.group?.name || 'Sin grupo'}</dd></div>
         <div><dt>Ubicación</dt><dd>{selected.location
@@ -540,6 +566,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
           : 'Sin ubicación'}</dd></div>
         <div><dt>Propietarios</dt><dd>{selected.owners?.map((owner) => `${owner.name} (${owner.percent}%)`).join(', ') || 'No registrados'}</dd></div>
         <div><dt>Marquillas</dt><dd>{selected.brands.map((brand) => brand.name).join(', ') || 'No registradas'}</dd></div>
+        <div><dt>Clasificación</dt><dd>{selected.classification?.name||'Sin clasificar'}</dd></div>
         <div><dt>Sexo</dt><dd>{selected.sex === 'FEMALE' ? 'Hembra' : 'Macho'}</dd></div>
         <div><dt>Nacimiento</dt><dd>{selected.birthDate || 'No registrado'}</dd></div>
         <div><dt>Ingreso</dt><dd>{selected.entryDate}</dd></div>
@@ -549,7 +576,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
         <div><dt>Razas</dt><dd>{selected.breeds?.map((breed) => breed.name).join(', ') || 'No registradas'}</dd></div>
         <div><dt>Colores</dt><dd>{selected.colors?.map((color) => color.name).join(', ') || 'No registrados'}</dd></div></dl>
       <dl className="animal-parent-summary"><div><dt>Madre</dt><dd>{selected.mother?.name || 'No registrada'}</dd></div>
-        <div><dt>Padre</dt><dd>{selected.father?.name || 'No registrado'}</dd></div></dl>
+        <div><dt>Padre</dt><dd>{selected.father?.name || 'No registrado'}</dd></div></dl></div>
       {canViewMedia&&<div className="animal-photos"><h4>Fotos y videos</h4>
         <div className="media-grid">{animalMedia.map(item=><article className="media-card" key={item.id}>
           {item.kind==='IMAGE'?<a href={item.url} target="_blank" rel="noreferrer"><img
@@ -574,7 +601,7 @@ export function AnimalPanel({ accessToken, canCreate, canUpdate, canViewCatalogs
           <input name="file" type="file" accept="image/jpeg,image/png,image/webp,image/heic" required/>
           <button className="secondary-button compact" disabled={busy}>Agregar foto</button></form>}
       </div>}
-      {canUpdate&&<details className="animal-edit-section"><summary>Editar ficha del animal</summary>
+      {canUpdate&&<details id="animal-edit-panel" className="animal-edit-section"><summary>Editar ficha del animal</summary>
       {canUpdate && <form className="animal-catalog-edit" key={`description:${selected.id}:${selected.version}`}
         onSubmit={(event) => void changeDescription(event)}>
         <h4>Descripción</h4>
