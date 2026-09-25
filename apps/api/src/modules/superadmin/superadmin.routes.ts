@@ -1,4 +1,5 @@
 import { Router, type Request } from 'express';
+import {z} from 'zod';
 import { asyncHandler } from '../../core/async-handler.js';
 import { authenticate, requireSuperadmin } from '../auth/auth.middleware.js';
 import type { RequestMetadata } from '../auth/auth.types.js';
@@ -17,6 +18,8 @@ import {
   updateAccountModule,
   updateAccountQuota,
 } from './superadmin.service.js';
+import {listSystemCatalog,saveSystemCatalogItem,systemCatalogCodes,
+  updateSystemCatalogItem} from './system-catalog.service.js';
 
 export const superadminRouter = Router();
 
@@ -28,6 +31,26 @@ function metadata(request: Request): RequestMetadata {
 }
 
 superadminRouter.use(authenticate, requireSuperadmin);
+const catalogParams=z.object({code:z.enum(systemCatalogCodes)});
+const catalogItemParams=catalogParams.extend({id:z.uuid()});
+const createSystemItem=z.object({name:z.string().trim().min(2).max(160)});
+const updateSystemItem=z.object({name:z.string().trim().min(2).max(160).optional(),
+  active:z.boolean().optional()}).refine(value=>value.name!==undefined||value.active!==undefined);
+
+superadminRouter.get('/catalogs/:code/items',asyncHandler(async(request,response)=>{
+  const {code}=catalogParams.parse(request.params);
+  response.json({ok:true,data:await listSystemCatalog(request.auth!,code)});
+}));
+superadminRouter.post('/catalogs/:code/items',asyncHandler(async(request,response)=>{
+  const {code}=catalogParams.parse(request.params);
+  response.status(201).json({ok:true,data:await saveSystemCatalogItem(request.auth!,code,
+    createSystemItem.parse(request.body),metadata(request))});
+}));
+superadminRouter.patch('/catalogs/:code/items/:id',asyncHandler(async(request,response)=>{
+  const {code,id}=catalogItemParams.parse(request.params);
+  response.json({ok:true,data:await updateSystemCatalogItem(request.auth!,code,id,
+    updateSystemItem.parse(request.body),metadata(request))});
+}));
 
 superadminRouter.get('/overview', asyncHandler(async (request, response) => {
   const data = await getPlatformOverview(request.auth!, metadata(request));
