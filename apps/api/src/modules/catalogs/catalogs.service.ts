@@ -70,7 +70,7 @@ async function ensureManageAccess(client: PoolClient, auth: AuthState, context: 
      JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = p.id AND pr.active
      JOIN role_permission rp ON rp.role_id = pr.id AND rp.permission_code = 'CATALOG_MANAGE'
      JOIN catalog_definition cd ON cd.code = $4 AND cd.active
-       AND cd.scope = 'PROPERTY' AND cd.mutability = 'PROPERTY_EXTENSIBLE'
+       AND cd.scope = 'PROPERTY' AND cd.mutability IN ('PROPERTY_EXTENSIBLE','PROPERTY_ONLY')
      WHERE p.id = $1 AND pr.id = $3 AND p.deleted_at IS NULL AND p.status = 'ACTIVE'
      FOR SHARE OF p, pm, pr`,
     [context.propertyId, auth.userId, context.roleId, code],

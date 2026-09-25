@@ -4,18 +4,22 @@ import {pool} from '../../database/pool.js';
 import {inTransaction} from '../../database/transaction.js';
 import type {AuthState,PropertyContext,RequestMetadata} from '../auth/auth.types.js';
 
-type Line={animalId?:string|undefined;productName?:string|undefined;quantity:number;unit:string;unitPrice:number;
+type Line={animalId?:string|undefined;productId?:string|undefined;productName?:string|undefined;
+  quantity:number;unit:string;unitPrice:number;
   animalEffect?:'KEEP_CURRENT_PROPERTY'|'EXIT_CURRENT_PROPERTY'|undefined};
-type Input={kind:'SALE'|'PURCHASE';tradedOn:string;counterpartyName:string;
+type Input={kind:'SALE'|'PURCHASE';tradedOn:string;buyerId?:string|undefined;
+  counterpartyName?:string|undefined;
   counterpartyContact?:string|null|undefined;destination?:string|null|undefined;
   notes?:string|null|undefined;lines:Line[]};
 const select=`SELECT r.id,r.kind,r.traded_on::text AS "tradedOn",
  r.counterparty_name AS "counterpartyName",r.counterparty_contact AS "counterpartyContact",
  r.destination,r.currency,r.notes,r.total::float8 AS total,r.status,
+ r.buyer_catalog_item_id AS "buyerId",
  r.cancellation_reason AS "cancellationReason",r.created_at AS "createdAt",
  u.display_name AS "registeredBy",
  coalesce((SELECT jsonb_agg(jsonb_build_object('id',l.id,'animalId',l.animal_id,
- 'animalName',a.name,'productName',l.product_name,'quantity',l.quantity::float8,
+ 'animalName',a.name,'productName',l.product_name,'productId',l.product_catalog_item_id,
+ 'quantity',l.quantity::float8,
  'unit',l.unit,'unitPrice',l.unit_price::float8,'animalEffect',l.animal_effect)
  ORDER BY l.id) FROM commerce_line l LEFT JOIN animal a ON a.id=l.animal_id
  WHERE l.record_id=r.id),'[]'::jsonb) AS lines
@@ -72,6 +76,15 @@ export async function createCommerce(auth:AuthState,context:PropertyContext,inpu
   meta:RequestMetadata){
   try{return await inTransaction(async client=>{
     const {account_id:accountId,today,timezone}=await access(client,auth,context);
+    let buyer:{id:string;name:string}|undefined;
+    if(input.kind==='SALE'){
+      buyer=(await client.query<{id:string;name:string}>(`SELECT id,name FROM governed_catalog_item
+        WHERE id=$1 AND catalog_code='BUYERS' AND account_id=$2 AND active AND deleted_at IS NULL
+        FOR SHARE`,[input.buyerId,accountId])).rows[0];
+      if(!buyer)throw invalidRequest('COMMERCE_BUYER_UNAVAILABLE',
+        'Selecciona un comprador activo de tu cuenta.');
+    }
+    const counterpartyName=buyer?.name??input.counterpartyName!;
     if(input.tradedOn>today)throw invalidRequest('COMMERCE_FUTURE_DATE',
       'La fecha de la operación no puede ser futura.');
     if(input.lines.some(line=>line.animalId&&input.kind==='SALE'&&!line.animalEffect))
@@ -84,12 +97,21 @@ export async function createCommerce(auth:AuthState,context:PropertyContext,inpu
     if(total>999999999999.99)throw invalidRequest('COMMERCE_TOTAL','Total fuera de rango.');
     const created=(await client.query<{id:string}>(`INSERT INTO commerce_record
       (account_id,property_id,kind,traded_on,counterparty_name,counterparty_contact,
-       destination,notes,total,created_by)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-      [accountId,context.propertyId,input.kind,input.tradedOn,input.counterpartyName,
-        input.counterpartyContact??null,input.destination??null,input.notes??null,total,auth.userId])).rows[0]!;
+       destination,notes,total,created_by,buyer_catalog_item_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+      [accountId,context.propertyId,input.kind,input.tradedOn,counterpartyName,
+        input.counterpartyContact??null,input.destination??null,input.notes??null,total,
+        auth.userId,buyer?.id??null])).rows[0]!;
     for(const line of input.lines){
       let eventId:string|null=null;
+      let product:{id:string;name:string}|undefined;
+      if(input.kind==='SALE'&&!line.animalId){
+        product=(await client.query<{id:string;name:string}>(`SELECT id,name FROM governed_catalog_item
+          WHERE id=$1 AND catalog_code='SALE_PRODUCTS' AND account_id=$2 AND active
+            AND deleted_at IS NULL FOR SHARE`,[line.productId,accountId])).rows[0];
+        if(!product)throw invalidRequest('COMMERCE_PRODUCT_UNAVAILABLE',
+          'Selecciona un producto de venta activo de tu cuenta.');
+      }
       if(line.animalId){
         const animal=(await client.query<{version:number}>(`SELECT version::int FROM animal
           WHERE id=$1 AND account_id=$2 AND property_id=$3 AND record_status='CURRENT'
@@ -103,16 +125,18 @@ export async function createCommerce(auth:AuthState,context:PropertyContext,inpu
             [input.tradedOn,today,timezone])).rows[0]!.at;
           await client.query(`SELECT change_animal_status($1,$2,$3,'EXITED',
             'RECORD_EXIT',$4,'SALE',$5,NULL,$6)`,[line.animalId,auth.userId,
-            context.roleId,`Venta a ${input.counterpartyName}`,occurredAt,animal.version]);
+            context.roleId,`Venta a ${counterpartyName}`,occurredAt,animal.version]);
           eventId=(await client.query<{id:string}>(`SELECT id FROM animal_status_event
             WHERE animal_id=$1 AND action_code='RECORD_EXIT'
             ORDER BY created_at DESC,id DESC LIMIT 1`,[line.animalId])).rows[0]!.id;
         }
       }
       await client.query(`INSERT INTO commerce_line(record_id,animal_id,product_name,
-        quantity,unit,unit_price,animal_effect,exit_event_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [created.id,line.animalId??null,line.productName??null,line.quantity,line.unit,
-          line.unitPrice,line.animalEffect??null,eventId]);
+        quantity,unit,unit_price,animal_effect,exit_event_id,product_catalog_item_id)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [created.id,line.animalId??null,product?.name??line.productName??null,
+          line.quantity,line.unit,line.unitPrice,line.animalEffect??null,eventId,
+          product?.id??null]);
     }
     const after=await read(client,context,created.id);
     await audit(client,auth,context,meta,'COMMERCE_CREATED',created.id,null,after);

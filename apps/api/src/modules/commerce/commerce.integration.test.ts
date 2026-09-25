@@ -7,6 +7,7 @@ import {getSessionOverview,login,register,resendEmailVerification,verifyEmail}
 import {createAnimal} from '../animals/animals.service.js';
 import {createGroup} from '../groups/groups.service.js';
 import {cancelCommerce,createCommerce,listCommerce} from './commerce.service.js';
+import {createCatalogItem,listCatalogItems} from '../catalogs/catalogs.service.js';
 import {createFinanceAccount,createFinanceMovement,financeAccounts}
   from '../finances/finances.service.js';
 
@@ -46,11 +47,22 @@ test('una venta registra salida reversible y las finanzas privadas respetan el Ã
       sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id},meta);
     const today=(await pool.query<{today:string}>(`SELECT (now() AT TIME ZONE timezone)::date::text
       AS today FROM property WHERE id=$1`,[owner.context.propertyId])).rows[0]!.today;
+    const buyer=await createCatalogItem(owner.auth,owner.context,'BUYERS',
+      {name:'Cliente de prueba'},meta);
+    const product=await createCatalogItem(owner.auth,owner.context,'SALE_PRODUCTS',
+      {name:'Leche fresca'},meta);
+    assert.equal((await listCatalogItems(owner.context,'BUYERS')).some(item=>item.id===buyer.id),true);
+    assert.equal((await listCatalogItems(outsider.context,'BUYERS')).some(item=>item.id===buyer.id),false);
+    assert.equal((await listCatalogItems(outsider.context,'SALE_PRODUCTS'))
+      .some(item=>item.id===product.id),false);
     const sale=await createCommerce(owner.auth,owner.context,{
-      kind:'SALE',tradedOn:today,counterpartyName:'Cliente de prueba',
+      kind:'SALE',tradedOn:today,buyerId:buyer.id,
       lines:[{animalId:animal.id,quantity:1,unit:'ANIMAL',unitPrice:1250,
-        animalEffect:'EXIT_CURRENT_PROPERTY'}]},meta);
-    assert.equal(sale.total,1250);
+        animalEffect:'EXIT_CURRENT_PROPERTY'},
+      {productId:product.id,quantity:5,unit:'L',unitPrice:5}]},meta);
+    assert.equal(sale.total,1275);
+    assert.equal(sale.counterpartyName,'Cliente de prueba');
+    assert.equal(sale.lines[1].productName,'Leche fresca');
     assert.equal((await pool.query(`SELECT availability_status_code FROM animal WHERE id=$1`,
       [animal.id])).rows[0]?.availability_status_code,'EXITED');
     assert.equal((await listCommerce(outsider.context)).length,0);
