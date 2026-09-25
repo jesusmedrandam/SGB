@@ -25,6 +25,7 @@ const record=z.object({kind:z.enum(['SALE','PURCHASE']),tradedOn:z.iso.date(),
   notes:z.string().trim().max(3000).nullable().optional(),
   lines:z.array(line).min(1).max(100)})
   .refine(value=>value.kind==='SALE'||value.lines.every(item=>!item.animalEffect))
+  .refine(value=>value.kind==='SALE'||value.lines.every(item=>!item.productId))
   .refine(value=>value.kind==='SALE'?Boolean(value.buyerId):Boolean(value.counterpartyName))
   .refine(value=>value.kind==='PURCHASE'||value.lines.every(item=>
     Boolean(item.animalId)||Boolean(item.productId)))
