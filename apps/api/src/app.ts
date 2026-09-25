@@ -24,6 +24,12 @@ import { activitiesRouter } from './modules/activities/activities.routes.js';
 import { mediaRouter } from './modules/media/media.routes.js';
 import { weighingsRouter } from './modules/weighings/weighings.routes.js';
 import { auditRouter } from './modules/audit/audit.routes.js';
+import { animalStatusRouter } from './modules/status/status.routes.js';
+import { commerceRouter } from './modules/commerce/commerce.routes.js';
+import { agendaRouter } from './modules/agenda/agenda.routes.js';
+import {propertyFinancesRouter,personalFinancesRouter}
+  from './modules/finances/finances.routes.js';
+import {notificationsRouter} from './modules/notifications/notifications.routes.js';
 
 export const app = express();
 
@@ -63,6 +69,12 @@ app.use('/cleanings', cleaningsRouter);
 app.use('/activities', activitiesRouter);
 app.use('/media', mediaRouter);
 app.use('/weighings', weighingsRouter);
+app.use('/animal-status', animalStatusRouter);
+app.use('/commerce', commerceRouter);
+app.use('/agenda', agendaRouter);
+app.use('/finances/property', propertyFinancesRouter);
+app.use('/finances/personal', personalFinancesRouter);
+app.use('/notifications', notificationsRouter);
 app.use('/audit', auditRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);
