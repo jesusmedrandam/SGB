@@ -33,6 +33,9 @@ export async function listStatusOptions(context:PropertyContext){
 export async function recordAnimalStatus(auth:AuthState,context:PropertyContext,input:Input){
   if(input.action==='RECORD_EXIT'&&!input.exitReasonCode)
     throw invalidRequest('EXIT_REASON_REQUIRED','Selecciona el motivo de salida.');
+  if(input.action==='RECORD_EXIT'&&input.exitReasonCode==='SALE')
+    throw invalidRequest('SALE_RECORD_REQUIRED',
+      'Registra la venta en Ventas para que la salida del animal y la operación queden juntas.');
   if(input.action!=='RECORD_EXIT'&&input.exitReasonCode)
     throw invalidRequest('EXIT_REASON_UNEXPECTED','El motivo de salida solo aplica a una salida.');
   const reason=input.reason?.trim()||null;
