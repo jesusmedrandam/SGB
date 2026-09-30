@@ -2,6 +2,7 @@ import type { RequestHandler } from 'express';
 import { forbidden, unauthorized } from '../../core/errors.js';
 import { pool } from '../../database/pool.js';
 import { hashToken } from '../../security/tokens.js';
+import { idempotentMutation } from '../../middleware/idempotency.js';
 
 function bearerToken(header: string | undefined): string | null {
   if (!header) return null;
@@ -10,7 +11,7 @@ function bearerToken(header: string | undefined): string | null {
   return token;
 }
 
-export const authenticate: RequestHandler = async (request, _response, next) => {
+export const authenticate: RequestHandler = async (request, response, next) => {
   try {
     const token = bearerToken(request.header('authorization'));
     if (!token) throw unauthorized();
@@ -48,7 +49,7 @@ export const authenticate: RequestHandler = async (request, _response, next) => 
       activePropertyId: row.active_property_id,
       activeRoleId: row.active_role_id,
     };
-    next();
+    await idempotentMutation(request, response, next);
   } catch (error) {
     next(error);
   }

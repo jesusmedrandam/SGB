@@ -1,11 +1,13 @@
 name: Validación
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
       - main
       - "foundation/**"
+      - "feature/sgb-v2-android-offline"
 
 permissions:
   contents: read

@@ -36,9 +36,19 @@ export const app = express();
 app.disable('x-powered-by');
 if (env.TRUST_PROXY) app.set('trust proxy', 1);
 app.use(helmet());
-app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
+app.use(cors({ origin: env.FRONTEND_URL, credentials: true,
+  exposedHeaders: ['etag', 'x-idempotent-replay'] }));
 app.use(requestId);
 app.use(express.json({ limit: '1mb' }));
+app.use((request, response, next) => {
+  if (request.method === 'GET') {
+    // The private browser/WebView cache keeps the last payload and validates its ETag.
+    // Unchanged records therefore return 304 without downloading the JSON again.
+    response.setHeader('cache-control', 'private, no-cache');
+    response.vary('authorization');
+  }
+  next();
+});
 
 app.get('/health', (_request, response) => {
   response.json({ ok: true, service: 'sgb-api', version: '2.0.0-alpha.1' });
