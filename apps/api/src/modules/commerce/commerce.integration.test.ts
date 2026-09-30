@@ -62,7 +62,8 @@ test('una venta registra salida reversible y las finanzas privadas respetan el Ã
       {productId:product.id,quantity:5,unit:'L',unitPrice:5}]},meta);
     assert.equal(sale.total,1275);
     assert.equal(sale.counterpartyName,'Cliente de prueba');
-    assert.equal(sale.lines[1].productName,'Leche fresca');
+    assert.equal(sale.lines.find((line:{productId?:string})=>line.productId===product.id)
+      ?.productName,'Leche fresca');
     assert.equal((await pool.query(`SELECT availability_status_code FROM animal WHERE id=$1`,
       [animal.id])).rows[0]?.availability_status_code,'EXITED');
     assert.equal((await listCommerce(outsider.context)).length,0);

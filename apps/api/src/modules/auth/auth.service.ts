@@ -430,7 +430,7 @@ export async function requestPasswordReset(email:string,metadata:RequestMetadata
     await client.query(`INSERT INTO password_reset_token(user_id,token_hash,expires_at)
       VALUES($1,$2,$3)`,[user.id,token.hash,expiresAt]);
     await client.query(`INSERT INTO audit_event(actor_user_id,action,entity_type,entity_id,
-      ip_address,user_agent) VALUES($1,'PASSWORD_RESET_REQUESTED','APP_USER',$1,$2,$3)`,
+      ip_address,user_agent) VALUES($1,'PASSWORD_RESET_REQUESTED','APP_USER',$1::text,$2,$3)`,
       [user.id,metadata.ipAddress,metadata.userAgent]);
     return user;
   });
@@ -456,7 +456,7 @@ export async function resetPassword(token:string,password:string,metadata:Reques
     await client.query(`UPDATE user_session SET revoked_at=now()
       WHERE user_id=$1 AND revoked_at IS NULL`,[current.user_id]);
     await client.query(`INSERT INTO audit_event(actor_user_id,action,entity_type,entity_id,
-      ip_address,user_agent) VALUES($1,'PASSWORD_RESET_COMPLETED','APP_USER',$1,$2,$3)`,
+      ip_address,user_agent) VALUES($1,'PASSWORD_RESET_COMPLETED','APP_USER',$1::text,$2,$3)`,
       [current.user_id,metadata.ipAddress,metadata.userAgent]);
   });
 }
