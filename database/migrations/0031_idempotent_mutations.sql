@@ -1,3 +1,5 @@
+BEGIN;
+
 CREATE TABLE idempotent_mutation (
   user_id uuid NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   idempotency_key text NOT NULL,
@@ -19,3 +21,5 @@ CREATE INDEX idempotent_mutation_expiry_idx
 
 COMMENT ON TABLE idempotent_mutation IS
   'Evita duplicados al reintentar escrituras desde clientes con conectividad intermitente.';
+
+COMMIT;
