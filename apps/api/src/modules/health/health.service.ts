@@ -1,4 +1,6 @@
 import type {PoolClient} from 'pg';
+import {v2 as cloudinary} from 'cloudinary';
+import {env} from '../../config.js';
 import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
 import {pool} from '../../database/pool.js';
 import {inTransaction} from '../../database/transaction.js';
@@ -63,8 +65,17 @@ export async function createMedicine(auth:AuthState,context:PropertyContext,inpu
 }
 export async function listHealthOptions(context:PropertyContext){
   const [animals,groups,units]=await Promise.all([
-    pool.query(`SELECT a.id,a.name,a.ear_tag_code AS "earTagCode",aga.group_id AS "groupId"
+    pool.query(`SELECT a.id,a.name,a.ear_tag_code AS "earTagCode",aga.group_id AS "groupId",
+      g.name AS "groupName",ala.location_id AS "locationId",pl.name AS "locationName",
+      (SELECT so.provider_asset_id FROM media_attachment ma
+        JOIN storage_object so ON so.id=ma.storage_object_id AND so.status='AVAILABLE'
+        WHERE ma.entity_type='ANIMAL' AND ma.entity_id=a.id AND ma.deleted_at IS NULL
+          AND ma.relation_code='PROFILE' AND so.kind='IMAGE'
+        ORDER BY ma.created_at DESC LIMIT 1) AS "profilePhotoAsset"
       FROM animal a LEFT JOIN animal_group_assignment aga ON aga.animal_id=a.id AND aga.ended_at IS NULL
+      LEFT JOIN livestock_group g ON g.id=aga.group_id
+      LEFT JOIN animal_location_assignment ala ON ala.animal_id=a.id AND ala.ended_at IS NULL
+      LEFT JOIN physical_location pl ON pl.id=ala.location_id
       WHERE a.property_id=$1 AND a.record_status='CURRENT' AND a.availability_status_code='ACTIVE'
       ORDER BY lower(a.name),a.id LIMIT 5000`,[context.propertyId]),
     pool.query(`SELECT id,name FROM livestock_group WHERE property_id=$1 AND active ORDER BY lower(name)`,
@@ -73,7 +84,13 @@ export async function listHealthOptions(context:PropertyContext){
       JOIN measurement_unit u ON u.code=acu.unit_code AND u.active
       WHERE acu.context_code='MEDICINE_DOSE' ORDER BY acu.sort_order`),
   ]);
-  return {animals:animals.rows,groups:groups.rows,units:units.rows};
+  return {animals:animals.rows.map(row=>({
+    id:row.id,name:row.name,earTagCode:row.earTagCode,groupId:row.groupId,
+    groupName:row.groupName,locationId:row.locationId,locationName:row.locationName,
+    profilePhotoUrl:row.profilePhotoAsset&&env.CLOUDINARY_CLOUD_NAME
+      ?cloudinary.url(row.profilePhotoAsset,{secure:true,cloud_name:env.CLOUDINARY_CLOUD_NAME,
+        width:120,height:120,crop:'fill',quality:'auto',fetch_format:'auto'}):null,
+  })),groups:groups.rows,units:units.rows};
 }
 const fields=`c.id,c.medicine_id AS "medicineId",m.name AS "medicineName",m.kind,
  c.administration_route AS "administrationRoute",c.selection_mode AS "selectionMode",
