@@ -81,6 +81,7 @@ test('multimedia respeta propiedad, tipo de registro y permisos antes de cargar'
     let attachment=(await pool.query<{id:string}>(`INSERT INTO media_attachment(account_id,storage_object_id,
       property_id,entity_type,entity_id,relation_code,created_by) VALUES($1,$2,$3,'ANIMAL',$4,'GENERAL',$5) RETURNING id`,
       [accountId,object,property.id,animal.id,auth.userId])).rows[0]!.id;
+    await pool.query("UPDATE storage_object SET created_at='2026-10-01T15:00:00Z' WHERE id=$1",[object]);
     const tag=(await pool.query<{id:string}>("SELECT id FROM governed_catalog_item WHERE catalog_code='MEDIA_TAGS' AND item_code='BIRTH'")).rows[0]!.id;
     const input={capturedOn:'2026-09-30',description:'Foto editada',animalIds:[father.id],tagIds:[tag],expectedAttachmentIds:[attachment]};
     const changed=await updateMediaDetails(auth,context,object,input);
@@ -99,6 +100,7 @@ test('multimedia respeta propiedad, tipo de registro y permisos antes de cargar'
     await updateMediaDetails(auth,context,object,{...input,capturedOn:null,description:null,tagIds:[],expectedAttachmentIds:[attachment]});
     const cleared=(await listMedia(context,undefined,undefined,object))[0]!;
     assert.equal(cleared.captured_on,null);assert.equal(cleared.description,null);assert.deepEqual(cleared.tags,[]);
+    assert.equal(new Date(cleared.created_at).toISOString().slice(0,10),'2026-10-01','Fallback date is the original upload, even after relinking');
     await pool.query("UPDATE media_attachment SET relation_code='PROFILE' WHERE id=$1",[attachment]);
     await assert.rejects(()=>updateMediaDetails(auth,context,object,{...input,animalIds:[animal.id],expectedAttachmentIds:[attachment]}),
       (error:{code?:string})=>error.code==='MEDIA_ROLE_INVALID');

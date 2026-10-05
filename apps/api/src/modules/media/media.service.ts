@@ -117,13 +117,13 @@ export async function listMedia(context:PropertyContext,type?:string,id?:string,
       COALESCE((SELECT json_agg(json_build_object('id',tag.id,'name',tag.name) ORDER BY tag.name)
         FROM media_attachment_tag mat JOIN governed_catalog_item tag ON tag.id=mat.tag_id
         WHERE mat.attachment_id=ma.id),'[]'::json) AS tags,
-      so.kind,so.byte_size,ma.created_at,so.provider_asset_id FROM media_attachment ma
+      so.kind,so.byte_size,so.created_at,so.provider_asset_id FROM media_attachment ma
     JOIN storage_object so ON so.id=ma.storage_object_id AND so.status='AVAILABLE'
     LEFT JOIN animal ON animal.id=ma.entity_id AND ma.entity_type='ANIMAL'
     WHERE ma.property_id=$1 AND ma.deleted_at IS NULL AND ma.entity_type=ANY($4::varchar[])
       AND ($2::varchar IS NULL OR ma.entity_type=$2) AND ($3::uuid IS NULL OR ma.entity_id=$3)
       AND ($5::uuid IS NULL OR ma.storage_object_id=$5)
-    ORDER BY COALESCE(ma.captured_on,ma.created_at::date) DESC,ma.created_at DESC LIMIT 500`,
+    ORDER BY COALESCE(ma.captured_on,so.created_at::date) DESC,so.created_at DESC LIMIT 500`,
     [context.propertyId,type??null,id??null,visible,objectId??null]);
   return rows.rows.map(({provider_asset_id,...row})=>({...row,byteSize:Number(row.byte_size),
     url:url(provider_asset_id,row.kind),
