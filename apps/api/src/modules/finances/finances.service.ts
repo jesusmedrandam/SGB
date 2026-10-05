@@ -3,6 +3,7 @@ import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
 import {pool} from '../../database/pool.js';
 import {inTransaction} from '../../database/transaction.js';
 import type {AuthState,PropertyContext,RequestMetadata} from '../auth/auth.types.js';
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 
 type Scope='PROPERTY'|'PERSONAL';
 type AccountInput={name:string;kind:'CASH'|'BANK'|'WALLET'|'CREDIT_CARD'|'OTHER';openingBalance:number};
@@ -24,6 +25,7 @@ async function access(client:PoolClient,auth:AuthState,context:PropertyContext|u
     if(!row)throw forbidden('PERSONAL_FINANCE_DISABLED','Mis finanzas está desactivado.');
     return;
   }
+  if(await superadminPropertyAccess(client,auth,context!))return;
   const row=(await client.query(`SELECT 1 FROM property p
     JOIN administrative_account aa ON aa.id=p.account_id AND aa.status='ACTIVE'
     JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND pm.status='ACTIVE'

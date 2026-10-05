@@ -539,7 +539,8 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     const superadminOverview = await getSessionOverview(superadminPropertyAuth);
     assert.equal(superadminOverview.user.isSuperadmin, true);
     assert.equal(superadminOverview.ownedAccount?.id, superadminProperty.accountId);
-    assert.equal(superadminOverview.properties[0]?.roles[0]?.code, 'OWNER');
+    assert.equal(superadminOverview.properties[0]?.roles[0]?.code, 'SUPERADMIN');
+    assert.ok(superadminOverview.properties[0]?.roles[0]?.permissions.includes('ANIMAL_PURGE'));
     assert.ok(superadminOverview.enabledUserModules.includes('PERSONAL_FINANCE'));
     assert.ok((await getPlatformOverview(superadminPropertyAuth, metadata)).accounts.some(
       (item) => item.id === accountId,

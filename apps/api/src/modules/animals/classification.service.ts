@@ -1,3 +1,4 @@
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type {PoolClient} from 'pg';
 import {forbidden} from '../../core/errors.js';
 import {pool} from '../../database/pool.js';
@@ -25,7 +26,8 @@ export async function getClassificationPolicy(context:PropertyContext){
 export async function updateClassificationPolicy(auth:AuthState,context:PropertyContext,
   input:ClassificationInput,metadata:RequestMetadata){
   return inTransaction(async client=>{
-    const grant=await client.query<{account_id:string}>(`SELECT p.account_id FROM property p
+    const supportGrant=await superadminPropertyAccess(client,auth,context);
+    const grant=supportGrant?{rows:[supportGrant],rowCount:1}:await client.query<{account_id:string}>(`SELECT p.account_id FROM property p
       JOIN administrative_account aa ON aa.id=p.account_id AND aa.status='ACTIVE'
       JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND pm.status='ACTIVE'
       JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=p.id

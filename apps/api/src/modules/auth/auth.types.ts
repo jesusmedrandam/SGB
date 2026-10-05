@@ -9,6 +9,7 @@ export interface AuthState {
 }
 
 export interface PropertyContext {
+  isSuperadmin?: boolean;
   propertyId: string;
   propertyName: string;
   roleId: string;

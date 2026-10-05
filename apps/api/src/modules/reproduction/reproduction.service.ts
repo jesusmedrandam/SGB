@@ -1,3 +1,4 @@
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type { PoolClient } from 'pg';
 import { ApiError, conflict, forbidden, invalidRequest } from '../../core/errors.js';
 import { pool } from '../../database/pool.js';
@@ -78,7 +79,8 @@ export async function updateReproductionSettings(auth: AuthState, context: Prope
 }
 
 async function access(client: PoolClient, auth: AuthState, context: PropertyContext, permission: string) {
-  const result = await client.query<{ account_id: string; today: string }>(
+  const supportResult=await superadminPropertyAccess(client,auth,context);
+    const result=supportResult?{rows:[supportResult],rowCount:1}:await client.query<{ account_id: string; today: string }>(
     `SELECT p.account_id, to_char((now() AT TIME ZONE p.timezone)::date, 'YYYY-MM-DD') AS today
      FROM property p
      JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'

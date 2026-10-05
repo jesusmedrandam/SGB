@@ -1,3 +1,4 @@
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type { PoolClient } from 'pg';
 import { conflict, forbidden, invalidRequest } from '../../core/errors.js';
 import { pool } from '../../database/pool.js';
@@ -6,7 +7,8 @@ import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.t
 import { readAnimal } from './animals.service.js';
 
 async function account(client: PoolClient, auth: AuthState, context: PropertyContext, permission: string) {
-  const result = await client.query<{ account_id: string }>(
+  const supportResult=await superadminPropertyAccess(client,auth,context);
+    const result=supportResult?{rows:[supportResult],rowCount:1}:await client.query<{ account_id: string }>(
     `SELECT p.account_id FROM property p
      JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
      JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'

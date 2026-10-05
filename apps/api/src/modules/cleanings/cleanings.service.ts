@@ -1,3 +1,4 @@
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type {PoolClient} from 'pg';
 import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
 import {pool} from '../../database/pool.js';
@@ -6,7 +7,7 @@ import type {AuthState,PropertyContext,RequestMetadata} from '../auth/auth.types
 import type {CleaningInput,ProductInput} from './cleanings.schemas.js';
 
 async function access(client:PoolClient,auth:AuthState,context:PropertyContext,permission:string){
-  const row=(await client.query<{account_id:string;today:string}>(
+  const row=await superadminPropertyAccess(client,auth,context)??(await client.query<{account_id:string;today:string}>(
     `SELECT p.account_id,(now() AT TIME ZONE p.timezone)::date::text AS today
      FROM property p JOIN administrative_account aa ON aa.id=p.account_id AND aa.status='ACTIVE'
      JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND pm.status='ACTIVE'

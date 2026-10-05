@@ -1,3 +1,4 @@
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import { ApiError, conflict, forbidden, invalidRequest } from '../../core/errors.js';
 import { inTransaction } from '../../database/transaction.js';
 import type {PoolClient} from 'pg';
@@ -27,7 +28,8 @@ export async function updateAnimalParents(auth: AuthState, context: PropertyCont
   input: { mother: ParentSelection; father: ParentSelection; expectedVersion: number },
   metadata: RequestMetadata) {
   return inTransaction(async (client) => {
-    const grant = await client.query(
+    const supportGrant=await superadminPropertyAccess(client,auth,context);
+    const grant=supportGrant?{rows:[supportGrant],rowCount:1}:await client.query(
       `SELECT 1 FROM property p
        JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
        JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'

@@ -1,3 +1,4 @@
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type { PoolClient } from 'pg';
 import {v2 as cloudinary} from 'cloudinary';
 import {env} from '../../config.js';
@@ -245,7 +246,8 @@ async function insertBrands(client: PoolClient, auth: AuthState, context: Proper
 }
 
 async function accessForCreate(client: PoolClient, auth: AuthState, context: PropertyContext) {
-  const result = await client.query<{ account_id: string; today: string }>(
+  const supportResult=await superadminPropertyAccess(client,auth,context);
+    const result=supportResult?{rows:[supportResult],rowCount:1}:await client.query<{ account_id: string; today: string }>(
     `SELECT p.account_id, to_char((now() AT TIME ZONE p.timezone)::date, 'YYYY-MM-DD') AS today
      FROM property p
      JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
@@ -355,7 +357,8 @@ export async function createAnimal(auth: AuthState, context: PropertyContext,
 export async function updateAnimalBrands(auth: AuthState, context: PropertyContext,
   id: string, brandIds: string[], expectedVersion: number, metadata: RequestMetadata) {
   return inTransaction(async (client) => {
-    const grant = await client.query(
+    const supportGrant=await superadminPropertyAccess(client,auth,context);
+    const grant=supportGrant?{rows:[supportGrant],rowCount:1}:await client.query(
       `SELECT 1 FROM property p
        JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
        JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'
@@ -404,7 +407,8 @@ export async function updateAnimalBrands(auth: AuthState, context: PropertyConte
 export async function updateAnimalCatalogs(auth: AuthState, context: PropertyContext,
   id: string, selection: AnimalCatalogSelection, expectedVersion: number, metadata: RequestMetadata) {
   return inTransaction(async (client) => {
-    const grant = await client.query(
+    const supportGrant=await superadminPropertyAccess(client,auth,context);
+    const grant=supportGrant?{rows:[supportGrant],rowCount:1}:await client.query(
       `SELECT 1 FROM property p
        JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
        JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'
