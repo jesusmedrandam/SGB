@@ -61,7 +61,8 @@ function accountData(row: AccountRow) {
   };
 }
 
-export async function getPlatformOverview(auth: AuthState, metadata: RequestMetadata) {
+export async function getPlatformOverview(auth: AuthState, metadata: RequestMetadata,search='',page=1) {
+  if(!auth.isSuperadmin)throw forbidden('SUPERADMIN_REQUIRED','Esta operación requiere acceso de superadministrador.');
   return inTransaction(async (client) => {
     const totals = await client.query<{
       users: string;
@@ -84,8 +85,9 @@ export async function getPlatformOverview(auth: AuthState, metadata: RequestMeta
          FROM administrative_account aa
          JOIN app_user u ON u.id = aa.owner_user_id
          LEFT JOIN account_collaborator_usage cu ON cu.account_id = aa.id
-        ORDER BY aa.created_at DESC
-        LIMIT 100`,
+        WHERE $1='' OR strpos(lower(u.display_name || ' ' || u.email::text || ' ' || aa.name),lower($1))>0
+        ORDER BY aa.created_at DESC,aa.id
+        LIMIT 101 OFFSET $2`,[search,(page-1)*100],
     );
     await audit(client, auth, metadata, 'SUPERADMIN_DASHBOARD_VIEWED', 'PLATFORM', null, null, {
       returnedAccounts: accounts.rowCount,
@@ -98,7 +100,7 @@ export async function getPlatformOverview(auth: AuthState, metadata: RequestMeta
         properties: Number(row.properties),
         managedAnimals: Number(row.managed_animals),
       },
-      accounts: accounts.rows.map(accountData),
+      accounts: accounts.rows.slice(0,100).map(accountData),page,hasMore:accounts.rows.length>100,
     };
   });
 }

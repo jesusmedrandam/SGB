@@ -51,12 +51,15 @@ app.use((request, response, next) => {
 });
 
 app.get('/health', (_request, response) => {
-  response.json({ ok: true, service: 'sgb-api', version: '2.0.0-alpha.1' });
+  response.json({ ok: true, service: 'sgb-api', version: '2.0.0-alpha.1',
+    capabilities:['superadmin-support','media-details','selective-offline-media'] });
 });
 
 app.get('/health/ready', asyncHandler(async (_request, response) => {
-  await pool.query('SELECT 1');
-  response.json({ ok: true, database: 'ready' });
+  const result=await pool.query<{support_ready:boolean}>(`SELECT EXISTS(
+    SELECT 1 FROM pg_trigger WHERE tgname='audit_event_mark_superadmin' AND NOT tgisinternal
+  ) AS support_ready`);
+  response.json({ ok: true, database: 'ready',supportReady:result.rows[0]?.support_ready===true });
 }));
 
 app.use('/auth', authRouter);

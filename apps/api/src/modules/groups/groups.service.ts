@@ -1,3 +1,4 @@
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { ApiError, conflict, forbidden, invalidRequest } from '../../core/errors.js';
@@ -86,7 +87,8 @@ export async function listLocations(context: PropertyContext) {
 
 async function access(client: PoolClient, auth: AuthState, context: PropertyContext,
   permission: string) {
-  const result = await client.query<{ account_id: string }>(
+  const supportResult=await superadminPropertyAccess(client,auth,context);
+    const result=supportResult?{rows:[supportResult],rowCount:1}:await client.query<{ account_id: string }>(
     `SELECT p.account_id FROM property p
      JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
      JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'
@@ -102,6 +104,7 @@ async function access(client: PoolClient, auth: AuthState, context: PropertyCont
 }
 
 async function requireModules(client: PoolClient, context: PropertyContext, codes: string[]) {
+  if(context.isSuperadmin)return;
   const enabled = await client.query<{ module_code: string }>(
     `SELECT am.module_code FROM property p
      JOIN account_module am ON am.account_id = p.account_id AND am.enabled

@@ -3,6 +3,9 @@ import {z} from 'zod';
 import { asyncHandler } from '../../core/async-handler.js';
 import { authenticate, requireSuperadmin } from '../auth/auth.middleware.js';
 import type { RequestMetadata } from '../auth/auth.types.js';
+import {changeContext,endSupport} from '../auth/auth.service.js';
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
+import {pool} from '../../database/pool.js';
 import {
   accountParamsSchema,
   accountUpdateSchema,
@@ -31,6 +34,15 @@ function metadata(request: Request): RequestMetadata {
 }
 
 superadminRouter.use(authenticate, requireSuperadmin);
+const supportTarget=z.object({accountId:z.uuid(),propertyId:z.uuid()});
+superadminRouter.post('/support-context',asyncHandler(async(request,response)=>{
+  const {accountId,propertyId}=supportTarget.parse(request.body);
+  const property=await superadminPropertyAccess(pool,request.auth!,{propertyId});
+  response.json({ok:true,data:await changeContext(request.auth!,propertyId,property!.role_id,metadata(request),accountId)});
+}));
+superadminRouter.delete('/support-context',asyncHandler(async(request,response)=>{
+  await endSupport(request.auth!,metadata(request));response.status(204).end();
+}));
 const catalogParams=z.object({code:z.enum(systemCatalogCodes)});
 const catalogItemParams=catalogParams.extend({id:z.uuid()});
 const createSystemItem=z.object({name:z.string().trim().min(2).max(160)});
@@ -53,7 +65,9 @@ superadminRouter.patch('/catalogs/:code/items/:id',asyncHandler(async(request,re
 }));
 
 superadminRouter.get('/overview', asyncHandler(async (request, response) => {
-  const data = await getPlatformOverview(request.auth!, metadata(request));
+  const {search,page}=z.object({search:z.string().trim().max(160).default(''),
+    page:z.coerce.number().int().min(1).max(10000).default(1)}).parse(request.query);
+  const data = await getPlatformOverview(request.auth!, metadata(request),search,page);
   response.json({ ok: true, data });
 }));
 

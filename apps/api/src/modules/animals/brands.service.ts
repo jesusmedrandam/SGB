@@ -1,3 +1,4 @@
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type { PoolClient } from 'pg';
 import { ApiError, conflict, forbidden } from '../../core/errors.js';
 import { pool } from '../../database/pool.js';
@@ -17,7 +18,8 @@ export async function listBrands(context: PropertyContext) {
 }
 
 async function access(client: PoolClient, auth: AuthState, context: PropertyContext) {
-  const result = await client.query<{ account_id: string }>(
+  const supportResult=await superadminPropertyAccess(client,auth,context);
+    const result=supportResult?{rows:[supportResult],rowCount:1}:await client.query<{ account_id: string }>(
     `SELECT p.account_id FROM property p
      JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
      JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'

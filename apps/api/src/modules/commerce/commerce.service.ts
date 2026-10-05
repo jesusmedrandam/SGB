@@ -1,3 +1,4 @@
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type {PoolClient} from 'pg';
 import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
 import {pool} from '../../database/pool.js';
@@ -41,7 +42,7 @@ export async function listCommerceAnimals(context:PropertyContext){
     ORDER BY lower(name),id LIMIT 5000`,[context.propertyId])).rows;
 }
 async function access(client:PoolClient,auth:AuthState,context:PropertyContext){
-  const row=(await client.query<{account_id:string;today:string;timezone:string}>(`
+  const row=await superadminPropertyAccess(client,auth,context)??(await client.query<{account_id:string;today:string;timezone:string}>(`
     SELECT p.account_id,p.timezone,(now() AT TIME ZONE p.timezone)::date::text AS today
     FROM property p JOIN administrative_account aa ON aa.id=p.account_id AND aa.status='ACTIVE'
     JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND pm.status='ACTIVE'
