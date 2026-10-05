@@ -1,3 +1,4 @@
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type {PoolClient} from 'pg';
 import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
 import {pool} from '../../database/pool.js';
@@ -19,7 +20,7 @@ type Resolved={source:Group;destination:Group;destinationLocationId:string|null;
   animals:Animal[];sourceLocationId:string|null;accountId:string};
 
 async function access(client:PoolClient,auth:AuthState,context:PropertyContext,permission:string){
-  const row=(await client.query<{account_id:string;today:string}>(
+  const row=await superadminPropertyAccess(client,auth,context)??(await client.query<{account_id:string;today:string}>(
     `SELECT p.account_id,(now() AT TIME ZONE p.timezone)::date::text AS today
      FROM property p JOIN administrative_account aa ON aa.id=p.account_id AND aa.status='ACTIVE'
      JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND pm.status='ACTIVE'
@@ -35,6 +36,8 @@ async function access(client:PoolClient,auth:AuthState,context:PropertyContext,p
 }
 
 async function destinationAccess(client:PoolClient,auth:AuthState,accountId:string,propertyId:string){
+  const support=await superadminPropertyAccess(client,auth,{propertyId});
+  if(support){if(support.account_id!==accountId)throw forbidden('MOVEMENT_DESTINATION_DENIED','Selecciona una propiedad de la misma cuenta.');return;}
   const row=(await client.query<{id:string}>(
     `SELECT p.id FROM property p
      JOIN administrative_account aa ON aa.id=p.account_id AND aa.status='ACTIVE'
@@ -49,7 +52,8 @@ async function destinationAccess(client:PoolClient,auth:AuthState,accountId:stri
     'Necesitas acceso para gestionar movimientos en la propiedad de destino de la misma cuenta.');
 }
 
-async function requireLocations(client:PoolClient,propertyIds:string[]){
+async function requireLocations(client:PoolClient,propertyIds:string[],support=false){
+  if(support)return;
   for(const propertyId of new Set(propertyIds)){
     const result=await client.query<{module_code:string}>(
       `SELECT module_code FROM effective_property_module WHERE property_id=$1
@@ -114,6 +118,7 @@ export async function listMovementOptions(auth:AuthState,context:PropertyContext
     `SELECT account_id FROM property WHERE id=$1`,[context.propertyId])).rows[0]?.account_id;
   if(!account)throw forbidden('MOVEMENT_DENIED','Selecciona una propiedad válida.');
   const [properties,groups,locations,animals]=await Promise.all([
+    auth.isSuperadmin?pool.query(`SELECT p.id,p.name FROM property p WHERE p.account_id=$1 AND p.deleted_at IS NULL ORDER BY p.name`,[account]):
     pool.query(`SELECT DISTINCT p.id,p.name FROM property p
       JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND pm.status='ACTIVE'
       JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=p.id
@@ -126,13 +131,13 @@ export async function listMovementOptions(auth:AuthState,context:PropertyContext
       pl.name AS "locationName" FROM livestock_group g
       LEFT JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
       LEFT JOIN physical_location pl ON pl.id=gla.location_id
-      WHERE g.account_id=$1 AND g.active AND g.property_id IN
-        (SELECT pm.property_id FROM property_membership pm WHERE pm.user_id=$2 AND pm.status='ACTIVE')
-      ORDER BY lower(g.name)`,[account,auth.userId]),
+      WHERE g.account_id=$1 AND g.active AND ($3::boolean OR g.property_id IN
+        (SELECT pm.property_id FROM property_membership pm WHERE pm.user_id=$2 AND pm.status='ACTIVE'))
+      ORDER BY lower(g.name)`,[account,auth.userId,auth.isSuperadmin]),
     pool.query(`SELECT id,name,kind,property_id AS "propertyId" FROM physical_location
-      WHERE account_id=$1 AND active AND property_id IN
-        (SELECT pm.property_id FROM property_membership pm WHERE pm.user_id=$2 AND pm.status='ACTIVE')
-      ORDER BY lower(name)`,[account,auth.userId]),
+      WHERE account_id=$1 AND active AND ($3::boolean OR property_id IN
+        (SELECT pm.property_id FROM property_membership pm WHERE pm.user_id=$2 AND pm.status='ACTIVE'))
+      ORDER BY lower(name)`,[account,auth.userId,auth.isSuperadmin]),
     pool.query(`SELECT a.id,a.name,a.ear_tag_code AS "earTagCode",
       aga.group_id AS "groupId",ala.location_id AS "locationId" FROM animal a
       LEFT JOIN animal_group_assignment aga ON aga.animal_id=a.id AND aga.ended_at IS NULL
@@ -181,7 +186,7 @@ async function resolve(client:PoolClient,auth:AuthState,context:PropertyContext,
         AND pl.property_id=$3 AND pl.active FOR UPDATE`,
       [destinationLocationId,accountId,input.destinationPropertyId]);
     if(!location.rows[0])throw invalidRequest('MOVEMENT_LOCATION_INVALID','El potrero o corral de destino no está activo.');
-    await requireLocations(client,[context.propertyId,input.destinationPropertyId]);
+    await requireLocations(client,[context.propertyId,input.destinationPropertyId],auth.isSuperadmin);
   }
   if(input.kind==='UBICACION'){
     const occupied=await client.query(`SELECT 1 FROM group_location_assignment

@@ -3,6 +3,7 @@ import { conflict, forbidden, invalidRequest } from '../../core/errors.js';
 import { pool } from '../../database/pool.js';
 import { inTransaction } from '../../database/transaction.js';
 import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.types.js';
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 
 async function record(client: PoolClient, auth: AuthState, metadata: RequestMetadata,
   action: string, entityType: string, entityId: string, propertyId: string,
@@ -19,7 +20,7 @@ async function record(client: PoolClient, auth: AuthState, metadata: RequestMeta
 
 // This is shared by an owner's first property and a later property in an existing account.
 async function seedProperty(client: PoolClient, input: {
-  accountId: string; ownerId: string; creatorId: string; name: string;
+  accountId: string; ownerId: string; creatorId: string; name: string; creatorIsSuperadmin?:boolean;
 }) {
   const inserted = await client.query<{ id: string }>(
     `INSERT INTO property(account_id, owner_user_id, name, created_by)
@@ -60,7 +61,7 @@ async function seedProperty(client: PoolClient, input: {
      VALUES($1,$2,$3,$4)`,
     [ownerMembership.rows[0]!.id, ownerRoleId, propertyId, input.creatorId],
   );
-  if (input.creatorId !== input.ownerId) {
+  if (input.creatorId !== input.ownerId && !input.creatorIsSuperadmin) {
     const adminMembership = await client.query<{ id: string }>(
       `INSERT INTO property_membership(property_id, user_id, status, job_title, joined_at, created_by)
        VALUES($1,$2,'ACTIVE','Administrador',now(),$2) RETURNING id`,
@@ -72,7 +73,7 @@ async function seedProperty(client: PoolClient, input: {
       [adminMembership.rows[0]!.id, administratorRoleId, propertyId, input.creatorId],
     );
   }
-  return { propertyId, roleId: input.creatorId === input.ownerId ? ownerRoleId : administratorRoleId };
+  return { propertyId, roleId: input.creatorId === input.ownerId || input.creatorIsSuperadmin ? ownerRoleId : administratorRoleId };
 }
 
 async function activateSession(client: PoolClient, auth: AuthState, propertyId: string, roleId: string) {
@@ -129,8 +130,8 @@ export async function getPropertySettings(context: PropertyContext) {
               (SELECT count(*) FROM property other WHERE other.account_id = aa.id
                 AND other.deleted_at IS NULL AND other.status <> 'ARCHIVED')::text AS used
        FROM property p JOIN administrative_account aa ON aa.id = p.account_id
-       WHERE p.id = $1 AND p.status = 'ACTIVE' AND p.deleted_at IS NULL AND aa.status = 'ACTIVE'`,
-      [context.propertyId],
+       WHERE p.id = $1 AND p.deleted_at IS NULL AND ($2::boolean OR (p.status='ACTIVE' AND aa.status='ACTIVE'))`,
+      [context.propertyId,context.isSuperadmin??false],
     ),
     pool.query<{ code: string; name: string; is_core: boolean; account_enabled: boolean; property_enabled: boolean }>(
       `SELECT m.code, m.name, m.is_core,
@@ -166,12 +167,12 @@ export async function createAccountProperty(auth: AuthState, context: PropertyCo
       `SELECT aa.id, aa.owner_user_id, aa.max_properties
        FROM administrative_account aa
        JOIN property p ON p.account_id = aa.id
-       WHERE p.id = $1 AND aa.status = 'ACTIVE' FOR UPDATE OF aa`,
-      [context.propertyId],
+       WHERE p.id = $1 AND ($2::boolean OR aa.status='ACTIVE') FOR UPDATE OF aa`,
+      [context.propertyId,auth.isSuperadmin],
     );
     const row = account.rows[0];
     if (!row) throw forbidden('ACCOUNT_UNAVAILABLE', 'La cuenta administrativa no está disponible.');
-    const grant = await client.query(
+    const grant = (await superadminPropertyAccess(client,auth,context))?{rowCount:1}:await client.query(
       `SELECT 1 FROM property_membership pm
        JOIN property p ON p.id = pm.property_id AND p.status = 'ACTIVE' AND p.deleted_at IS NULL
        JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
@@ -197,7 +198,7 @@ export async function createAccountProperty(auth: AuthState, context: PropertyCo
     );
     if (duplicate.rowCount) throw conflict('PROPERTY_NAME_TAKEN', 'Ya existe una propiedad con ese nombre en esta cuenta.');
     const created = await seedProperty(client, {
-      accountId: row.id, ownerId: row.owner_user_id, creatorId: auth.userId, name,
+      accountId: row.id, ownerId: row.owner_user_id, creatorId: auth.userId, name,creatorIsSuperadmin:auth.isSuperadmin,
     });
     await activateSession(client, auth, created.propertyId, created.roleId);
     await record(client, auth, metadata, 'PROPERTY_CREATED', 'PROPERTY', created.propertyId,
@@ -212,11 +213,11 @@ export async function updatePropertyModule(auth: AuthState, context: PropertyCon
     const account = await client.query<{ id: string }>(
       `SELECT aa.id FROM administrative_account aa
        JOIN property p ON p.account_id = aa.id
-       WHERE p.id = $1 AND aa.status = 'ACTIVE' FOR UPDATE OF aa`,
-      [context.propertyId],
+       WHERE p.id = $1 AND ($2::boolean OR aa.status='ACTIVE') FOR UPDATE OF aa`,
+      [context.propertyId,auth.isSuperadmin],
     );
     if (!account.rows[0]) throw forbidden('ACCOUNT_UNAVAILABLE', 'La cuenta administrativa no está disponible.');
-    const grant = await client.query(
+    const grant = (await superadminPropertyAccess(client,auth,context))?{rowCount:1}:await client.query(
       `SELECT 1 FROM property_membership pm
        JOIN property p ON p.id = pm.property_id AND p.status = 'ACTIVE' AND p.deleted_at IS NULL
        JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id

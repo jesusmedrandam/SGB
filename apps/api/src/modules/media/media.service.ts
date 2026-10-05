@@ -10,7 +10,18 @@ import {env} from '../../config.js';
 import {conflict,forbidden,invalidRequest,ApiError} from '../../core/errors.js';
 import {pool} from '../../database/pool.js';
 import {inTransaction} from '../../database/transaction.js';
-import type {AuthState,PropertyContext} from '../auth/auth.types.js';
+import type {AuthState,PropertyContext,RequestMetadata} from '../auth/auth.types.js';
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
+
+async function auditMedia(client:PoolClient,auth:AuthState|undefined,context:PropertyContext,
+  action:string,id:string,before:unknown,after:unknown,metadata?:RequestMetadata){
+  if(!auth)return;
+  await client.query(`INSERT INTO audit_event(actor_user_id,property_id,active_role_id,action,
+    entity_type,entity_id,before_data,after_data,ip_address,user_agent)
+    VALUES($1,$2,$3,$4,'MEDIA_OBJECT',$5,$6::jsonb,$7::jsonb,$8,$9)`,
+    [auth.userId,context.propertyId,context.roleId,action,id,JSON.stringify(before),JSON.stringify(after),
+      metadata?.ipAddress??null,metadata?.userAgent??null]);
+}
 
 // Only explicitly mapped records can receive attachments. Each lookup checks the active property.
 const targets:Record<string,{table:string;property:string;module:string;permission:string;condition?:string}>={
@@ -35,9 +46,9 @@ function configured(){
   cloudinary.config({cloud_name:env.CLOUDINARY_CLOUD_NAME,api_key:env.CLOUDINARY_API_KEY,
     api_secret:env.CLOUDINARY_API_SECRET,secure:true});
 }
-async function account(client:PoolClient,propertyId:string){
+async function account(client:PoolClient,propertyId:string,support=false){
   const result=await client.query<{account_id:string}>(
-    'SELECT account_id FROM property WHERE id=$1 AND deleted_at IS NULL AND status=$2',[propertyId,'ACTIVE']);
+    "SELECT account_id FROM property WHERE id=$1 AND deleted_at IS NULL AND (status='ACTIVE' OR $2::boolean)",[propertyId,support]);
   if(!result.rows[0])throw invalidRequest('PROPERTY_UNAVAILABLE','La propiedad ya no está disponible.');
   return result.rows[0].account_id;
 }
@@ -139,7 +150,7 @@ export async function usage(context:PropertyContext){
 }
 export async function addMedia(auth:AuthState,context:PropertyContext,type:string,id:string,
   relation:string,kind:'IMAGE'|'VIDEO',input:Buffer,options:{extraAnimalIds?:string[];
-  description?:string|null;capturedOn?:string|null;tagIds?:string[]}={}){
+  description?:string|null;capturedOn?:string|null;tagIds?:string[];metadata?:RequestMetadata}={}){
   const ids=[id,...(options.extraAnimalIds??[])];
   if(new Set(ids).size!==ids.length||ids.length>100||ids.length>1&&type!=='ANIMAL')
     throw invalidRequest('MEDIA_ANIMALS_INVALID','Selecciona animales distintos de la misma propiedad.');
@@ -153,8 +164,9 @@ export async function addMedia(auth:AuthState,context:PropertyContext,type:strin
   const digest=createHash('sha256').update(canonical.data).digest('hex');
   const reservationId=randomUUID();let accountId='';let reused:string|null=null;
   await inTransaction(async client=>{
+    await superadminPropertyAccess(client,auth,context);
     for(const targetId of ids)await validateTarget(client,context,type,targetId);
-    accountId=await account(client,context.propertyId);
+    accountId=await account(client,context.propertyId,auth.isSuperadmin);
     if(options.tagIds?.length){
       const tags=await client.query(`SELECT id FROM governed_catalog_item
         WHERE id=ANY($1::uuid[]) AND catalog_code='MEDIA_TAGS' AND active AND deleted_at IS NULL
@@ -181,6 +193,7 @@ export async function addMedia(auth:AuthState,context:PropertyContext,type:strin
   try{
     if(!reused){await upload(canonical.data,key,kind);uploaded=true;}
     const result=await inTransaction(async client=>{
+      await superadminPropertyAccess(client,auth,context);
       for(const targetId of ids)await validateTarget(client,context,type,targetId);
       await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
       if(type==='CLEANING'){
@@ -227,6 +240,8 @@ export async function addMedia(auth:AuthState,context:PropertyContext,type:strin
           attachment_id,tag_id) VALUES($1,$2)`,[attachmentId,tagId]);
         attachmentIds.push(attachmentId);
       }
+      await auditMedia(client,auth,context,'MEDIA_UPLOADED',objectId,null,
+        {attachmentIds,animalIds:ids,relation,description:options.description??null,capturedOn:options.capturedOn??null,tagIds:options.tagIds??[]},options.metadata);
       return attachmentIds;
     });
     return {id:result[0],attachmentIds:result};
@@ -240,16 +255,19 @@ export async function addMedia(auth:AuthState,context:PropertyContext,type:strin
 }
 export async function updateMediaDetails(auth:AuthState,context:PropertyContext,objectId:string,input:{
   capturedOn:string|null;description:string|null;tagIds:string[];animalIds:string[];expectedAttachmentIds:string[];
-}){
+},metadata?:RequestMetadata){
   if(!context.permissions.has('MEDIA_MANAGE'))throw forbidden('PERMISSION_DENIED','Tu rol no puede editar multimedia.');
   return inTransaction(async client=>{
-    const accountId=await account(client,context.propertyId);
+    await superadminPropertyAccess(client,auth,context);
+    const accountId=await account(client,context.propertyId,auth.isSuperadmin);
     await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
     const object=await client.query(`SELECT id FROM storage_object WHERE id=$1 AND account_id=$2
       AND status='AVAILABLE' FOR UPDATE`,[objectId,accountId]);
     if(!object.rowCount)throw invalidRequest('MEDIA_NOT_FOUND','El archivo no está disponible.');
     const refs=await client.query<{id:string;entity_type:string;entity_id:string;relation_code:string}>(`
-      SELECT id,entity_type,entity_id,relation_code FROM media_attachment WHERE storage_object_id=$1
+      SELECT id,entity_type,entity_id,relation_code,description,captured_on::text,
+        ARRAY(SELECT tag_id FROM media_attachment_tag WHERE attachment_id=media_attachment.id ORDER BY tag_id) AS tag_ids
+      FROM media_attachment WHERE storage_object_id=$1
       AND property_id=$2 AND deleted_at IS NULL FOR UPDATE`,[objectId,context.propertyId]);
     if(!refs.rows.length)throw invalidRequest('MEDIA_NOT_FOUND','El archivo no pertenece a esta propiedad.');
     if(refs.rows.length!==input.expectedAttachmentIds.length||refs.rows.some(row=>!input.expectedAttachmentIds.includes(row.id)))
@@ -283,12 +301,14 @@ export async function updateMediaDetails(auth:AuthState,context:PropertyContext,
     await client.query('DELETE FROM media_attachment_tag WHERE attachment_id=ANY($1::uuid[])',[ids]);
     if(input.tagIds.length)await client.query(`INSERT INTO media_attachment_tag(attachment_id,tag_id)
       SELECT attachment_id,tag_id FROM unnest($1::uuid[]) attachment_id CROSS JOIN unnest($2::uuid[]) tag_id`,[ids,input.tagIds]);
+    await auditMedia(client,auth,context,'MEDIA_METADATA_UPDATED',objectId,refs.rows,input,metadata);
     return ids;
   });
 }
-async function deleteReferences(context:PropertyContext,objectId:string,attachmentId?:string){
+async function deleteReferences(context:PropertyContext,objectId:string,attachmentId?:string,auth?:AuthState,metadata?:RequestMetadata){
   const pending=await inTransaction(async client=>{
-    const accountId=await account(client,context.propertyId);
+    if(auth)await superadminPropertyAccess(client,auth,context);
+    const accountId=await account(client,context.propertyId,auth?.isSuperadmin??false);
     await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
     const object=await client.query(`SELECT id FROM storage_object WHERE id=$1 AND account_id=$2
       AND status='AVAILABLE' FOR UPDATE`,[objectId,accountId]);
@@ -301,6 +321,7 @@ async function deleteReferences(context:PropertyContext,objectId:string,attachme
     for(const ref of refs.rows)await validateTarget(client,context,ref.entity_type,ref.entity_id);
     await client.query(`UPDATE media_attachment SET deleted_at=now() WHERE id=ANY($1::uuid[])`,
       [refs.rows.map(ref=>ref.id)]);
+    await auditMedia(client,auth,context,'MEDIA_RELATIONS_REMOVED',objectId,refs.rows,null,metadata);
     const remaining=await client.query(`SELECT 1 FROM media_attachment WHERE storage_object_id=$1
       AND deleted_at IS NULL LIMIT 1`,[objectId]);
     if(remaining.rowCount)return false;
@@ -350,13 +371,13 @@ export async function processPendingDeletions(){
     RETURNING storage_object_id`,[`${process.pid}`]);
   for(const item of due.rows)await processDeletion(item.storage_object_id);
 }
-export async function removeMedia(context:PropertyContext,id:string){
+export async function removeMedia(context:PropertyContext,id:string,auth?:AuthState,metadata?:RequestMetadata){
   const row=(await pool.query<{storage_object_id:string}>(`SELECT storage_object_id
     FROM media_attachment WHERE id=$1 AND property_id=$2 AND deleted_at IS NULL`,
     [id,context.propertyId])).rows[0];
   if(!row)throw invalidRequest('MEDIA_NOT_FOUND','El archivo no está disponible.');
-  return deleteReferences(context,row.storage_object_id,id);
+  return deleteReferences(context,row.storage_object_id,id,auth,metadata);
 }
-export async function removeMediaObject(context:PropertyContext,id:string){
-  return deleteReferences(context,id);
+export async function removeMediaObject(context:PropertyContext,id:string,auth?:AuthState,metadata?:RequestMetadata){
+  return deleteReferences(context,id,undefined,auth,metadata);
 }

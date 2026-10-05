@@ -15,7 +15,8 @@ auditRouter.get('/',asyncHandler(async(request,response)=>{
     ev.action,ev.entity_type AS "entityType",ev.entity_id AS "entityId",
     ev.reason,ev.before_data AS "beforeData",ev.after_data AS "afterData",
     ev.ip_address::text AS "ipAddress",ev.user_agent AS "userAgent",
-    u.display_name AS "actorName"
+    CASE WHEN ev.superadmin_access THEN 'Sistema · soporte' ELSE u.display_name END AS "actorName",
+    u.display_name AS "actorDisplayName",ev.actor_user_id AS "actorUserId",ev.superadmin_access AS "superadminAccess"
     FROM audit_event ev LEFT JOIN app_user u ON u.id=ev.actor_user_id
     WHERE ev.property_id=$1 AND ($2::text IS NULL OR ev.action=$2)
     ORDER BY ev.occurred_at DESC,ev.id DESC LIMIT 201 OFFSET $3`,

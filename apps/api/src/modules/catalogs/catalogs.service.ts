@@ -1,3 +1,4 @@
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type { PoolClient } from 'pg';
 import { conflict, forbidden, invalidRequest } from '../../core/errors.js';
 import { pool } from '../../database/pool.js';
@@ -62,7 +63,11 @@ export async function listCatalogItems(context: PropertyContext, code: EditableC
 async function ensureManageAccess(client: PoolClient, auth: AuthState, context: PropertyContext,
   code: EditableCatalogCode, speciesCode: string | null) {
   // Recheck inside the transaction: a stale browser or session must not retain write access.
-  const access = await client.query<{ account_id: string }>(
+  const supportAccess=await superadminPropertyAccess(client,auth,context);
+  if(supportAccess&&!(await client.query(`SELECT 1 FROM catalog_definition WHERE code=$1 AND active
+    AND scope='PROPERTY' AND mutability IN ('PROPERTY_EXTENSIBLE','PROPERTY_ONLY')`,[code])).rowCount)
+    throw forbidden('CATALOG_MANAGE_DENIED','Este catálogo se configura desde las opciones del sistema.');
+    const access=supportAccess?{rows:[supportAccess],rowCount:1}:await client.query<{ account_id: string }>(
     `SELECT p.account_id FROM property p
      JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
      JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'

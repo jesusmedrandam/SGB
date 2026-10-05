@@ -6,6 +6,7 @@ import { inTransaction } from '../../database/transaction.js';
 import { hashToken, issueToken } from '../../security/tokens.js';
 import { sendPropertyInvitationEmail } from '../../services/email.service.js';
 import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.types.js';
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type { CreateInvitationInput } from './collaboration.schemas.js';
 
 interface InvitationRow extends QueryResultRow {
@@ -155,7 +156,7 @@ export async function getPropertyTeam(auth: AuthState, context: PropertyContext)
         WHERE property_id = $1 AND active AND code <> 'OWNER'
           AND ($2::boolean OR code <> 'ADMINISTRATOR')
         ORDER BY name`,
-      [context.propertyId, context.roleCode === 'OWNER'],
+      [context.propertyId, context.roleCode === 'OWNER' || auth.isSuperadmin],
     ),
     pool.query<{ used_value: string; limit_value: string | null }>(
       `SELECT coalesce(u.used_value, 0)::text AS used_value, q.limit_value::text
@@ -208,15 +209,16 @@ export async function createPropertyInvitation(
   const invitationToken = issueToken('invite');
   const expiresAt = new Date(Date.now() + env.INVITATION_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
   const created = await inTransaction(async (client) => {
+    await superadminPropertyAccess(client,auth,context);
     const propertyResult = await client.query<{
       account_id: string; property_name: string; owner_user_id: string;
     }>(
       `SELECT p.account_id, p.name AS property_name, p.owner_user_id
          FROM property p
-         JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
-        WHERE p.id = $1 AND p.status = 'ACTIVE' AND p.deleted_at IS NULL
+         JOIN administrative_account aa ON aa.id = p.account_id AND (aa.status = 'ACTIVE' OR $2::boolean)
+        WHERE p.id = $1 AND (p.status = 'ACTIVE' OR $2::boolean) AND p.deleted_at IS NULL
         FOR UPDATE OF aa`,
-      [context.propertyId],
+      [context.propertyId,auth.isSuperadmin],
     );
     const property = propertyResult.rows[0];
     if (!property) throw notFound('La propiedad activa no está disponible.');
@@ -232,7 +234,7 @@ export async function createPropertyInvitation(
     if (selectedRoles.rows.some((role) => role.code === 'OWNER')) {
       throw forbidden('OWNER_ROLE_PROTECTED', 'El rol de propietario no puede asignarse mediante invitación.');
     }
-    if (selectedRoles.rows.some((role) => role.code === 'ADMINISTRATOR') && property.owner_user_id !== auth.userId) {
+    if (selectedRoles.rows.some((role) => role.code === 'ADMINISTRATOR') && property.owner_user_id !== auth.userId && !auth.isSuperadmin) {
       throw forbidden('ADMIN_ROLE_OWNER_ONLY', 'Solo el propietario puede nombrar administradores.');
     }
 
@@ -384,7 +386,7 @@ export async function updatePropertyMembershipStatus(
     if (member.user_id === auth.userId) {
       throw forbidden('SELF_MEMBERSHIP_PROTECTED', 'No puedes suspender ni finalizar tu propio acceso.');
     }
-    if (member.is_administrator && context.roleCode !== 'OWNER') {
+    if (member.is_administrator && context.roleCode !== 'OWNER' && !auth.isSuperadmin) {
       throw forbidden('ADMIN_MEMBERSHIP_OWNER_ONLY', 'Solo el propietario puede modificar a un administrador.');
     }
     if (member.status === 'ENDED' && status !== 'ENDED') {

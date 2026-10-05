@@ -3,6 +3,7 @@ import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
 import {pool} from '../../database/pool.js';
 import {inTransaction} from '../../database/transaction.js';
 import type {AuthState,PropertyContext,RequestMetadata} from '../auth/auth.types.js';
+import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 
 type Kind='TASK'|'EVENT';
 type Input={kind:Kind;activityType:string;title:string;instructions:string|null;
@@ -39,11 +40,11 @@ export async function listAgendaItems(auth:AuthState,context:PropertyContext){
   canView(context);
   return (await pool.query(`${fields} WHERE i.property_id=$1
     AND ((i.kind='TASK' AND $3::boolean) OR (i.kind='EVENT' AND $4::boolean))
-    AND (i.created_by=$2 OR EXISTS (SELECT 1 FROM agenda_participant ap
+    AND ($5::boolean OR i.created_by=$2 OR EXISTS (SELECT 1 FROM agenda_participant ap
       WHERE ap.item_id=i.id AND ap.user_id=$2) OR (i.kind='EVENT' AND i.visibility='ALL'))
     ORDER BY i.scheduled_at ASC,i.id ASC LIMIT 2000`,
     [context.propertyId,auth.userId,allowed(context,'TASK','VIEW'),
-      allowed(context,'EVENT','VIEW')])).rows;
+      allowed(context,'EVENT','VIEW'),auth.isSuperadmin])).rows;
 }
 export async function listAgendaOptions(context:PropertyContext){
   canView(context);
@@ -79,6 +80,7 @@ export async function createAgendaItem(auth:AuthState,context:PropertyContext,in
   if(input.reminderAt&&input.reminderAt>input.scheduledAt)
     throw invalidRequest('AGENDA_REMINDER_DATE','El recordatorio no puede ser posterior al evento.');
   return inTransaction(async client=>{
+    await superadminPropertyAccess(client,auth,context);
     const participants=(await client.query<{id:string}>(`SELECT user_id AS id
       FROM property_membership WHERE property_id=$1 AND status='ACTIVE'
       AND user_id=ANY($2::uuid[])`,[context.propertyId,input.userIds])).rows;
@@ -116,6 +118,7 @@ export async function createAgendaItem(auth:AuthState,context:PropertyContext,in
 export async function agendaAction(auth:AuthState,context:PropertyContext,id:string,
   action:'ACCEPT'|'DECLINE'|'COMPLETE'|'CANCEL',meta:RequestMetadata){
   return inTransaction(async client=>{
+    await superadminPropertyAccess(client,auth,context);
     const item=(await client.query<{kind:Kind;status:string;created_by:string}>(`
       SELECT kind,status,created_by FROM agenda_item WHERE id=$1 AND property_id=$2 FOR UPDATE`,
       [id,context.propertyId])).rows[0];
@@ -134,19 +137,19 @@ export async function agendaAction(auth:AuthState,context:PropertyContext,id:str
     }else if(action==='COMPLETE'){
       if(item.kind!=='TASK'||!allowed(context,'TASK','MANAGE'))
         throw forbidden('AGENDA_COMPLETE_DENIED','Este rol no puede completar la tarea.');
-      if(item.created_by!==auth.userId&&(!participant||participant.response==='DECLINED'))
+      if(item.created_by!==auth.userId&&(!participant||participant.response==='DECLINED')&&!auth.isSuperadmin)
         throw forbidden('AGENDA_COMPLETE_DENIED','No estás asignado a esta tarea.');
-    }else if(item.created_by!==auth.userId||!allowed(context,item.kind,'MANAGE'))
+    }else if((item.created_by!==auth.userId||!allowed(context,item.kind,'MANAGE'))&&!auth.isSuperadmin)
       throw forbidden('AGENDA_CANCEL_DENIED','Solo quien creó el elemento puede cancelarlo.');
     const before=await read(client,auth,context,id);
     if(action==='ACCEPT'||action==='DECLINE')await client.query(`UPDATE agenda_participant
       SET response=$3,responded_at=now() WHERE item_id=$1 AND user_id=$2`,
       [id,auth.userId,action==='ACCEPT'?'ACCEPTED':'DECLINED']);
-    else await client.query(`UPDATE agenda_item SET status=$2,
-      completed_at=CASE WHEN $2='COMPLETED' THEN now() ELSE NULL END,
-      completed_by=CASE WHEN $2='COMPLETED' THEN $3::uuid ELSE NULL END,
-      cancelled_at=CASE WHEN $2='CANCELLED' THEN now() ELSE NULL END,
-      cancelled_by=CASE WHEN $2='CANCELLED' THEN $3::uuid ELSE NULL END WHERE id=$1`,
+    else await client.query(`UPDATE agenda_item SET status=$2::varchar,
+      completed_at=CASE WHEN $2::varchar='COMPLETED' THEN now() ELSE NULL END,
+      completed_by=CASE WHEN $2::varchar='COMPLETED' THEN $3::uuid ELSE NULL END,
+      cancelled_at=CASE WHEN $2::varchar='CANCELLED' THEN now() ELSE NULL END,
+      cancelled_by=CASE WHEN $2::varchar='CANCELLED' THEN $3::uuid ELSE NULL END WHERE id=$1`,
       [id,action==='COMPLETE'?'COMPLETED':'CANCELLED',auth.userId]);
     if(action==='COMPLETE'||action==='CANCEL')await client.query(`INSERT INTO app_notification
       (user_id,property_id,agenda_item_id,kind,title,message)

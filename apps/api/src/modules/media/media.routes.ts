@@ -1,4 +1,4 @@
-import {Router,raw} from 'express';
+import {Router,raw,type Request} from 'express';
 import {z} from 'zod';
 import {asyncHandler} from '../../core/async-handler.js';
 import {invalidRequest} from '../../core/errors.js';
@@ -16,6 +16,7 @@ const distinctIds=z.array(z.uuid()).max(100).refine(value=>new Set(value).size==
 const mediaDetails=z.object({capturedOn:z.iso.date().nullable(),description:z.string().trim().max(2000).nullable(),
   tagIds:distinctIds,animalIds:distinctIds,expectedAttachmentIds:distinctIds.min(1)});
 export const mediaRouter=Router();
+const metadata=(request:Request)=>({ipAddress:request.ip??null,userAgent:request.header('user-agent')?.slice(0,1000)??null});
 mediaRouter.use(authenticate,requirePropertyContext,requireModule('MULTIMEDIA'));
 mediaRouter.get('/usage',requirePermission('MEDIA_VIEW'),asyncHandler(async(req,res)=>{
   res.json({ok:true,data:await usage(req.propertyContext!)});
@@ -36,20 +37,20 @@ mediaRouter.post('/',requirePermission('MEDIA_MANAGE'),raw({type:['image/*','vid
     'Selecciona animales para una foto de animales.');
   const result=await addMedia(req.auth!,req.propertyContext!,query.entityType,query.entityId,
     query.relationCode,kind,req.body,{extraAnimalIds:ids.filter(value=>value!==query.entityId),
-      tagIds:query.tagIds,description:query.description??null,capturedOn:query.capturedOn??null});
+      tagIds:query.tagIds,description:query.description??null,capturedOn:query.capturedOn??null,metadata:metadata(req)});
   res.status(201).json({ok:true,data:result});
 }));
 mediaRouter.patch('/objects/:id',requirePermission('MEDIA_MANAGE'),asyncHandler(async(req,res)=>{
   const objectId=id.parse(req.params).id;
-  const attachmentIds=await updateMediaDetails(req.auth!,req.propertyContext!,objectId,mediaDetails.parse(req.body));
+  const attachmentIds=await updateMediaDetails(req.auth!,req.propertyContext!,objectId,mediaDetails.parse(req.body),metadata(req));
   const attachments=await listMedia(req.propertyContext!,undefined,undefined,objectId);
   res.json({ok:true,data:{attachmentIds,attachments}});
 }));
 mediaRouter.delete('/objects/:id',requirePermission('MEDIA_MANAGE'),asyncHandler(async(req,res)=>{
-  const deletedFromProvider=await removeMediaObject(req.propertyContext!,id.parse(req.params).id);
+  const deletedFromProvider=await removeMediaObject(req.propertyContext!,id.parse(req.params).id,req.auth!,metadata(req));
   res.json({ok:true,data:{deletedFromProvider}});
 }));
 mediaRouter.delete('/:id',requirePermission('MEDIA_MANAGE'),asyncHandler(async(req,res)=>{
-  await removeMedia(req.propertyContext!,id.parse(req.params).id);
+  await removeMedia(req.propertyContext!,id.parse(req.params).id,req.auth!,metadata(req));
   res.status(204).end();
 }));

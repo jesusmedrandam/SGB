@@ -3,6 +3,7 @@ import { forbidden, unauthorized } from '../../core/errors.js';
 import { pool } from '../../database/pool.js';
 import { hashToken } from '../../security/tokens.js';
 import { idempotentMutation } from '../../middleware/idempotency.js';
+import {superadminPropertyContext} from './superadmin-access.js';
 
 function bearerToken(header: string | undefined): string | null {
   if (!header) return null;
@@ -69,6 +70,11 @@ export const requirePropertyContext: RequestHandler = async (request, _response,
     if (!auth) throw unauthorized();
     if (!auth.activePropertyId || !auth.activeRoleId) {
       throw forbidden('PROPERTY_CONTEXT_REQUIRED', 'Selecciona una propiedad y un rol para continuar.');
+    }
+
+    if(auth.isSuperadmin){
+      request.propertyContext=(await superadminPropertyContext(pool,auth,auth.activePropertyId,auth.activeRoleId)).context;
+      next();return;
     }
 
     const contextResult = await pool.query<{
