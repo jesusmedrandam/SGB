@@ -103,7 +103,7 @@ function upload(data:Buffer,key:string,kind:'IMAGE'|'VIDEO'){
 }
 function url(publicId:string,kind:string){configured();return cloudinary.url(publicId,{secure:true,
   resource_type:kind==='VIDEO'?'video':'image',type:'upload'});}
-export async function listMedia(context:PropertyContext,type?:string,id?:string){
+export async function listMedia(context:PropertyContext,type?:string,id?:string,objectId?:string){
   if(type&&id)await inTransaction(client=>validateTarget(client,context,type,id));
   const visible=Object.entries(targets).filter(([,target])=>context.permissions.has(target.permission)
     && (target.module==='CORE'||context.enabledModules.has(target.module))).map(([code])=>code);
@@ -122,8 +122,9 @@ export async function listMedia(context:PropertyContext,type?:string,id?:string)
     LEFT JOIN animal ON animal.id=ma.entity_id AND ma.entity_type='ANIMAL'
     WHERE ma.property_id=$1 AND ma.deleted_at IS NULL AND ma.entity_type=ANY($4::varchar[])
       AND ($2::varchar IS NULL OR ma.entity_type=$2) AND ($3::uuid IS NULL OR ma.entity_id=$3)
+      AND ($5::uuid IS NULL OR ma.storage_object_id=$5)
     ORDER BY COALESCE(ma.captured_on,ma.created_at::date) DESC,ma.created_at DESC LIMIT 500`,
-    [context.propertyId,type??null,id??null,visible]);
+    [context.propertyId,type??null,id??null,visible,objectId??null]);
   return rows.rows.map(({provider_asset_id,...row})=>({...row,byteSize:Number(row.byte_size),
     url:url(provider_asset_id,row.kind),
     thumbnailUrl:row.kind==='IMAGE'?cloudinary.url(provider_asset_id,{secure:true,
@@ -236,6 +237,54 @@ export async function addMedia(auth:AuthState,context:PropertyContext,type:strin
     if(!reused)await pool.query(`UPDATE media_quota_reservation SET status='RELEASED',completed_at=now()
       WHERE id=$1 AND status='RESERVED'`,[reservationId]);
   }
+}
+export async function updateMediaDetails(auth:AuthState,context:PropertyContext,objectId:string,input:{
+  capturedOn:string|null;description:string|null;tagIds:string[];animalIds:string[];expectedAttachmentIds:string[];
+}){
+  if(!context.permissions.has('MEDIA_MANAGE'))throw forbidden('PERMISSION_DENIED','Tu rol no puede editar multimedia.');
+  return inTransaction(async client=>{
+    const accountId=await account(client,context.propertyId);
+    await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
+    const object=await client.query(`SELECT id FROM storage_object WHERE id=$1 AND account_id=$2
+      AND status='AVAILABLE' FOR UPDATE`,[objectId,accountId]);
+    if(!object.rowCount)throw invalidRequest('MEDIA_NOT_FOUND','El archivo no está disponible.');
+    const refs=await client.query<{id:string;entity_type:string;entity_id:string;relation_code:string}>(`
+      SELECT id,entity_type,entity_id,relation_code FROM media_attachment WHERE storage_object_id=$1
+      AND property_id=$2 AND deleted_at IS NULL FOR UPDATE`,[objectId,context.propertyId]);
+    if(!refs.rows.length)throw invalidRequest('MEDIA_NOT_FOUND','El archivo no pertenece a esta propiedad.');
+    if(refs.rows.length!==input.expectedAttachmentIds.length||refs.rows.some(row=>!input.expectedAttachmentIds.includes(row.id)))
+      throw conflict('MEDIA_RELATIONS_CHANGED','Las relaciones cambiaron. Vuelve a abrir la foto antes de editarla.');
+    for(const ref of refs.rows)await validateTarget(client,context,ref.entity_type,ref.entity_id);
+    for(const animalId of input.animalIds)await validateTarget(client,context,'ANIMAL',animalId);
+    if(refs.rows.some(row=>row.entity_type==='ANIMAL'&&row.relation_code!=='GENERAL'&&!input.animalIds.includes(row.entity_id)))
+      throw invalidRequest('MEDIA_ROLE_INVALID','Conserva el animal de la foto de perfil o portada.');
+    if(input.tagIds.length){
+      const tags=await client.query(`SELECT id FROM governed_catalog_item WHERE id=ANY($1::uuid[])
+        AND catalog_code='MEDIA_TAGS' AND deleted_at IS NULL AND (system_defined OR account_id=$2)
+        AND (active OR id IN (SELECT tag_id FROM media_attachment_tag WHERE attachment_id=ANY($3::uuid[])))`,
+        [input.tagIds,accountId,refs.rows.map(row=>row.id)]);
+      if(tags.rowCount!==input.tagIds.length)throw invalidRequest('MEDIA_TAG_INVALID','Selecciona etiquetas disponibles de esta cuenta.');
+    }
+    const retained=refs.rows.filter(row=>row.entity_type!=='ANIMAL'||row.relation_code!=='GENERAL'||input.animalIds.includes(row.entity_id));
+    if(!retained.length&&!input.animalIds.length)throw invalidRequest('MEDIA_TARGET_REQUIRED','Relaciona el archivo con al menos un registro.');
+    const removed=refs.rows.filter(row=>!retained.some(ref=>ref.id===row.id));
+    if(removed.length)await client.query('UPDATE media_attachment SET deleted_at=now() WHERE id=ANY($1::uuid[])',
+      [removed.map(row=>row.id)]);
+    for(const animalId of input.animalIds){
+      if(retained.some(row=>row.entity_type==='ANIMAL'&&row.entity_id===animalId))continue;
+      const added=await client.query<{id:string}>(`INSERT INTO media_attachment(account_id,storage_object_id,
+        property_id,entity_type,entity_id,relation_code,created_by) VALUES($1,$2,$3,'ANIMAL',$4,'GENERAL',$5) RETURNING id`,
+        [accountId,objectId,context.propertyId,animalId,auth.userId]);
+      retained.push({id:added.rows[0]!.id,entity_type:'ANIMAL',entity_id:animalId,relation_code:'GENERAL'});
+    }
+    const ids=retained.map(row=>row.id);
+    await client.query('UPDATE media_attachment SET description=$2,captured_on=$3 WHERE id=ANY($1::uuid[])',
+      [ids,input.description,input.capturedOn]);
+    await client.query('DELETE FROM media_attachment_tag WHERE attachment_id=ANY($1::uuid[])',[ids]);
+    if(input.tagIds.length)await client.query(`INSERT INTO media_attachment_tag(attachment_id,tag_id)
+      SELECT attachment_id,tag_id FROM unnest($1::uuid[]) attachment_id CROSS JOIN unnest($2::uuid[]) tag_id`,[ids,input.tagIds]);
+    return ids;
+  });
 }
 async function deleteReferences(context:PropertyContext,objectId:string,attachmentId?:string){
   const pending=await inTransaction(async client=>{

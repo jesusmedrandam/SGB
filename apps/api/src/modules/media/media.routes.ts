@@ -3,7 +3,7 @@ import {z} from 'zod';
 import {asyncHandler} from '../../core/async-handler.js';
 import {invalidRequest} from '../../core/errors.js';
 import {authenticate,requireModule,requirePermission,requirePropertyContext} from '../auth/auth.middleware.js';
-import {addMedia,listMedia,removeMedia,removeMediaObject,usage} from './media.service.js';
+import {addMedia,listMedia,removeMedia,removeMediaObject,updateMediaDetails,usage} from './media.service.js';
 
 const target=z.object({entityType:z.string().max(60).regex(/^[A-Z_]+$/),entityId:z.uuid()});
 const uploadTarget=target.extend({relationCode:z.string().max(60).regex(/^[A-Z_]+$/).default('GENERAL')});
@@ -12,6 +12,9 @@ const optionalIds=z.string().max(4000).optional().transform(value=>value?value.s
 const photoUpload=z.object({animalIds:optionalIds,tagIds:optionalIds,
   description:z.string().trim().max(2000).optional(),capturedOn:z.iso.date().optional()});
 const id=z.object({id:z.uuid()});
+const distinctIds=z.array(z.uuid()).max(100).refine(value=>new Set(value).size===value.length);
+const mediaDetails=z.object({capturedOn:z.iso.date().nullable(),description:z.string().trim().max(2000).nullable(),
+  tagIds:distinctIds,animalIds:distinctIds,expectedAttachmentIds:distinctIds.min(1)});
 export const mediaRouter=Router();
 mediaRouter.use(authenticate,requirePropertyContext,requireModule('MULTIMEDIA'));
 mediaRouter.get('/usage',requirePermission('MEDIA_VIEW'),asyncHandler(async(req,res)=>{
@@ -35,6 +38,12 @@ mediaRouter.post('/',requirePermission('MEDIA_MANAGE'),raw({type:['image/*','vid
     query.relationCode,kind,req.body,{extraAnimalIds:ids.filter(value=>value!==query.entityId),
       tagIds:query.tagIds,description:query.description??null,capturedOn:query.capturedOn??null});
   res.status(201).json({ok:true,data:result});
+}));
+mediaRouter.patch('/objects/:id',requirePermission('MEDIA_MANAGE'),asyncHandler(async(req,res)=>{
+  const objectId=id.parse(req.params).id;
+  const attachmentIds=await updateMediaDetails(req.auth!,req.propertyContext!,objectId,mediaDetails.parse(req.body));
+  const attachments=await listMedia(req.propertyContext!,undefined,undefined,objectId);
+  res.json({ok:true,data:{attachmentIds,attachments}});
 }));
 mediaRouter.delete('/objects/:id',requirePermission('MEDIA_MANAGE'),asyncHandler(async(req,res)=>{
   const deletedFromProvider=await removeMediaObject(req.propertyContext!,id.parse(req.params).id);
