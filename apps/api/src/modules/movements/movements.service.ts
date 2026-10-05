@@ -118,7 +118,7 @@ export async function listMovementOptions(auth:AuthState,context:PropertyContext
     `SELECT account_id FROM property WHERE id=$1`,[context.propertyId])).rows[0]?.account_id;
   if(!account)throw forbidden('MOVEMENT_DENIED','Selecciona una propiedad válida.');
   const [properties,groups,locations,animals]=await Promise.all([
-    auth.isSuperadmin?pool.query(`SELECT p.id,p.name FROM property p WHERE p.account_id=$1 AND p.deleted_at IS NULL ORDER BY p.name`,[account]):
+    Boolean(context.isSuperadmin)?pool.query(`SELECT p.id,p.name FROM property p WHERE p.account_id=$1 AND p.deleted_at IS NULL ORDER BY p.name`,[account]):
     pool.query(`SELECT DISTINCT p.id,p.name FROM property p
       JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND pm.status='ACTIVE'
       JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=p.id
@@ -133,11 +133,11 @@ export async function listMovementOptions(auth:AuthState,context:PropertyContext
       LEFT JOIN physical_location pl ON pl.id=gla.location_id
       WHERE g.account_id=$1 AND g.active AND ($3::boolean OR g.property_id IN
         (SELECT pm.property_id FROM property_membership pm WHERE pm.user_id=$2 AND pm.status='ACTIVE'))
-      ORDER BY lower(g.name)`,[account,auth.userId,auth.isSuperadmin]),
+      ORDER BY lower(g.name)`,[account,auth.userId,Boolean(context.isSuperadmin)]),
     pool.query(`SELECT id,name,kind,property_id AS "propertyId" FROM physical_location
       WHERE account_id=$1 AND active AND ($3::boolean OR property_id IN
         (SELECT pm.property_id FROM property_membership pm WHERE pm.user_id=$2 AND pm.status='ACTIVE'))
-      ORDER BY lower(name)`,[account,auth.userId,auth.isSuperadmin]),
+      ORDER BY lower(name)`,[account,auth.userId,Boolean(context.isSuperadmin)]),
     pool.query(`SELECT a.id,a.name,a.ear_tag_code AS "earTagCode",
       aga.group_id AS "groupId",ala.location_id AS "locationId" FROM animal a
       LEFT JOIN animal_group_assignment aga ON aga.animal_id=a.id AND aga.ended_at IS NULL
@@ -186,7 +186,7 @@ async function resolve(client:PoolClient,auth:AuthState,context:PropertyContext,
         AND pl.property_id=$3 AND pl.active FOR UPDATE`,
       [destinationLocationId,accountId,input.destinationPropertyId]);
     if(!location.rows[0])throw invalidRequest('MOVEMENT_LOCATION_INVALID','El potrero o corral de destino no está activo.');
-    await requireLocations(client,[context.propertyId,input.destinationPropertyId],auth.isSuperadmin);
+    await requireLocations(client,[context.propertyId,input.destinationPropertyId],Boolean(context.isSuperadmin));
   }
   if(input.kind==='UBICACION'){
     const occupied=await client.query(`SELECT 1 FROM group_location_assignment

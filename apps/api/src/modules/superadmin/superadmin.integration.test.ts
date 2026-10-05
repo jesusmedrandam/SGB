@@ -35,16 +35,51 @@ test('el soporte accede sin membresía, conserva aislamiento, contexto y autor r
     const admin=(await pool.query<{id:string;display_name:string}>(
       'SELECT id,display_name FROM app_user WHERE is_superadmin AND deleted_at IS NULL')).rows[0];
     assert.ok(admin,'Run the CI superadmin bootstrap before integration tests');adminId=admin.id;
-    let token='support-access-'+randomUUID();const refresh='support-refresh-'+randomUUID();
+    let token='support-access-'+randomUUID();let refresh='support-refresh-'+randomUUID();
     await pool.query(`INSERT INTO user_session(user_id,access_token_hash,refresh_token_hash,device_id,access_expires_at,expires_at)
       VALUES($1,$2,$3,$4,now()+interval '15 minutes',now()+interval '1 day')`,[admin.id,hashToken(token),hashToken(refresh),'support-'+randomUUID()]);
     const target={accountId:first.accountId,propertyId:first.propertyId};
     await request(first.token,'POST','/superadmin/support-context',target,403);
     await request(first.token,'GET','/superadmin/overview',undefined,403);
+    await assert.rejects(pool.query('UPDATE user_session SET support_mode=true WHERE access_token_hash=$1',
+      [hashToken(first.token)]),(error:{code?:string})=>error.code==='23514');
     await request(first.token,'POST','/auth/context',{propertyId:second.propertyId,roleId:second.roleId},403);
     await request(token,'POST','/superadmin/support-context',{...target,propertyId:second.propertyId},403);
+    const normal=(await pool.query<{property_id:string;membership_id:string;owner_role:string;viewer_role:string}>(`
+      SELECT pm.property_id,pm.id AS membership_id,owner.id AS owner_role,viewer.id AS viewer_role
+      FROM property_membership pm
+      JOIN property_role owner ON owner.property_id=pm.property_id AND owner.code='OWNER'
+      JOIN property_role viewer ON viewer.property_id=pm.property_id AND viewer.code='VIEWER'
+      WHERE pm.user_id=$1 AND pm.status='ACTIVE' ORDER BY pm.created_at LIMIT 1`,[admin.id])).rows[0];
+    assert.ok(normal,'The auth integration creates the administrator own account');
+    await pool.query(`INSERT INTO membership_role(membership_id,property_id,role_id,assigned_by)
+      VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,[normal.membership_id,normal.property_id,normal.viewer_role,admin.id]);
+    await request(token,'POST','/auth/context',{propertyId:first.propertyId,roleId:first.roleId},403);
+    await request(token,'POST','/auth/context',{propertyId:normal.property_id,roleId:normal.viewer_role});
+    let normalOverview=await request(token,'GET','/auth/me');
+    assert.equal(normalOverview.supportMode,false);assert.equal(normalOverview.supportOwner,null);
+    assert.equal(normalOverview.user.isSuperadmin,true);
+    assert.equal(normalOverview.properties.find((p:any)=>p.id===normal.property_id).roles.find((r:any)=>r.id===normal.viewer_role).code,'VIEWER');
+    await request(token,'POST','/groups',{name:'Viewer must not create'},403);
+    const normalRefreshed=await refreshSession(refresh,metadata);token=normalRefreshed.accessToken;refresh=normalRefreshed.refreshToken;
+    assert.equal((await request(token,'GET','/auth/me')).supportMode,false);
+    await request(token,'POST','/auth/context',{propertyId:normal.property_id,roleId:normal.owner_role});
+    const normalGroup=await request(token,'POST','/groups',{name:'Cambio de usuario normal'},201);
+    const normalEvent=(await request(token,'GET','/audit')).items.find((event:any)=>event.entityId===normalGroup.id);
+    assert.ok(normalEvent);assert.equal(normalEvent.superadminAccess,false);assert.equal(normalEvent.actorName,admin.display_name);
+    // Support in a property where the administrator also belongs still preserves their normal roles.
+    const normalAccount=(await pool.query<{account_id:string}>('SELECT account_id FROM property WHERE id=$1',[normal.property_id])).rows[0]!.account_id;
+    await request(token,'POST','/superadmin/support-context',{accountId:normalAccount,propertyId:normal.property_id});
+    normalOverview=await request(token,'GET','/auth/me');assert.equal(normalOverview.supportMode,true);
+    assert(normalOverview.memberProperties.find((p:any)=>p.id===normal.property_id).roles.some((r:any)=>r.code==='VIEWER'));
+    await request(token,'DELETE','/superadmin/support-context',undefined,204);
+    normalOverview=await request(token,'GET','/auth/me');assert.equal(normalOverview.supportMode,false);
+    assert.equal(normalOverview.activeContext.roleId,normal.owner_role);
+    // Refresh may keep explicit support, but it must never infer it from superadministrator identity.
     const selected=await request(token,'POST','/superadmin/support-context',target);
     assert.equal(selected.roleCode,'SUPERADMIN');
+    await assert.rejects(pool.query('UPDATE user_session SET support_mode=false WHERE access_token_hash=$1',
+      [hashToken(token)]),(error:{code?:string})=>error.code==='23514');
     let overview=await request(token,'GET','/auth/me');
     assert.equal(overview.user.id,admin.id);assert.equal(overview.supportOwner.id,first.id);
     const property=overview.properties.find((item:any)=>item.id===first.propertyId);
@@ -108,8 +143,16 @@ test('el soporte accede sin membresía, conserva aislamiento, contexto y autor r
     await request(token,'POST','/superadmin/support-context',target,403);
     await pool.query('UPDATE app_user SET is_superadmin=true WHERE id=$1',[admin.id]);
     await request(token,'DELETE','/superadmin/support-context',undefined,204);
-    overview=await request(token,'GET','/auth/me');assert.equal(overview.activeContext,null);assert.equal(overview.supportOwner,null);
-    await request(token,'GET','/animals',undefined,403);
+    overview=await request(token,'GET','/auth/me');assert.equal(overview.activeContext.propertyId,normal.property_id);
+    assert.equal(overview.activeContext.roleId,normal.owner_role);assert.equal(overview.supportOwner,null);assert.equal(overview.supportMode,false);
+    await request(token,'POST','/groups',{name:'Usuario después de finalizar soporte'},201);
+    await request(token,'POST','/auth/context',{propertyId:first.propertyId,roleId:first.roleId},403);
+    await request(token,'DELETE','/superadmin/support-context',undefined,204);
+    assert.equal((await request(token,'GET','/auth/me')).activeContext.roleId,normal.owner_role);
+    await request(token,'POST','/superadmin/support-context',target);
+    await request(token,'POST','/auth/context',{propertyId:normal.property_id,roleId:normal.viewer_role});
+    assert.equal((await request(token,'GET','/auth/me')).supportMode,false);
+    await request(token,'POST','/groups',{name:'Viewer after support'},403);
     assert.equal((await request(second.token,'GET',`/animals/${otherAnimal.id}`)).description,null);
   }finally{
     if(adminId)await pool.query('UPDATE app_user SET is_superadmin=true WHERE id=$1',[adminId]);

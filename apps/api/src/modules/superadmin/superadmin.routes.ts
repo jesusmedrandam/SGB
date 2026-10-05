@@ -37,7 +37,7 @@ superadminRouter.use(authenticate, requireSuperadmin);
 const supportTarget=z.object({accountId:z.uuid(),propertyId:z.uuid()});
 superadminRouter.post('/support-context',asyncHandler(async(request,response)=>{
   const {accountId,propertyId}=supportTarget.parse(request.body);
-  const property=await superadminPropertyAccess(pool,request.auth!,{propertyId});
+  const property=await superadminPropertyAccess(pool,{...request.auth!,supportMode:true},{propertyId});
   response.json({ok:true,data:await changeContext(request.auth!,propertyId,property!.role_id,metadata(request),accountId)});
 }));
 superadminRouter.delete('/support-context',asyncHandler(async(request,response)=>{

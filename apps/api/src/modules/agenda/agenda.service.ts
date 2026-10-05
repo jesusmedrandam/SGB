@@ -44,7 +44,7 @@ export async function listAgendaItems(auth:AuthState,context:PropertyContext){
       WHERE ap.item_id=i.id AND ap.user_id=$2) OR (i.kind='EVENT' AND i.visibility='ALL'))
     ORDER BY i.scheduled_at ASC,i.id ASC LIMIT 2000`,
     [context.propertyId,auth.userId,allowed(context,'TASK','VIEW'),
-      allowed(context,'EVENT','VIEW'),auth.isSuperadmin])).rows;
+      allowed(context,'EVENT','VIEW'),Boolean(context.isSuperadmin)])).rows;
 }
 export async function listAgendaOptions(context:PropertyContext){
   canView(context);
@@ -137,9 +137,9 @@ export async function agendaAction(auth:AuthState,context:PropertyContext,id:str
     }else if(action==='COMPLETE'){
       if(item.kind!=='TASK'||!allowed(context,'TASK','MANAGE'))
         throw forbidden('AGENDA_COMPLETE_DENIED','Este rol no puede completar la tarea.');
-      if(item.created_by!==auth.userId&&(!participant||participant.response==='DECLINED')&&!auth.isSuperadmin)
+      if(item.created_by!==auth.userId&&(!participant||participant.response==='DECLINED')&&!Boolean(context.isSuperadmin))
         throw forbidden('AGENDA_COMPLETE_DENIED','No estás asignado a esta tarea.');
-    }else if((item.created_by!==auth.userId||!allowed(context,item.kind,'MANAGE'))&&!auth.isSuperadmin)
+    }else if((item.created_by!==auth.userId||!allowed(context,item.kind,'MANAGE'))&&!Boolean(context.isSuperadmin))
       throw forbidden('AGENDA_CANCEL_DENIED','Solo quien creó el elemento puede cancelarlo.');
     const before=await read(client,auth,context,id);
     if(action==='ACCEPT'||action==='DECLINE')await client.query(`UPDATE agenda_participant

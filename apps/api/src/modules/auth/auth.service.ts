@@ -36,6 +36,7 @@ interface SessionRow extends QueryResultRow {
   email: string;
   display_name: string;
   is_superadmin: boolean;
+  support_mode: boolean;
 }
 
 interface SessionTokens {
@@ -60,7 +61,7 @@ async function initialContext(client: PoolClient, userId: string): Promise<Conte
   const result = await client.query<ContextRow>(
     `SELECT pm.property_id, pr.id AS role_id
        FROM property_membership pm
-       JOIN property p ON p.id = pm.property_id AND p.deleted_at IS NULL
+       JOIN property p ON p.id = pm.property_id AND p.deleted_at IS NULL AND p.status='ACTIVE'
        JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
        JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
        JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = pm.property_id AND pr.active
@@ -86,7 +87,7 @@ async function contextIsValid(
   if (!propertyId && !roleId) return true;
   if (!propertyId || !roleId) return false;
   if(isSuperadmin){
-    try{return Boolean(await superadminPropertyAccess(client,{userId,isSuperadmin},{propertyId,roleId}));}
+    try{return Boolean(await superadminPropertyAccess(client,{userId,isSuperadmin,supportMode:true},{propertyId,roleId}));}
     catch(error){if(error instanceof ApiError&&error.code==='SUPPORT_CONTEXT_DENIED')return false;throw error;}
   }
   const result = await client.query(
@@ -567,7 +568,7 @@ export async function refreshSession(refreshToken: string, metadata: RequestMeta
   const refreshHash = hashToken(refreshToken);
   const outcome = await inTransaction(async (client) => {
     const result = await client.query<SessionRow>(
-      `SELECT s.id, s.user_id, s.active_property_id, s.active_role_id, s.expires_at,
+      `SELECT s.id, s.user_id, s.active_property_id, s.active_role_id, s.support_mode, s.expires_at,
               u.status, u.email, u.display_name, u.is_superadmin
          FROM user_session s
          JOIN app_user u ON u.id = s.user_id AND u.deleted_at IS NULL
@@ -591,7 +592,7 @@ export async function refreshSession(refreshToken: string, metadata: RequestMeta
       session.user_id,
       session.active_property_id,
       session.active_role_id,
-      session.is_superadmin,
+      session.is_superadmin&&session.support_mode,
     );
     const tokens = createSessionTokens();
     const activePropertyId = validContext ? session.active_property_id : null;
@@ -607,7 +608,7 @@ export async function refreshSession(refreshToken: string, metadata: RequestMeta
               active_role_id = $7,
               ip_address = $8,
               user_agent = $9,
-              last_seen_at = now()
+              last_seen_at = now(),support_mode=support_mode AND $10
         WHERE id = $1`,
       [
         session.id,
@@ -619,6 +620,7 @@ export async function refreshSession(refreshToken: string, metadata: RequestMeta
         activeRoleId,
         metadata.ipAddress,
         metadata.userAgent,
+        validContext,
       ],
     );
 
@@ -692,7 +694,7 @@ export async function changeContext(
   expectedAccountId?: string,
 ) {
   return inTransaction(async (client) => {
-    const support=await superadminPropertyAccess(client,auth,{propertyId,roleId});
+    const support=expectedAccountId?await superadminPropertyAccess(client,{...auth,supportMode:true},{propertyId,roleId}):null;
     if(expectedAccountId&&support?.account_id!==expectedAccountId)
       throw forbidden('SUPPORT_CONTEXT_DENIED','La propiedad no pertenece al propietario seleccionado.');
     const result = support?{rows:[{property_name:support.property_name,role_code:'SUPERADMIN',role_name:'Sistema · soporte'}]}:
@@ -709,17 +711,22 @@ export async function changeContext(
     const context = result.rows[0];
     if (!context) throw forbidden('CONTEXT_NOT_ALLOWED', 'No tienes acceso a esa propiedad con el rol indicado.');
 
-    await client.query(
+    const updated=await client.query(
       `UPDATE user_session
-          SET active_property_id = $2, active_role_id = $3, last_seen_at = now()
-        WHERE id = $1 AND revoked_at IS NULL`,
-      [auth.sessionId, propertyId, roleId],
+          SET support_return_property_id=CASE WHEN $4 AND NOT support_mode THEN active_property_id
+                WHEN $4 THEN support_return_property_id ELSE NULL END,
+              support_return_role_id=CASE WHEN $4 AND NOT support_mode THEN active_role_id
+                WHEN $4 THEN support_return_role_id ELSE NULL END,
+              active_property_id = $2, active_role_id = $3,support_mode=$4,last_seen_at = now()
+        WHERE id = $1 AND user_id=$5 AND revoked_at IS NULL`,
+      [auth.sessionId, propertyId, roleId,Boolean(support),auth.userId],
     );
+    if(!updated.rowCount)throw unauthorized();
     await client.query(
       `INSERT INTO audit_event(
          actor_user_id, property_id, active_role_id, action, entity_type, entity_id,
-         after_data, ip_address, user_agent
-       ) VALUES($1,$2,$3,'SESSION_CONTEXT_CHANGED','USER_SESSION',$4,$5,$6,$7)`,
+         after_data, ip_address, user_agent,superadmin_access
+       ) VALUES($1,$2,$3,'SESSION_CONTEXT_CHANGED','USER_SESSION',$4,$5,$6,$7,$8)`,
       [
         auth.userId,
         propertyId,
@@ -728,6 +735,7 @@ export async function changeContext(
         JSON.stringify({ propertyId, roleId, supportMode:Boolean(support), supportOwnerId:support?.owner_user_id??null }),
         metadata.ipAddress,
         metadata.userAgent,
+        Boolean(support),
       ],
     );
 
@@ -744,12 +752,20 @@ export async function changeContext(
 export async function endSupport(auth:AuthState,metadata:RequestMetadata){
   if(!auth.isSuperadmin)throw forbidden('SUPERADMIN_REQUIRED','Esta operación requiere acceso de superadministrador.');
   await inTransaction(async client=>{
-    const previous=await client.query<{active_property_id:string|null;active_role_id:string|null}>(
-      `UPDATE user_session SET active_property_id=NULL,active_role_id=NULL,last_seen_at=now()
-       WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL RETURNING active_property_id,active_role_id`,[auth.sessionId,auth.userId]);
-    if(!previous.rowCount)throw unauthorized();
+    const previous=await client.query<{support_mode:boolean;support_return_property_id:string|null;support_return_role_id:string|null}>(
+      `SELECT support_mode,support_return_property_id,support_return_role_id FROM user_session
+       WHERE id=$1 AND user_id=$2 AND revoked_at IS NULL FOR UPDATE`,[auth.sessionId,auth.userId]);
+    const saved=previous.rows[0];if(!saved)throw unauthorized();
+    if(!saved.support_mode)return;
+    const canReturn=Boolean(saved.support_return_property_id&&saved.support_return_role_id)&&await contextIsValid(
+      client,auth.userId,saved.support_return_property_id,saved.support_return_role_id);
+    const fallback=canReturn?{property_id:saved.support_return_property_id,role_id:saved.support_return_role_id}
+      :await initialContext(client,auth.userId);
+    await client.query(`UPDATE user_session SET active_property_id=$2,active_role_id=$3,support_mode=false,
+      support_return_property_id=NULL,support_return_role_id=NULL,last_seen_at=now() WHERE id=$1`,
+      [auth.sessionId,fallback?.property_id??null,fallback?.role_id??null]);
     await client.query(`INSERT INTO audit_event(actor_user_id,property_id,active_role_id,action,entity_type,entity_id,
-      before_data,ip_address,user_agent) VALUES($1,$2,$3,'SUPERADMIN_SUPPORT_ENDED','USER_SESSION',$4,$5,$6,$7)`,
+      before_data,ip_address,user_agent,superadmin_access) VALUES($1,$2,$3,'SUPERADMIN_SUPPORT_ENDED','USER_SESSION',$4,$5,$6,$7,true)`,
       [auth.userId,auth.activePropertyId,auth.activeRoleId,auth.sessionId,
         JSON.stringify({propertyId:auth.activePropertyId,roleId:auth.activeRoleId}),metadata.ipAddress,metadata.userAgent]);
   });
@@ -847,10 +863,13 @@ export async function getSessionOverview(auth: AuthState) {
   );
   const owned = ownedAccount.rows[0];
 
+  const memberProperties=[...properties.values()];
   let supportOwner:null|{id:string;name:string;email:string}=null;
-  if(auth.isSuperadmin&&auth.activePropertyId&&auth.activeRoleId){
+  let supportAccountId:string|null=null;
+  if(auth.isSuperadmin&&auth.supportMode&&auth.activePropertyId&&auth.activeRoleId){
     const support=await superadminPropertyContext(pool,auth,auth.activePropertyId,auth.activeRoleId);
     supportOwner=support.owner;
+    supportAccountId=support.accountId;
     properties.set(auth.activePropertyId,{id:auth.activePropertyId,name:support.context.propertyName,
       timezone:support.timezone,isOwner:support.owner.id===auth.userId,
       roles:[{id:support.context.roleId,code:support.context.roleCode,name:support.context.roleName,permissions:[...support.context.permissions]}],
@@ -868,6 +887,7 @@ export async function getSessionOverview(auth: AuthState) {
       ? { propertyId: auth.activePropertyId, roleId: auth.activeRoleId }
       : null,
     supportOwner,
+    supportMode:Boolean(supportOwner),supportAccountId,memberProperties,
     properties: [...properties.values()],
     enabledUserModules: userModules.rows.map((row) => row.module_code),
     ownedAccount: owned ? {

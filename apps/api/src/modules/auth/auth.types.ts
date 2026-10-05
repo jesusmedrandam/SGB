@@ -4,6 +4,7 @@ export interface AuthState {
   email: string;
   displayName: string;
   isSuperadmin: boolean;
+  supportMode?: boolean;
   activePropertyId: string | null;
   activeRoleId: string | null;
 }

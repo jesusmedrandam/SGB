@@ -166,7 +166,7 @@ export async function addMedia(auth:AuthState,context:PropertyContext,type:strin
   await inTransaction(async client=>{
     await superadminPropertyAccess(client,auth,context);
     for(const targetId of ids)await validateTarget(client,context,type,targetId);
-    accountId=await account(client,context.propertyId,auth.isSuperadmin);
+    accountId=await account(client,context.propertyId,Boolean(context.isSuperadmin));
     if(options.tagIds?.length){
       const tags=await client.query(`SELECT id FROM governed_catalog_item
         WHERE id=ANY($1::uuid[]) AND catalog_code='MEDIA_TAGS' AND active AND deleted_at IS NULL
@@ -259,7 +259,7 @@ export async function updateMediaDetails(auth:AuthState,context:PropertyContext,
   if(!context.permissions.has('MEDIA_MANAGE'))throw forbidden('PERMISSION_DENIED','Tu rol no puede editar multimedia.');
   return inTransaction(async client=>{
     await superadminPropertyAccess(client,auth,context);
-    const accountId=await account(client,context.propertyId,auth.isSuperadmin);
+    const accountId=await account(client,context.propertyId,Boolean(context.isSuperadmin));
     await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
     const object=await client.query(`SELECT id FROM storage_object WHERE id=$1 AND account_id=$2
       AND status='AVAILABLE' FOR UPDATE`,[objectId,accountId]);

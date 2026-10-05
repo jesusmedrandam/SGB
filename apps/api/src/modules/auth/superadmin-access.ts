@@ -4,8 +4,8 @@ import type {AuthState,PropertyContext} from './auth.types.js';
 
 // Recheck the real actor inside each write transaction; never impersonate the owner.
 export async function superadminPropertyAccess(client:Pick<PoolClient,'query'>,
-  auth:Pick<AuthState,'userId'|'isSuperadmin'>,context:{propertyId:string;roleId?:string|null}){
-  if(!auth.isSuperadmin)return null;
+  auth:Pick<AuthState,'userId'|'isSuperadmin'|'supportMode'>,context:{propertyId:string;roleId?:string|null}){
+  if(!auth.isSuperadmin||!auth.supportMode)return null;
   const result=await client.query<{account_id:string;owner_user_id:string;owner_name:string;owner_email:string;
     property_name:string;timezone:string;role_id:string;today:string;max_days:number}>(`
     SELECT p.account_id,p.owner_user_id,owner.display_name AS owner_name,owner.email::text AS owner_email,
@@ -19,11 +19,12 @@ export async function superadminPropertyAccess(client:Pick<PoolClient,'query'>,
     WHERE p.id=$1 AND p.deleted_at IS NULL FOR SHARE OF p,aa,actor,pr`,
     [context.propertyId,auth.userId,context.roleId??null]);
   if(!result.rows[0])throw forbidden('SUPPORT_CONTEXT_DENIED','La propiedad o el acceso de superadministrador ya no están disponibles.');
+  await client.query("SELECT set_config('sgb.superadmin_support','true',true)");
   return result.rows[0];
 }
 
 export async function superadminPropertyContext(client:Pick<PoolClient,'query'>,
-  auth:Pick<AuthState,'userId'|'isSuperadmin'>,propertyId:string,roleId?:string|null){
+  auth:Pick<AuthState,'userId'|'isSuperadmin'|'supportMode'>,propertyId:string,roleId?:string|null){
   const property=await superadminPropertyAccess(client,auth,{propertyId,roleId:roleId??null});
   if(!property)throw forbidden('SUPERADMIN_REQUIRED','Esta operación requiere acceso de superadministrador.');
   const permissions=await client.query<{code:string}>('SELECT code FROM permission_catalog ORDER BY code');
@@ -33,5 +34,5 @@ export async function superadminPropertyContext(client:Pick<PoolClient,'query'>,
     roleCode:'SUPERADMIN',roleName:'Sistema · soporte',isSuperadmin:true,
     permissions:new Set(permissions.rows.map(row=>row.code)),enabledModules:new Set(modules.rows.map(row=>row.code)),
     enabledSpecies:new Set(species.rows.map(row=>row.code))};
-  return {context,owner:{id:property.owner_user_id,name:property.owner_name,email:property.owner_email},timezone:property.timezone};
+  return {context,owner:{id:property.owner_user_id,name:property.owner_name,email:property.owner_email},timezone:property.timezone,accountId:property.account_id};
 }

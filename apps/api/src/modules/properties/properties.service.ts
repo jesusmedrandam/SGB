@@ -168,7 +168,7 @@ export async function createAccountProperty(auth: AuthState, context: PropertyCo
        FROM administrative_account aa
        JOIN property p ON p.account_id = aa.id
        WHERE p.id = $1 AND ($2::boolean OR aa.status='ACTIVE') FOR UPDATE OF aa`,
-      [context.propertyId,auth.isSuperadmin],
+      [context.propertyId,Boolean(context.isSuperadmin)],
     );
     const row = account.rows[0];
     if (!row) throw forbidden('ACCOUNT_UNAVAILABLE', 'La cuenta administrativa no está disponible.');
@@ -198,7 +198,7 @@ export async function createAccountProperty(auth: AuthState, context: PropertyCo
     );
     if (duplicate.rowCount) throw conflict('PROPERTY_NAME_TAKEN', 'Ya existe una propiedad con ese nombre en esta cuenta.');
     const created = await seedProperty(client, {
-      accountId: row.id, ownerId: row.owner_user_id, creatorId: auth.userId, name,creatorIsSuperadmin:auth.isSuperadmin,
+      accountId: row.id, ownerId: row.owner_user_id, creatorId: auth.userId, name,creatorIsSuperadmin:Boolean(context.isSuperadmin),
     });
     await activateSession(client, auth, created.propertyId, created.roleId);
     await record(client, auth, metadata, 'PROPERTY_CREATED', 'PROPERTY', created.propertyId,
@@ -214,7 +214,7 @@ export async function updatePropertyModule(auth: AuthState, context: PropertyCon
       `SELECT aa.id FROM administrative_account aa
        JOIN property p ON p.account_id = aa.id
        WHERE p.id = $1 AND ($2::boolean OR aa.status='ACTIVE') FOR UPDATE OF aa`,
-      [context.propertyId,auth.isSuperadmin],
+      [context.propertyId,Boolean(context.isSuperadmin)],
     );
     if (!account.rows[0]) throw forbidden('ACCOUNT_UNAVAILABLE', 'La cuenta administrativa no está disponible.');
     const grant = (await superadminPropertyAccess(client,auth,context))?{rowCount:1}:await client.query(

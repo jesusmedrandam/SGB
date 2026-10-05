@@ -23,11 +23,12 @@ export const authenticate: RequestHandler = async (request, response, next) => {
       email: string;
       display_name: string;
       is_superadmin: boolean;
+      support_mode: boolean;
       active_property_id: string | null;
       active_role_id: string | null;
     }>(
       `SELECT s.id AS session_id, u.id AS user_id, u.email, u.display_name,
-              u.is_superadmin, s.active_property_id, s.active_role_id
+              u.is_superadmin, s.support_mode, s.active_property_id, s.active_role_id
          FROM user_session s
          JOIN app_user u ON u.id = s.user_id
         WHERE s.access_token_hash = $1
@@ -47,6 +48,7 @@ export const authenticate: RequestHandler = async (request, response, next) => {
       email: row.email,
       displayName: row.display_name,
       isSuperadmin: row.is_superadmin,
+      supportMode: row.support_mode,
       activePropertyId: row.active_property_id,
       activeRoleId: row.active_role_id,
     };
@@ -72,7 +74,7 @@ export const requirePropertyContext: RequestHandler = async (request, _response,
       throw forbidden('PROPERTY_CONTEXT_REQUIRED', 'Selecciona una propiedad y un rol para continuar.');
     }
 
-    if(auth.isSuperadmin){
+    if(auth.isSuperadmin&&auth.supportMode){
       request.propertyContext=(await superadminPropertyContext(pool,auth,auth.activePropertyId,auth.activeRoleId)).context;
       next();return;
     }

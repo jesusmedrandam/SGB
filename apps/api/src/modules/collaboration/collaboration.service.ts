@@ -156,7 +156,7 @@ export async function getPropertyTeam(auth: AuthState, context: PropertyContext)
         WHERE property_id = $1 AND active AND code <> 'OWNER'
           AND ($2::boolean OR code <> 'ADMINISTRATOR')
         ORDER BY name`,
-      [context.propertyId, context.roleCode === 'OWNER' || auth.isSuperadmin],
+      [context.propertyId, context.roleCode === 'OWNER' || Boolean(context.isSuperadmin)],
     ),
     pool.query<{ used_value: string; limit_value: string | null }>(
       `SELECT coalesce(u.used_value, 0)::text AS used_value, q.limit_value::text
@@ -218,7 +218,7 @@ export async function createPropertyInvitation(
          JOIN administrative_account aa ON aa.id = p.account_id AND (aa.status = 'ACTIVE' OR $2::boolean)
         WHERE p.id = $1 AND (p.status = 'ACTIVE' OR $2::boolean) AND p.deleted_at IS NULL
         FOR UPDATE OF aa`,
-      [context.propertyId,auth.isSuperadmin],
+      [context.propertyId,Boolean(context.isSuperadmin)],
     );
     const property = propertyResult.rows[0];
     if (!property) throw notFound('La propiedad activa no está disponible.');
@@ -234,7 +234,7 @@ export async function createPropertyInvitation(
     if (selectedRoles.rows.some((role) => role.code === 'OWNER')) {
       throw forbidden('OWNER_ROLE_PROTECTED', 'El rol de propietario no puede asignarse mediante invitación.');
     }
-    if (selectedRoles.rows.some((role) => role.code === 'ADMINISTRATOR') && property.owner_user_id !== auth.userId && !auth.isSuperadmin) {
+    if (selectedRoles.rows.some((role) => role.code === 'ADMINISTRATOR') && property.owner_user_id !== auth.userId && !Boolean(context.isSuperadmin)) {
       throw forbidden('ADMIN_ROLE_OWNER_ONLY', 'Solo el propietario puede nombrar administradores.');
     }
 
@@ -386,7 +386,7 @@ export async function updatePropertyMembershipStatus(
     if (member.user_id === auth.userId) {
       throw forbidden('SELF_MEMBERSHIP_PROTECTED', 'No puedes suspender ni finalizar tu propio acceso.');
     }
-    if (member.is_administrator && context.roleCode !== 'OWNER' && !auth.isSuperadmin) {
+    if (member.is_administrator && context.roleCode !== 'OWNER' && !Boolean(context.isSuperadmin)) {
       throw forbidden('ADMIN_MEMBERSHIP_OWNER_ONLY', 'Solo el propietario puede modificar a un administrador.');
     }
     if (member.status === 'ENDED' && status !== 'ENDED') {
