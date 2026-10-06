@@ -5,6 +5,7 @@ export const conditionSchema=z.object({animalId:z.uuid(),kind:z.string().trim().
   expectedVersion:z.number().int().positive().optional()});
 export const resolutionSchema=z.object({resolvedOn:z.iso.date(),
   expectedVersion:z.number().int().positive().optional()});
+const routeSchema=z.union([z.enum(['ORAL','INTRAMUSCULAR','SUBCUTANEA','INTRAVENOSA','TOPICA','OTRA']),z.uuid()]);
 export const medicineSchema=z.object({
   name:z.string().trim().min(2).max(160),
   kind:z.enum(['VACUNA','DESPARASITACION','ENFERMEDAD','OTRO']),
@@ -15,10 +16,19 @@ export const medicineSchema=z.object({
   indications:z.string().trim().max(2000).nullable().optional(),
   withdrawalMilkDays:z.number().int().min(0).max(10000).default(0),
   withdrawalMeatDays:z.number().int().min(0).max(10000).default(0),
+  administrationRoutes:z.array(routeSchema).min(1).max(30).optional(),
+  doseAmount:z.number().finite().min(0.000001).max(1000000).nullable().optional(),
+  doseWeight:z.number().finite().min(0.000001).max(1000000).nullable().optional(),
+  doseWeightUnitCode:z.enum(['KILOGRAM','POUND']).nullable().optional(),
+}).superRefine((input,ctx)=>{
+  if((input.doseWeight!=null)!==(input.doseWeightUnitCode!=null)||input.doseWeight!=null&&input.doseAmount==null)
+    ctx.addIssue({code:'custom',message:'La dosis por peso necesita cantidad, peso base y unidad de peso.'});
+  if(input.administrationRoutes&&new Set(input.administrationRoutes).size!==input.administrationRoutes.length)
+    ctx.addIssue({code:'custom',message:'Las vías de administración no pueden repetirse.'});
 });
 export const campaignSchema=z.object({
   medicineId:z.uuid(),
-  administrationRoute:z.enum(['ORAL','INTRAMUSCULAR','SUBCUTANEA','INTRAVENOSA','TOPICA','OTRA']),
+  administrationRoute:routeSchema,
   selectionMode:z.enum(['TODOS','GRUPO','MANUAL']),
   groupId:z.uuid().nullable().optional(),
   appliedOn:z.iso.date(), responsible:z.string().trim().max(200).nullable().optional(),

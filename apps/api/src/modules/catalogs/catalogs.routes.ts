@@ -6,6 +6,8 @@ import {
   catalogItemParamsSchema, catalogItemStateSchema, catalogParamsSchema, createCatalogItemSchema,
 } from './catalogs.schemas.js';
 import { createCatalogItem, getCatalogReference, listCatalogItems, setCatalogItemActive } from './catalogs.service.js';
+import {createMedicine,listMedicines} from '../health/health.service.js';
+import {medicineSchema} from '../health/health.schemas.js';
 
 const metadata = (request: Request): RequestMetadata => ({
   ipAddress: request.ip || null, userAgent: request.header('user-agent')?.slice(0, 1000) ?? null,
@@ -13,6 +15,13 @@ const metadata = (request: Request): RequestMetadata => ({
 
 export const catalogsRouter = Router();
 catalogsRouter.use(authenticate, requirePropertyContext);
+catalogsRouter.get('/medicines',requirePermission('CATALOG_VIEW'),asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await listMedicines(request.propertyContext!)});
+}));
+catalogsRouter.post('/medicines',requirePermission('CATALOG_MANAGE'),asyncHandler(async(request,response)=>{
+  response.status(201).json({ok:true,data:await createMedicine(request.auth!,request.propertyContext!,
+    medicineSchema.parse(request.body),metadata(request),'CATALOG_MANAGE')});
+}));
 catalogsRouter.get('/reference', requirePermission('CATALOG_VIEW'), asyncHandler(async (request, response) => {
   response.json({ ok: true, data: await getCatalogReference(request.propertyContext!) });
 }));

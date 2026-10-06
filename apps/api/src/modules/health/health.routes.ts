@@ -30,7 +30,7 @@ healthRouter.post('/conditions/:id/resolve',requirePermission('HEALTH_MANAGE'),a
 healthRouter.get('/medicines',requirePermission('HEALTH_VIEW'),asyncHandler(async(request,response)=>{
   response.json({ok:true,data:await listMedicines(request.propertyContext!)});
 }));
-healthRouter.post('/medicines',requirePermission('HEALTH_MANAGE'),asyncHandler(async(request,response)=>{
+healthRouter.post(['/medicines','/medicines/structured'],requirePermission('HEALTH_MANAGE'),asyncHandler(async(request,response)=>{
   response.status(201).json({ok:true,data:await createMedicine(request.auth!,request.propertyContext!,
     medicineSchema.parse(request.body),metadata(request))});
 }));
