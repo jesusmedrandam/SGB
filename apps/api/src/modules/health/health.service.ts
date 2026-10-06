@@ -37,7 +37,8 @@ function medicine(row:Record<string,unknown>){return {
   withdrawalMeatDays:row.withdrawal_meat_days,active:row.active,
   administrationRoutes:row.administration_routes,
   doseAmount:row.dose_amount==null?null:Number(row.dose_amount),
-  doseWeight:row.dose_weight==null?null:Number(row.dose_weight),doseWeightUnitCode:row.dose_weight_unit_code};}
+  doseWeight:row.dose_weight==null?null:Number(row.dose_weight),doseWeightUnitCode:row.dose_weight_unit_code,
+  doseClassificationRanges:row.dose_classification_ranges??[]};}
 async function validateRoutes(client:PoolClient,accountId:string,routes:string[]){
   const valid=await client.query(`SELECT COALESCE(item_code,id::text) AS code FROM governed_catalog_item
     WHERE catalog_code='ADMINISTRATION_ROUTES' AND active AND deleted_at IS NULL
@@ -68,12 +69,12 @@ export async function createMedicine(auth:AuthState,context:PropertyContext,inpu
     }
     const result=await client.query(`INSERT INTO health_medicine(account_id,name,kind,active_ingredient,
       default_unit_code,suggested_dose,indications,withdrawal_milk_days,withdrawal_meat_days,created_by,
-      treatment_catalog_item_id,administration_routes,dose_amount,dose_weight,dose_weight_unit_code)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+      treatment_catalog_item_id,administration_routes,dose_amount,dose_weight,dose_weight_unit_code,dose_classification_ranges)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb) RETURNING *`,
       [account_id,input.name,input.kind,input.activeIngredient??null,input.defaultUnitCode,
         input.suggestedDose??null,input.indications??null,input.withdrawalMilkDays,
         input.withdrawalMeatDays,auth.userId,input.treatmentCatalogItemId??null,administrationRoutes,
-        input.doseAmount??null,input.doseWeight??null,input.doseWeightUnitCode??null]);
+        input.doseAmount??null,input.doseWeight??null,input.doseWeightUnitCode??null,JSON.stringify(input.doseClassificationRanges??[])]);
     const created=medicine(result.rows[0]!);
     await healthAudit(client,auth,context,metadata,'HEALTH_MEDICINE_CREATED','HEALTH_MEDICINE',
       result.rows[0]!.id,null,created);
@@ -81,13 +82,15 @@ export async function createMedicine(auth:AuthState,context:PropertyContext,inpu
   });
 }
 export async function listHealthOptions(context:PropertyContext){
-  const [animals,groups,units]=await Promise.all([
+  const [animals,groups,units,classifications]=await Promise.all([
     pool.query(`SELECT a.id,a.name,a.ear_tag_code AS "earTagCode",aga.group_id AS "groupId",
       COALESCE(w.weight_kg,CASE WHEN a.initial_weight_unit_code='POUND' THEN a.initial_weight*0.45359237
         ELSE a.initial_weight END)::double precision AS "weightKg",
       COALESCE(w.weighed_on,a.entry_date)::text AS "weightOn",
-      CASE WHEN w.weight_kg IS NOT NULL THEN 'WEIGHING' ELSE 'INITIAL' END AS "weightSource"
-      FROM animal a LEFT JOIN animal_group_assignment aga ON aga.animal_id=a.id AND aga.ended_at IS NULL
+      CASE WHEN w.weight_kg IS NOT NULL THEN 'WEIGHING' ELSE 'INITIAL' END AS "weightSource",
+      classify_animal(a.id,(now() AT TIME ZONE p.timezone)::date) AS "classificationCode"
+      FROM animal a JOIN property p ON p.id=a.property_id
+      LEFT JOIN animal_group_assignment aga ON aga.animal_id=a.id AND aga.ended_at IS NULL
       LEFT JOIN LATERAL (SELECT CASE WHEN unit_code='POUND' THEN weight*0.45359237 ELSE weight END AS weight_kg,weighed_on
         FROM animal_weighing WHERE animal_id=a.id AND voided_at IS NULL
         ORDER BY weighed_on DESC,created_at DESC,id DESC LIMIT 1) w ON true
@@ -98,8 +101,11 @@ export async function listHealthOptions(context:PropertyContext){
     pool.query(`SELECT u.code,u.name,u.symbol FROM allowed_context_unit acu
       JOIN measurement_unit u ON u.code=acu.unit_code AND u.active
       WHERE acu.context_code='MEDICINE_DOSE' ORDER BY acu.sort_order`),
+    pool.query(`SELECT c.code,COALESCE(n.name,c.name) AS name FROM animal_classification_catalog c
+      LEFT JOIN account_animal_classification_name n ON n.code=c.code
+        AND n.account_id=(SELECT account_id FROM property WHERE id=$1) ORDER BY c.code`,[context.propertyId]),
   ]);
-  return {animals:animals.rows,groups:groups.rows,units:units.rows,
+  return {animals:animals.rows,groups:groups.rows,units:units.rows,classifications:classifications.rows,
     administrationRoutes:await listCatalogItems(context,'ADMINISTRATION_ROUTES')};
 }
 const fields=`c.id,c.medicine_id AS "medicineId",m.name AS "medicineName",m.kind,

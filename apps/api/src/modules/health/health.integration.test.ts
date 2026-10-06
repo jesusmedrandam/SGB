@@ -122,10 +122,34 @@ test('sanidad respeta propiedad, dosis, selección, borradores y aplicación ún
     await voidWeighing(auth,context,weighing!.id,weighing!.version,metadata);
     weightedAnimal=(await listHealthOptions(context)).animals.find(animal=>animal.id===second.id)!;
     assert.equal(weightedAnimal.weightKg,null);
+    assert.equal(medicineSchema.safeParse({...reference,defaultUnitCode:''}).success,false);
+    const doseClassificationRanges=[{classificationCode:'VACA' as const,min:5,max:10},
+      {classificationCode:'TERNERO' as const,min:3,max:5}];
+    const classifiedInput={...reference,name:'Referencia por clasificación',doseAmount:null,doseWeight:null,
+      doseWeightUnitCode:null,doseClassificationRanges};
+    assert.equal(medicineSchema.safeParse(classifiedInput).success,true);
+    for(const invalid of [
+      {...classifiedInput,doseClassificationRanges:[{classificationCode:'VACA',min:10,max:5}]},
+      {...classifiedInput,doseClassificationRanges:[doseClassificationRanges[0],doseClassificationRanges[0]]},
+      {...classifiedInput,doseClassificationRanges:[{classificationCode:'UNKNOWN',min:1,max:2}]},
+      {...classifiedInput,doseClassificationRanges:[{classificationCode:'VACA',min:0,max:2}]},
+      {...classifiedInput,doseAmount:1},
+    ])assert.equal(medicineSchema.safeParse(invalid).success,false);
+    const classified=await createMedicine(auth,context,classifiedInput,metadata);
+    assert.deepEqual(classified.doseClassificationRanges,doseClassificationRanges);
+    assert.deepEqual((await listMedicines(context)).find(item=>item.id===classified.id)?.doseClassificationRanges,doseClassificationRanges);
+    const classificationOptions=await listHealthOptions(context);
+    assert.equal(classificationOptions.classifications.length,6);
+    assert.ok(classificationOptions.animals.every(animal=>'classificationCode' in animal));
+    assert.equal(classificationOptions.units.length,6);
+    const referenceCampaign=await createCampaign(auth,context,{...base,medicineId:classified.id as string,
+      administrationRoute:'ORAL',selectionMode:'MANUAL',groupId:null,animals:[{...base.animals[1]!,dose:12}]},metadata);
+    assert.equal(referenceCampaign.animals[0].dose,12); // El rango es referencial: se admite otra cantidad.
     await pool.query(`UPDATE administrative_account SET max_properties=2 WHERE id=(SELECT account_id FROM property WHERE id=$1)`,[property.id]);
     const extra=await createAccountProperty(auth,context,`Otra finca ${suffix}`,metadata);
     const extraContext={...context,propertyId:extra.propertyId,roleId:extra.roleId};
     assert.ok((await listMedicines(extraContext)).some(item=>item.id===weighted.id));
+    assert.ok((await listMedicines(extraContext)).some(item=>item.id===classified.id));
     assert.ok((await listCatalogItems(extraContext,'ADMINISTRATION_ROUTES')).some(item=>item.id===customRoute.id));
     assert.equal((await pool.query(`SELECT actor_user_id FROM audit_event WHERE entity_id=$1 AND action='HEALTH_MEDICINE_CREATED'`,[weighted.id])).rows[0]?.actor_user_id,auth.userId);
   }finally{await pool.end();}

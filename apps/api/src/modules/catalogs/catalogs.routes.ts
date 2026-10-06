@@ -18,7 +18,7 @@ catalogsRouter.use(authenticate, requirePropertyContext);
 catalogsRouter.get('/medicines',requirePermission('CATALOG_VIEW'),asyncHandler(async(request,response)=>{
   response.json({ok:true,data:await listMedicines(request.propertyContext!)});
 }));
-catalogsRouter.post('/medicines',requirePermission('CATALOG_MANAGE'),asyncHandler(async(request,response)=>{
+catalogsRouter.post(['/medicines','/medicines/classification'],requirePermission('CATALOG_MANAGE'),asyncHandler(async(request,response)=>{
   response.status(201).json({ok:true,data:await createMedicine(request.auth!,request.propertyContext!,
     medicineSchema.parse(request.body),metadata(request),'CATALOG_MANAGE')});
 }));
