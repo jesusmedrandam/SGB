@@ -52,18 +52,21 @@ app.use((request, response, next) => {
 
 app.get('/health', (_request, response) => {
   response.json({ ok: true, service: 'sgb-api', version: '2.0.0-alpha.1',
-    capabilities:['superadmin-support','media-details','selective-offline-media','explicit-support-mode','medicine-weight-dose'] });
+    capabilities:['superadmin-support','media-details','selective-offline-media','explicit-support-mode','medicine-weight-dose','medicine-classification-dose'] });
 });
 
 app.get('/health/ready', asyncHandler(async (_request, response) => {
-  const result=await pool.query<{support_ready:boolean;support_modes_ready:boolean;medicine_doses_ready:boolean}>(`SELECT EXISTS(
+  const result=await pool.query<{support_ready:boolean;support_modes_ready:boolean;medicine_doses_ready:boolean;medicine_classification_doses_ready:boolean}>(`SELECT EXISTS(
     SELECT 1 FROM pg_trigger WHERE tgname='audit_event_mark_superadmin' AND NOT tgisinternal
   ) AS support_ready,EXISTS(SELECT 1 FROM information_schema.columns
     WHERE table_schema='public' AND table_name='user_session' AND column_name='support_mode') AS support_modes_ready,
     EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='health_medicine'
-      AND column_name='dose_weight') AS medicine_doses_ready`);
+      AND column_name='dose_weight') AS medicine_doses_ready,
+    EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='health_medicine'
+      AND column_name='dose_classification_ranges') AS medicine_classification_doses_ready`);
   response.json({ ok: true, database: 'ready',supportReady:result.rows[0]?.support_ready===true,
-    supportModesReady:result.rows[0]?.support_modes_ready===true,medicineDosesReady:result.rows[0]?.medicine_doses_ready===true });
+    supportModesReady:result.rows[0]?.support_modes_ready===true,medicineDosesReady:result.rows[0]?.medicine_doses_ready===true,
+    medicineClassificationDosesReady:result.rows[0]?.medicine_classification_doses_ready===true });
 }));
 
 app.use('/auth', authRouter);

@@ -35,3 +35,27 @@ comando actual de Render (`node apps/api/dist/scripts/migrate.js && npm run star
 Validación: migración sobre las 33 migraciones anteriores, once pruebas de
 integración, aislamiento y permisos, vías personalizadas, pesajes anulados,
 conversión de libras, persistencia de referencia y auditoría del autor.
+
+## Referencias por clasificación (0035)
+
+`doseClassificationRanges` permite configurar un mínimo y máximo para cada
+clasificación existente (VACA, VACONA, TERNERA, TORO, TORETE o TERNERO). Se usan
+los nombres personalizados y la clasificación calculada del inventario.
+Los rangos se excluyen de la referencia fija o por peso y no admiten
+clasificaciones repetidas, cantidades no positivas ni máximos menores al mínimo.
+El tratamiento muestra el intervalo y requiere aceptar una cantidad manual;
+no elige automáticamente un extremo. Una cantidad diferente también es válida.
+Sin peso, se muestra la configuración conservada del medicamento.
+
+Las altas con rangos usan `/health-records/medicines/classification` o
+`/catalogs/medicines/classification`. Una API anterior rechazará estas rutas;
+el pendiente se conserva y nunca se descartan los rangos silenciosamente.
+La migración `0035_medicine_classification_doses.sql` añade una columna JSONB
+con valor inicial vacío para todos los medicamentos existentes. Mantiene los
+permisos, el aislamiento por cuenta y la auditoría del autor real.
+`/health/ready` informa `medicineClassificationDosesReady`.
+
+Android alpha.9 usa el mismo formulario en Sanidad y Catálogos, exige seleccionar
+una unidad y dispone de las seis unidades oficiales aunque la descarga sea
+anterior. Catálogos incluye «Unidades de dosis». Una actualización del caché
+refresca los registros sanitarios sin reiniciar el formulario abierto.

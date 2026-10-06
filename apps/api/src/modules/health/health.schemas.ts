@@ -6,6 +6,11 @@ export const conditionSchema=z.object({animalId:z.uuid(),kind:z.string().trim().
 export const resolutionSchema=z.object({resolvedOn:z.iso.date(),
   expectedVersion:z.number().int().positive().optional()});
 const routeSchema=z.union([z.enum(['ORAL','INTRAMUSCULAR','SUBCUTANEA','INTRAVENOSA','TOPICA','OTRA']),z.uuid()]);
+const classificationRangeSchema=z.object({
+  classificationCode:z.enum(['VACA','VACONA','TERNERA','TORO','TORETE','TERNERO']),
+  min:z.number().finite().min(0.000001).max(1000000),
+  max:z.number().finite().min(0.000001).max(1000000),
+}).refine(input=>input.max>=input.min,{message:'El máximo debe ser mayor o igual al mínimo.'});
 export const medicineSchema=z.object({
   name:z.string().trim().min(2).max(160),
   kind:z.enum(['VACUNA','DESPARASITACION','ENFERMEDAD','OTRO']),
@@ -20,7 +25,13 @@ export const medicineSchema=z.object({
   doseAmount:z.number().finite().min(0.000001).max(1000000).nullable().optional(),
   doseWeight:z.number().finite().min(0.000001).max(1000000).nullable().optional(),
   doseWeightUnitCode:z.enum(['KILOGRAM','POUND']).nullable().optional(),
+  doseClassificationRanges:z.array(classificationRangeSchema).max(6).optional(),
 }).superRefine((input,ctx)=>{
+  const ranges=input.doseClassificationRanges??[];
+  if(new Set(ranges.map(range=>range.classificationCode)).size!==ranges.length)
+    ctx.addIssue({code:'custom',message:'Las clasificaciones de la dosis no pueden repetirse.'});
+  if(ranges.length&&(input.doseAmount!=null||input.doseWeight!=null||input.doseWeightUnitCode!=null))
+    ctx.addIssue({code:'custom',message:'Elige una referencia por clasificación o por cantidad/peso.'});
   if((input.doseWeight!=null)!==(input.doseWeightUnitCode!=null)||input.doseWeight!=null&&input.doseAmount==null)
     ctx.addIssue({code:'custom',message:'La dosis por peso necesita cantidad, peso base y unidad de peso.'});
   if(input.administrationRoutes&&new Set(input.administrationRoutes).size!==input.administrationRoutes.length)
