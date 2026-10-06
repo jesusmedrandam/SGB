@@ -13,11 +13,12 @@ interface CatalogItemRow {
   species_code: string | null;
   system_defined: boolean;
   active: boolean;
+  item_code: string | null;
 }
 
 function item(row: CatalogItemRow) {
   return { id: row.id, catalogCode: row.catalog_code, name: row.name,
-    speciesCode: row.species_code, systemDefined: row.system_defined, active: row.active };
+    speciesCode: row.species_code, systemDefined: row.system_defined, active: row.active, itemCode: row.item_code };
 }
 
 export async function getCatalogReference(context: PropertyContext) {
@@ -34,7 +35,7 @@ export async function getCatalogReference(context: PropertyContext) {
        JOIN unit_usage_context uc ON uc.code = acu.context_code AND uc.active
        WHERE acu.context_code = ANY($1::varchar[])
        ORDER BY acu.context_code, acu.sort_order, u.name`,
-      [['ANIMAL_WEIGHT', 'LAND_AREA']]),
+      [['ANIMAL_WEIGHT', 'LAND_AREA', 'MEDICINE_DOSE']]),
   ]);
   return {
     species: species.rows.map((row) => ({ code: row.code, name: row.name,
@@ -46,7 +47,7 @@ export async function getCatalogReference(context: PropertyContext) {
 
 export async function listCatalogItems(context: PropertyContext, code: EditableCatalogCode) {
   const result = await pool.query<CatalogItemRow>(
-    `SELECT ci.id, ci.catalog_code, ci.name, ci.species_code, ci.system_defined, ci.active
+    `SELECT ci.id, ci.catalog_code, ci.name, ci.species_code, ci.system_defined, ci.active, ci.item_code
      FROM governed_catalog_item ci
      JOIN catalog_definition cd ON cd.code = ci.catalog_code AND cd.active
      WHERE ci.catalog_code = $2 AND ci.deleted_at IS NULL
@@ -60,7 +61,7 @@ export async function listCatalogItems(context: PropertyContext, code: EditableC
   return result.rows.map(item);
 }
 
-async function ensureManageAccess(client: PoolClient, auth: AuthState, context: PropertyContext,
+export async function ensureManageAccess(client: PoolClient, auth: AuthState, context: PropertyContext,
   code: EditableCatalogCode, speciesCode: string | null) {
   // Recheck inside the transaction: a stale browser or session must not retain write access.
   const supportAccess=await superadminPropertyAccess(client,auth,context);
@@ -118,7 +119,7 @@ export async function createCatalogItem(auth: AuthState, context: PropertyContex
       `INSERT INTO governed_catalog_item(catalog_code, account_id, property_id, species_code,
          name, created_by)
        VALUES($1,$2,$3,$4,$5,$6)
-       RETURNING id, catalog_code, name, species_code, system_defined, active`,
+       RETURNING id, catalog_code, name, species_code, system_defined, active, item_code`,
       [code, accountId, context.propertyId, speciesCode, input.name, auth.userId],
     );
     const created = item(result.rows[0]!);
@@ -132,7 +133,7 @@ export async function setCatalogItemActive(auth: AuthState, context: PropertyCon
   return inTransaction(async (client) => {
     const accountId = await ensureManageAccess(client, auth, context, code, null);
     const current = await client.query<CatalogItemRow>(
-      `SELECT id, catalog_code, name, species_code, system_defined, active
+      `SELECT id, catalog_code, name, species_code, system_defined, active, item_code
        FROM governed_catalog_item
        WHERE id = $1 AND catalog_code = $2 AND account_id = $3 AND NOT system_defined AND deleted_at IS NULL
        FOR UPDATE`,
@@ -150,7 +151,7 @@ export async function setCatalogItemActive(auth: AuthState, context: PropertyCon
     }
     const updated = await client.query<CatalogItemRow>(
       `UPDATE governed_catalog_item SET active = $2 WHERE id = $1
-       RETURNING id, catalog_code, name, species_code, system_defined, active`, [id, active],
+       RETURNING id, catalog_code, name, species_code, system_defined, active, item_code`, [id, active],
     );
     const after = item(updated.rows[0]!);
     await audit(client, auth, context, metadata, 'CATALOG_ITEM_STATE_CHANGED', id,

@@ -5,6 +5,7 @@ import {pool} from '../../database/pool.js';
 import {inTransaction} from '../../database/transaction.js';
 import type {AuthState,PropertyContext,RequestMetadata} from '../auth/auth.types.js';
 import type {CampaignInput,MedicineInput} from './health.schemas.js';
+import {ensureManageAccess,listCatalogItems} from '../catalogs/catalogs.service.js';
 
 export async function healthAccess(client:PoolClient,auth:AuthState,context:PropertyContext,permission:string){
   const row=await superadminPropertyAccess(client,auth,context)??(await client.query<{account_id:string;today:string}>(
@@ -33,16 +34,32 @@ function medicine(row:Record<string,unknown>){return {
   defaultUnitCode:row.default_unit_code,suggestedDose:row.suggested_dose,
   treatmentCatalogItemId:row.treatment_catalog_item_id,
   indications:row.indications,withdrawalMilkDays:row.withdrawal_milk_days,
-  withdrawalMeatDays:row.withdrawal_meat_days,active:row.active};}
+  withdrawalMeatDays:row.withdrawal_meat_days,active:row.active,
+  administrationRoutes:row.administration_routes,
+  doseAmount:row.dose_amount==null?null:Number(row.dose_amount),
+  doseWeight:row.dose_weight==null?null:Number(row.dose_weight),doseWeightUnitCode:row.dose_weight_unit_code};}
+async function validateRoutes(client:PoolClient,accountId:string,routes:string[]){
+  const valid=await client.query(`SELECT COALESCE(item_code,id::text) AS code FROM governed_catalog_item
+    WHERE catalog_code='ADMINISTRATION_ROUTES' AND active AND deleted_at IS NULL
+      AND (system_defined OR account_id=$1) AND COALESCE(item_code,id::text)=ANY($2::text[])`,[accountId,routes]);
+  if(valid.rowCount!==new Set(routes).size)throw invalidRequest('HEALTH_ROUTE_INVALID','Selecciona vías activas de esta cuenta.');
+}
 export async function listMedicines(context:PropertyContext){
   const result=await pool.query(`SELECT m.* FROM health_medicine m JOIN property p ON p.account_id=m.account_id
     WHERE p.id=$1 ORDER BY m.active DESC,lower(m.name)`,[context.propertyId]);
   return result.rows.map(medicine);
 }
 export async function createMedicine(auth:AuthState,context:PropertyContext,input:MedicineInput,
-  metadata:RequestMetadata){
+  metadata:RequestMetadata,permission:'HEALTH_MANAGE'|'CATALOG_MANAGE'='HEALTH_MANAGE'){
   return inTransaction(async(client)=>{
-    const {account_id}=await healthAccess(client,auth,context,'HEALTH_MANAGE');
+    const account_id=permission==='CATALOG_MANAGE'
+      ?await ensureManageAccess(client,auth,context,'TREATMENT_TYPES',null)
+      :(await healthAccess(client,auth,context,'HEALTH_MANAGE')).account_id;
+    const administrationRoutes=input.administrationRoutes??['ORAL','INTRAMUSCULAR','SUBCUTANEA','INTRAVENOSA','TOPICA','OTRA'];
+    await validateRoutes(client,account_id,administrationRoutes);
+    await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[account_id]);
+    if((await client.query(`SELECT 1 FROM health_medicine WHERE account_id=$1 AND lower(name)=lower($2)`,[account_id,input.name])).rowCount)
+      throw conflict('HEALTH_MEDICINE_EXISTS','Este medicamento ya está registrado en la cuenta.');
     if(input.treatmentCatalogItemId){
       const valid=await client.query(`SELECT 1 FROM governed_catalog_item ci WHERE ci.id=$1
         AND ci.catalog_code='TREATMENT_TYPES' AND ci.active AND ci.deleted_at IS NULL
@@ -51,11 +68,12 @@ export async function createMedicine(auth:AuthState,context:PropertyContext,inpu
     }
     const result=await client.query(`INSERT INTO health_medicine(account_id,name,kind,active_ingredient,
       default_unit_code,suggested_dose,indications,withdrawal_milk_days,withdrawal_meat_days,created_by,
-      treatment_catalog_item_id)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      treatment_catalog_item_id,administration_routes,dose_amount,dose_weight,dose_weight_unit_code)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
       [account_id,input.name,input.kind,input.activeIngredient??null,input.defaultUnitCode,
         input.suggestedDose??null,input.indications??null,input.withdrawalMilkDays,
-        input.withdrawalMeatDays,auth.userId,input.treatmentCatalogItemId??null]);
+        input.withdrawalMeatDays,auth.userId,input.treatmentCatalogItemId??null,administrationRoutes,
+        input.doseAmount??null,input.doseWeight??null,input.doseWeightUnitCode??null]);
     const created=medicine(result.rows[0]!);
     await healthAudit(client,auth,context,metadata,'HEALTH_MEDICINE_CREATED','HEALTH_MEDICINE',
       result.rows[0]!.id,null,created);
@@ -64,8 +82,15 @@ export async function createMedicine(auth:AuthState,context:PropertyContext,inpu
 }
 export async function listHealthOptions(context:PropertyContext){
   const [animals,groups,units]=await Promise.all([
-    pool.query(`SELECT a.id,a.name,a.ear_tag_code AS "earTagCode",aga.group_id AS "groupId"
+    pool.query(`SELECT a.id,a.name,a.ear_tag_code AS "earTagCode",aga.group_id AS "groupId",
+      COALESCE(w.weight_kg,CASE WHEN a.initial_weight_unit_code='POUND' THEN a.initial_weight*0.45359237
+        ELSE a.initial_weight END)::double precision AS "weightKg",
+      COALESCE(w.weighed_on,a.entry_date)::text AS "weightOn",
+      CASE WHEN w.weight_kg IS NOT NULL THEN 'WEIGHING' ELSE 'INITIAL' END AS "weightSource"
       FROM animal a LEFT JOIN animal_group_assignment aga ON aga.animal_id=a.id AND aga.ended_at IS NULL
+      LEFT JOIN LATERAL (SELECT CASE WHEN unit_code='POUND' THEN weight*0.45359237 ELSE weight END AS weight_kg,weighed_on
+        FROM animal_weighing WHERE animal_id=a.id AND voided_at IS NULL
+        ORDER BY weighed_on DESC,created_at DESC,id DESC LIMIT 1) w ON true
       WHERE a.property_id=$1 AND a.record_status='CURRENT' AND a.availability_status_code='ACTIVE'
       ORDER BY lower(a.name),a.id LIMIT 5000`,[context.propertyId]),
     pool.query(`SELECT id,name FROM livestock_group WHERE property_id=$1 AND active ORDER BY lower(name)`,
@@ -74,7 +99,8 @@ export async function listHealthOptions(context:PropertyContext){
       JOIN measurement_unit u ON u.code=acu.unit_code AND u.active
       WHERE acu.context_code='MEDICINE_DOSE' ORDER BY acu.sort_order`),
   ]);
-  return {animals:animals.rows,groups:groups.rows,units:units.rows};
+  return {animals:animals.rows,groups:groups.rows,units:units.rows,
+    administrationRoutes:await listCatalogItems(context,'ADMINISTRATION_ROUTES')};
 }
 const fields=`c.id,c.medicine_id AS "medicineId",m.name AS "medicineName",m.kind,
  c.administration_route AS "administrationRoute",c.selection_mode AS "selectionMode",
@@ -101,10 +127,13 @@ export async function listCampaigns(context:PropertyContext){
 async function validate(client:PoolClient,context:PropertyContext,input:CampaignInput,
   accountId:string,today:string){
   if(input.appliedOn>today)throw invalidRequest('HEALTH_FUTURE_DATE','La aplicación no puede ser futura.');
-  const medicine=(await client.query<{default_unit_code:string}>(
-    `SELECT default_unit_code FROM health_medicine WHERE id=$1 AND account_id=$2 AND active FOR SHARE`,
+  const medicine=(await client.query<{default_unit_code:string;administration_routes:string[]}>(
+    `SELECT default_unit_code,administration_routes FROM health_medicine WHERE id=$1 AND account_id=$2 AND active FOR SHARE`,
     [input.medicineId,accountId])).rows[0];
   if(!medicine)throw invalidRequest('HEALTH_MEDICINE_INVALID','Selecciona un medicamento activo de la cuenta.');
+  await validateRoutes(client,accountId,[input.administrationRoute]);
+  if(!medicine.administration_routes.includes(input.administrationRoute))
+    throw invalidRequest('HEALTH_MEDICINE_ROUTE_INVALID','La vía no corresponde a este medicamento.');
   if(input.animals.some((animal)=>animal.unitCode!==medicine.default_unit_code))
     throw invalidRequest('HEALTH_UNIT_INVALID','Todas las dosis deben usar la unidad del medicamento.');
   for(const item of input.animals.filter((animal)=>animal.conditionId)){

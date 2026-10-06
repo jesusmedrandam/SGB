@@ -5,7 +5,10 @@ import {pool} from '../../database/pool.js';
 import {register,login,verifyEmail,resendEmailVerification,getSessionOverview} from '../auth/auth.service.js';
 import {createAnimal} from '../animals/animals.service.js';
 import {assignAnimalToGroup,createGroup} from '../groups/groups.service.js';
-import {createCatalogItem} from '../catalogs/catalogs.service.js';
+import {createCatalogItem,listCatalogItems} from '../catalogs/catalogs.service.js';
+import {createAccountProperty} from '../properties/properties.service.js';
+import {createWeighing,voidWeighing} from '../weighings/weighings.service.js';
+import {medicineSchema} from './health.schemas.js';
 import {applyCampaign,cancelCampaign,createCampaign,createMedicine,listCampaigns,
   listHealthOptions,listMedicines,updateCampaign} from './health.service.js';
 import {createCondition,listConditions,resolveCondition,updateCondition} from './conditions.service.js';
@@ -93,5 +96,37 @@ test('sanidad respeta propiedad, dosis, selección, borradores y aplicación ún
       {...context,roleId:viewer.id},{name:'No permitida',kind:'OTRO',
         defaultUnitCode:'GRAM',withdrawalMilkDays:0,withdrawalMeatDays:0},metadata),
       (error:{code?:string})=>error.code==='HEALTH_DENIED');
+    const customRoute=await createCatalogItem(auth,context,'ADMINISTRATION_ROUTES',{name:'Intramamaria'},metadata);
+    const reference={name:'Referencia por peso',kind:'OTRO' as const,defaultUnitCode:'MILLILITER' as const,
+      administrationRoutes:['ORAL',customRoute.id],doseAmount:1,doseWeight:50,doseWeightUnitCode:'KILOGRAM' as const,
+      withdrawalMilkDays:0,withdrawalMeatDays:0};
+    assert.equal(medicineSchema.safeParse({...reference,doseAmount:null}).success,false);
+    assert.equal(medicineSchema.safeParse({...reference,doseWeightUnitCode:null}).success,false);
+    assert.equal(medicineSchema.safeParse({...reference,doseWeight:Infinity}).success,false);
+    const weighted=await createMedicine(auth,context,reference,metadata,'CATALOG_MANAGE');
+    assert.equal(weighted.doseAmount,1);assert.equal(weighted.doseWeight,50);
+    assert.deepEqual(weighted.administrationRoutes,['ORAL',customRoute.id]);
+    await assert.rejects(()=>createMedicine(auth,context,{...reference,name:'Referencia ajena',administrationRoutes:[randomUUID()]},metadata),
+      (error:{code?:string})=>error.code==='HEALTH_ROUTE_INVALID');
+    await assert.rejects(()=>createMedicine({...auth,activeRoleId:viewer.id},{...context,roleId:viewer.id},reference,metadata,'CATALOG_MANAGE'),
+      (error:{code?:string})=>error.code==='CATALOG_MANAGE_DENIED');
+    await assert.rejects(()=>createCampaign(auth,context,{...base,medicineId:weighted.id as string},metadata),
+      (error:{code?:string})=>error.code==='HEALTH_MEDICINE_ROUTE_INVALID');
+    const byRoute=await createCampaign(auth,context,{...base,medicineId:weighted.id as string,administrationRoute:customRoute.id,
+      selectionMode:'MANUAL',groupId:null,animals:[base.animals[1]!]},metadata);
+    assert.equal(byRoute.administrationRoute,customRoute.id);
+    const weighing=await createWeighing(auth,context,{animalId:second.id,weighedOn:today,weight:1000,unitCode:'POUND',method:null,notes:null},metadata);
+    assert.ok(weighing);
+    let weightedAnimal=(await listHealthOptions(context)).animals.find(animal=>animal.id===second.id)!;
+    assert.equal(weightedAnimal.weightKg,453.59237);assert.equal(weightedAnimal.weightSource,'WEIGHING');
+    await voidWeighing(auth,context,weighing!.id,weighing!.version,metadata);
+    weightedAnimal=(await listHealthOptions(context)).animals.find(animal=>animal.id===second.id)!;
+    assert.equal(weightedAnimal.weightKg,null);
+    await pool.query(`UPDATE administrative_account SET max_properties=2 WHERE id=(SELECT account_id FROM property WHERE id=$1)`,[property.id]);
+    const extra=await createAccountProperty(auth,context,`Otra finca ${suffix}`,metadata);
+    const extraContext={...context,propertyId:extra.propertyId,roleId:extra.roleId};
+    assert.ok((await listMedicines(extraContext)).some(item=>item.id===weighted.id));
+    assert.ok((await listCatalogItems(extraContext,'ADMINISTRATION_ROUTES')).some(item=>item.id===customRoute.id));
+    assert.equal((await pool.query(`SELECT actor_user_id FROM audit_event WHERE entity_id=$1 AND action='HEALTH_MEDICINE_CREATED'`,[weighted.id])).rows[0]?.actor_user_id,auth.userId);
   }finally{await pool.end();}
 });
