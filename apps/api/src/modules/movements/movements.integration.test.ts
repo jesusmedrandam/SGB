@@ -5,12 +5,13 @@ import {pool} from '../../database/pool.js';
 import {getSessionOverview,login,register,resendEmailVerification,verifyEmail} from '../auth/auth.service.js';
 import {createAccountProperty} from '../properties/properties.service.js';
 import {createAnimal,getAnimal} from '../animals/animals.service.js';
-import {assignAnimalToGroup,createGroup,createLocation,listGroups} from '../groups/groups.service.js';
+import {assignAnimalToGroup,createGroup,createLocation,listGroups,listLocations} from '../groups/groups.service.js';
 import {applyMovement,cancelMovement,createMovement,listMovementOptions,listMovements,
   updateMovement} from './movements.service.js';
 
 const metadata={ipAddress:'127.0.0.1',userAgent:'sgb-movement-test'};
-const date=()=>new Date().toISOString().slice(0,10);
+const date=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Guayaquil',
+  year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 test('borrador, rotación de grupo, selección manual y traslado conservan historia y permisos',async()=>{
   const suffix=randomUUID();
   try{
@@ -121,6 +122,22 @@ test('borrador, rotación de grupo, selección manual y traslado conservan histo
       sourceGroupId:group.id,destinationGroupId:groupTwo.id,selectionMode:'MANUAL',
       animalIds:[other.id],reason:'Borrador cancelable'},metadata);
     await cancelMovement(auth,context,toCancel.id,metadata);
+    const sourceLocations=await listLocations(context);
+    const firstHistory=sourceLocations.find(entry=>entry.id===sourcePasture.id)!;
+    assert.equal(firstHistory.currentAnimalCount,0);
+    assert.equal(firstHistory.occupationHistory?.length,1);
+    assert.equal(firstHistory.occupationHistory?.[0]?.animalCount,2);
+    assert.equal(firstHistory.occupationHistory?.[0]?.endedOn,base.movementOn);
+    const ongoing=sourceLocations.find(entry=>entry.id===rotatedPasture.id)!;
+    assert.equal(ongoing.currentAnimalCount,1);
+    assert.equal(ongoing.occupationHistory?.[0]?.animalCount,2);
+    assert.equal(ongoing.occupationHistory?.[0]?.endedOn,null);
+    assert.equal(ongoing.occupationHistory?.[0]?.startedOn,base.movementOn);
+    assert.deepEqual(sourceLocations.find(entry=>entry.id===initialPasture.id)?.occupationHistory,[]);
+    const destinationLocations=await listLocations(destinationContext);
+    assert.ok(!destinationLocations.some(entry=>entry.id===sourcePasture.id));
+    assert.equal(destinationLocations.find(entry=>entry.id===destPasture.id)?.currentAnimalCount,1);
+    assert.equal(destinationLocations.find(entry=>entry.id===destPasture.id)?.occupationHistory?.[0]?.animalCount,1);
     await assert.rejects(()=>applyMovement(auth,context,toCancel.id,metadata),
       (error:{code?:string})=>error.code==='MOVEMENT_ALREADY_FINAL');
     const viewer=(await pool.query<{id:string}>(

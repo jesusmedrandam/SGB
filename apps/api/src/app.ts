@@ -52,7 +52,7 @@ app.use((request, response, next) => {
 
 app.get('/health', (_request, response) => {
   response.json({ ok: true, service: 'sgb-api', version: '2.0.0-alpha.1',
-    capabilities:['superadmin-support','media-details','selective-offline-media','explicit-support-mode','medicine-weight-dose','medicine-classification-dose'] });
+    capabilities:['superadmin-support','media-details','selective-offline-media','explicit-support-mode','medicine-weight-dose','medicine-classification-dose','pasture-occupation-history'] });
 });
 
 app.get('/health/ready', asyncHandler(async (_request, response) => {
