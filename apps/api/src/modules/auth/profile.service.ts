@@ -32,7 +32,7 @@ export async function updateProfile(auth:AuthState,input:{displayName:string;pro
     if(before.display_name!==updated.displayName||before.profile_photo_data!==updated.profilePhoto){
       await client.query(`INSERT INTO audit_event(actor_user_id,property_id,active_role_id,action,entity_type,
         entity_id,before_data,after_data,ip_address,user_agent)
-        VALUES($1,$2,$3,'USER_PROFILE_UPDATED','APP_USER',$1,$4::jsonb,$5::jsonb,$6,$7)`,
+        VALUES($1::uuid,$2,$3,'USER_PROFILE_UPDATED','APP_USER',$1::text,$4::jsonb,$5::jsonb,$6,$7)`,
         [auth.userId,auth.activePropertyId,auth.activeRoleId,
           JSON.stringify({displayName:before.display_name,hasProfilePhoto:Boolean(before.profile_photo_data)}),
           JSON.stringify({displayName:updated.displayName,hasProfilePhoto:Boolean(updated.profilePhoto),
@@ -58,7 +58,7 @@ export async function changePassword(auth:AuthState,input:{currentPassword:strin
       [auth.userId,auth.sessionId]);
     await client.query(`UPDATE password_reset_token SET consumed_at=now() WHERE user_id=$1 AND consumed_at IS NULL`,[auth.userId]);
     await client.query(`INSERT INTO audit_event(actor_user_id,property_id,active_role_id,action,entity_type,
-      entity_id,ip_address,user_agent) VALUES($1,$2,$3,'USER_PASSWORD_CHANGED','APP_USER',$1,$4,$5)`,
+      entity_id,ip_address,user_agent) VALUES($1::uuid,$2,$3,'USER_PASSWORD_CHANGED','APP_USER',$1::text,$4,$5)`,
       [auth.userId,auth.activePropertyId,auth.activeRoleId,metadata.ipAddress,metadata.userAgent]);
   });
 }
