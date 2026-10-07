@@ -6,6 +6,16 @@ const password = z.string()
   .regex(/[A-Za-zÁÉÍÓÚáéíóúÑñ]/, 'Incluye al menos una letra.')
   .regex(/[0-9]/, 'Incluye al menos un número.');
 
+export const profileSchema = z.strictObject({
+  displayName: z.string().trim().min(2).max(160),
+  profilePhoto: z.string().max(350000)
+    .regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/).nullable().optional(),
+});
+export const changePasswordSchema = z.strictObject({
+  currentPassword: z.string().min(1).max(128),
+  newPassword: password,
+});
+
 export const registerSchema = z.object({
   email: z.email().max(254).transform((value) => value.trim().toLowerCase()),
   password,

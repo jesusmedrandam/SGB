@@ -772,6 +772,8 @@ export async function endSupport(auth:AuthState,metadata:RequestMetadata){
 }
 
 export async function getSessionOverview(auth: AuthState) {
+  const profile=(await pool.query<{profile_photo_data:string|null}>(
+    'SELECT profile_photo_data FROM app_user WHERE id=$1',[auth.userId])).rows[0];
   const membershipResult = await pool.query<{
     property_id: string;
     property_name: string;
@@ -882,6 +884,7 @@ export async function getSessionOverview(auth: AuthState) {
       email: auth.email,
       displayName: auth.displayName,
       isSuperadmin: auth.isSuperadmin,
+      profilePhoto: profile?.profile_photo_data??null,
     },
     activeContext: auth.activePropertyId && auth.activeRoleId
       ? { propertyId: auth.activePropertyId, roleId: auth.activeRoleId }
