@@ -6,6 +6,7 @@ import { pool } from '../../database/pool.js';
 import { inTransaction } from '../../database/transaction.js';
 import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.types.js';
 import { readAnimal } from '../animals/animals.service.js';
+import { locationOccupations, type LocationStay } from './location-occupations.js';
 
 type Kind = 'PASTURE' | 'CORRAL';
 interface GroupRow {
@@ -77,12 +78,32 @@ const locationJoins = `FROM physical_location pl
   LEFT JOIN livestock_group lg ON lg.id = gla.group_id`;
 
 export async function listLocations(context: PropertyContext) {
-  const result = await pool.query<LocationRow>(
+  const [result, stays] = await Promise.all([pool.query<LocationRow>(
     `SELECT ${locationFields} ${locationJoins}
      WHERE pl.property_id = $1 ORDER BY pl.active DESC, pl.kind, lower(pl.name), pl.id`,
     [context.propertyId],
-  );
-  return result.rows.map(location);
+  ), pool.query<LocationStay>(
+    `SELECT ala.location_id AS "locationId", ala.animal_id AS "animalId",
+      ala.started_at::text AS "startedAt", ala.ended_at::text AS "endedAt",
+      COALESCE(sm.movement_on, (ala.started_at AT TIME ZONE p.timezone)::date)::text AS "startedOn",
+      COALESCE(em.movement_on, (ala.ended_at AT TIME ZONE p.timezone)::date)::text AS "endedOn"
+     FROM animal_location_assignment ala JOIN property p ON p.id=ala.property_id
+     JOIN physical_location pl ON pl.id=ala.location_id AND pl.kind='PASTURE'
+     LEFT JOIN livestock_movement sm ON sm.id=ala.movement_batch_id AND sm.status='COMPLETADO'
+     LEFT JOIN (SELECT ma.animal_id, ma.source_location_id, m.applied_at, m.movement_on
+       FROM livestock_movement_animal ma JOIN livestock_movement m ON m.id=ma.movement_id
+       WHERE m.status='COMPLETADO') em ON em.animal_id=ala.animal_id
+         AND em.source_location_id=ala.location_id AND em.applied_at=ala.ended_at
+     WHERE ala.property_id=$1 ORDER BY ala.started_at, ala.id`, [context.propertyId]),
+  ]);
+  const byLocation = new Map<string, LocationStay[]>();
+  for (const stay of stays.rows) {
+    const entries = byLocation.get(stay.locationId) ?? [];
+    entries.push(stay);
+    byLocation.set(stay.locationId, entries);
+  }
+  return result.rows.map(row => ({...location(row), ...(row.kind === 'PASTURE'
+    ? locationOccupations(byLocation.get(row.id) ?? [], row.last_rest_date) : {})}));
 }
 
 async function access(client: PoolClient, auth: AuthState, context: PropertyContext,
