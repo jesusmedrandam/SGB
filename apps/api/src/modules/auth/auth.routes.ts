@@ -7,6 +7,7 @@ import { clearRefreshCookie, readCookie, setRefreshCookie } from '../../security
 import { authenticate } from './auth.middleware.js';
 import {
   contextSchema,
+  profileSchema,changePasswordSchema,
   loginSchema,
   registerSchema,
   resendVerificationSchema,
@@ -25,6 +26,7 @@ import {
   verifyEmail,
 } from './auth.service.js';
 import type { RequestMetadata } from './auth.types.js';
+import {updateProfile,changePassword} from './profile.service.js';
 
 export const authRouter = Router();
 
@@ -152,6 +154,15 @@ authRouter.post('/logout', asyncHandler(async (request, response) => {
 authRouter.get('/me', authenticate, asyncHandler(async (request, response) => {
   const data = await getSessionOverview(request.auth!);
   response.json({ ok: true, data });
+}));
+
+authRouter.patch('/profile',authenticate,asyncHandler(async(request,response)=>{
+  const user=await updateProfile(request.auth!,profileSchema.parse(request.body),metadata(request));
+  response.json({ok:true,data:user});
+}));
+authRouter.post('/password',authLimiter,authenticate,asyncHandler(async(request,response)=>{
+  await changePassword(request.auth!,changePasswordSchema.parse(request.body),metadata(request));
+  response.json({ok:true,data:{changed:true}});
 }));
 
 authRouter.post('/context', authenticate, asyncHandler(async (request, response) => {
