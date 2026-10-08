@@ -107,7 +107,7 @@ export const idempotentMutation: RequestHandler = async (request, response, next
     }) as typeof response.json;
 
     response.once('finish', () => {
-      if (response.statusCode >= 500) {
+      if (response.statusCode >= 500 || response.statusCode === 429) {
         void pool.query(
           `DELETE FROM idempotent_mutation
             WHERE user_id = $1 AND idempotency_key = $2 AND state = 'PENDING'`,

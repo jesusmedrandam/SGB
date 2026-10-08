@@ -5,6 +5,7 @@ export const productSchema=z.object({name:z.string().trim().min(2).max(160),
   activeIngredient:z.string().trim().max(2000).nullable().optional(),
   formulatedBy:z.string().trim().max(200).nullable().optional(),
   description:z.string().trim().max(2000).nullable().optional()});
+export const productUpdateSchema=productSchema.extend({active:z.boolean(),expectedVersion:z.number().int().positive()});
 export const cleaningSchema=z.object({
   locationId:z.uuid(),startedOn:z.iso.date(),finishedOn:z.iso.date().nullable().optional(),
   activities:z.array(z.enum(['FUMIGACION','TALA_SELECTIVA','DESBROCE','OTRA'])).min(1).max(4),

@@ -5,6 +5,7 @@ import {pool} from '../../database/pool.js';
 import {inTransaction} from '../../database/transaction.js';
 import type {AuthState,PropertyContext,RequestMetadata} from '../auth/auth.types.js';
 import type {CleaningInput,ProductInput} from './cleanings.schemas.js';
+import {ensureCatalogAdministrator,ensureManageAccess,listCatalogItems} from '../catalogs/catalogs.service.js';
 
 async function access(client:PoolClient,auth:AuthState,context:PropertyContext,permission:string){
   const row=await superadminPropertyAccess(client,auth,context)??(await client.query<{account_id:string;today:string}>(
@@ -32,16 +33,20 @@ async function audit(client:PoolClient,auth:AuthState,context:PropertyContext,
       before===null?null:JSON.stringify(before),JSON.stringify(after),metadata.ipAddress,metadata.userAgent]);
 }
 export async function listProducts(context:PropertyContext){
-  return (await pool.query(`SELECT p.id,p.name,p.category,p.active,
+  return (await pool.query(`SELECT p.id,p.version,p.name,p.category,p.active,
     p.active_ingredient AS "activeIngredient",p.formulated_by AS "formulatedBy",p.description
     FROM pasture_agrochemical p
     JOIN property property ON property.account_id=p.account_id WHERE property.id=$1
     ORDER BY p.active DESC,lower(p.name)`,[context.propertyId])).rows;
 }
 export async function createProduct(auth:AuthState,context:PropertyContext,input:ProductInput,
-  metadata:RequestMetadata){
+  metadata:RequestMetadata,permission:'CLEANING_MANAGE'|'CATALOG_MANAGE'='CLEANING_MANAGE'){
   return inTransaction(async(client)=>{
-    const {account_id}=await access(client,auth,context,'CLEANING_MANAGE');
+    const account_id=permission==='CATALOG_MANAGE'?await ensureManageAccess(client,auth,context,'AGROCHEMICAL_CATEGORIES',null):
+      (await access(client,auth,context,'CLEANING_MANAGE')).account_id;
+    await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[account_id]);
+    if((await client.query('SELECT 1 FROM pasture_agrochemical WHERE account_id=$1 AND lower(name)=lower($2)',[account_id,input.name])).rowCount)
+      throw conflict('CLEANING_PRODUCT_EXISTS','Este producto ya está registrado en la cuenta.');
     if(input.category){
       const category=await client.query(`SELECT 1 FROM governed_catalog_item
         WHERE catalog_code='AGROCHEMICAL_CATEGORIES' AND name=$1 AND active AND deleted_at IS NULL
@@ -51,12 +56,34 @@ export async function createProduct(auth:AuthState,context:PropertyContext,input
     }
     const row=(await client.query(`INSERT INTO pasture_agrochemical(account_id,name,category,
       active_ingredient,formulated_by,description,created_by)
-      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,name,category,active,
+      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,version,name,category,active,
         active_ingredient AS "activeIngredient",formulated_by AS "formulatedBy",description`,
       [account_id,input.name,input.category??null,input.activeIngredient??null,
         input.formulatedBy??null,input.description??null,auth.userId])).rows[0]!;
     await audit(client,auth,context,metadata,'CLEANING_PRODUCT_CREATED',row.id,null,row);
     return row;
+  });
+}
+export async function updateProduct(auth:AuthState,context:PropertyContext,id:string,
+  input:ProductInput&{active:boolean;expectedVersion:number},metadata:RequestMetadata){
+  return inTransaction(async client=>{
+    const accountId=await ensureManageAccess(client,auth,context,'AGROCHEMICAL_CATEGORIES',null);
+    await ensureCatalogAdministrator(client,auth,context);
+    await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
+    const before=(await client.query(`SELECT id,version,name,category,active,active_ingredient AS "activeIngredient",
+      formulated_by AS "formulatedBy",description FROM pasture_agrochemical WHERE id=$1 AND account_id=$2 FOR UPDATE`,[id,accountId])).rows[0];
+    if(!before)throw new ApiError(404,'CLEANING_PRODUCT_NOT_FOUND','Producto no encontrado en esta cuenta.');
+    if(before.version!==input.expectedVersion)throw conflict('CLEANING_PRODUCT_VERSION_CONFLICT','El producto cambió. Actualiza sus datos antes de guardar.');
+    if(input.category&&input.category!==before.category&&(await client.query(`SELECT 1 FROM governed_catalog_item WHERE catalog_code='AGROCHEMICAL_CATEGORIES'
+      AND name=$1 AND active AND deleted_at IS NULL AND (system_defined OR account_id=$2)`,[input.category,accountId])).rowCount!==1)
+      throw invalidRequest('CLEANING_CATEGORY_INVALID','Selecciona una categoría disponible.');
+    if((await client.query(`SELECT 1 FROM pasture_agrochemical WHERE account_id=$1 AND lower(name)=lower($2) AND id<>$3`,
+      [accountId,input.name,id])).rowCount)throw conflict('CLEANING_PRODUCT_EXISTS','Este producto ya está registrado en la cuenta.');
+    const after=(await client.query(`UPDATE pasture_agrochemical SET name=$2,category=$3,active_ingredient=$4,
+      formulated_by=$5,description=$6,active=$7 WHERE id=$1 RETURNING id,version,name,category,active,
+      active_ingredient AS "activeIngredient",formulated_by AS "formulatedBy",description`,
+      [id,input.name,input.category??null,input.activeIngredient??null,input.formulatedBy??null,input.description??null,input.active])).rows[0];
+    await audit(client,auth,context,metadata,'CLEANING_PRODUCT_UPDATED',id,before,after);return after;
   });
 }
 export async function listCleaningOptions(context:PropertyContext){
@@ -68,7 +95,7 @@ export async function listCleaningOptions(context:PropertyContext){
       WHERE u.code=ANY($1::varchar[]) AND u.active ORDER BY u.name`,
       [['MILLIGRAM','GRAM','KILOGRAM','MILLILITER','LITER','UNIT','DOSE']]),
   ]);
-  return {locations:locations.rows,units:units.rows};
+  return {locations:locations.rows,units:units.rows,categories:await listCatalogItems(context,'AGROCHEMICAL_CATEGORIES')};
 }
 const fields=`c.id,c.location_id AS "locationId",l.name AS "locationName",
  c.started_on::text AS "startedOn",c.finished_on::text AS "finishedOn",
@@ -77,7 +104,7 @@ const fields=`c.id,c.location_id AS "locationId",l.name AS "locationName",
  c.partial_percent AS "partialPercent",c.area_value AS "areaValue",
  c.area_unit_code AS "areaUnitCode",c.status,c.notes,c.version::int,
  c.created_at AS "createdAt",c.completed_at AS "completedAt",c.cancelled_at AS "cancelledAt",
- COALESCE((SELECT json_agg(json_build_object('productId',d.product_id,'productName',p.name,
+ COALESCE((SELECT json_agg(json_build_object('productId',d.product_id,'productName',d.product_name,
    'unitCode',d.unit_code,'quantityPerApplication',d.quantity_per_application,
    'totalQuantity',d.total_quantity,'notes',d.notes) ORDER BY p.name)
    FROM pasture_cleaning_product d JOIN pasture_agrochemical p ON p.id=d.product_id

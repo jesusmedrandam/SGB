@@ -5,7 +5,7 @@ import {pool} from '../../database/pool.js';
 import {inTransaction} from '../../database/transaction.js';
 import type {AuthState,PropertyContext,RequestMetadata} from '../auth/auth.types.js';
 import type {CampaignInput,MedicineInput} from './health.schemas.js';
-import {ensureManageAccess,listCatalogItems} from '../catalogs/catalogs.service.js';
+import {ensureManageAccess,ensureCatalogAdministrator,listCatalogItems} from '../catalogs/catalogs.service.js';
 
 export async function healthAccess(client:PoolClient,auth:AuthState,context:PropertyContext,permission:string){
   const row=await superadminPropertyAccess(client,auth,context)??(await client.query<{account_id:string;today:string}>(
@@ -284,13 +284,11 @@ export async function updateMedicine(auth:AuthState,context:PropertyContext,id:s
   input:{medicine:MedicineInput;active:boolean;expectedVersion:number},metadata:RequestMetadata){
   return inTransaction(async client=>{
     const accountId=await ensureManageAccess(client,auth,context,'TREATMENT_TYPES',null);
-    const administrator=await client.query(`SELECT 1 FROM property_role WHERE id=$1 AND property_id=$2
-      AND active AND is_system AND code IN ('OWNER','ADMINISTRATOR') FOR SHARE`,[context.roleId,context.propertyId]);
-    if(!administrator.rowCount)throw forbidden('MEDICINE_ADMIN_REQUIRED','Solo un administrador puede editar medicamentos.');
+    await ensureCatalogAdministrator(client,auth,context);
     await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
     const current=(await client.query('SELECT * FROM health_medicine WHERE id=$1 AND account_id=$2 FOR UPDATE',[id,accountId])).rows[0];
     if(!current)throw new ApiError(404,'HEALTH_MEDICINE_NOT_FOUND','Medicamento no encontrado en esta cuenta.');
-    if(current.version!==input.expectedVersion)throw conflict('MEDICINE_VERSION_CONFLICT','El medicamento cambi?. Actualiza la pantalla antes de editar.');
+    if(current.version!==input.expectedVersion)throw conflict('MEDICINE_VERSION_CONFLICT','El medicamento cambió. Actualiza la pantalla antes de editar.');
     const config=input.medicine;const routes=config.administrationRoutes??current.administration_routes;
     await validateRoutes(client,accountId,routes);
     if(config.treatmentCatalogItemId&&(await client.query(`SELECT 1 FROM governed_catalog_item WHERE id=$1
@@ -298,7 +296,7 @@ export async function updateMedicine(auth:AuthState,context:PropertyContext,id:s
       [config.treatmentCatalogItemId,accountId])).rowCount!==1)
       throw invalidRequest('TREATMENT_TYPE_INVALID','Selecciona una clase farmacológica disponible.');
     if((await client.query('SELECT 1 FROM health_medicine WHERE account_id=$1 AND lower(name)=lower($2) AND id<>$3',[accountId,config.name,id])).rowCount)
-      throw conflict('HEALTH_MEDICINE_EXISTS','Este medicamento ya est? registrado en la cuenta.');
+      throw conflict('HEALTH_MEDICINE_EXISTS','Este medicamento ya está registrado en la cuenta.');
     const saved=(await client.query(`UPDATE health_medicine SET name=$2,kind=$3,active_ingredient=$4,
       default_unit_code=$5,suggested_dose=$6,indications=$7,withdrawal_milk_days=$8,withdrawal_meat_days=$9,
       treatment_catalog_item_id=$10,administration_routes=$11,dose_amount=$12,dose_weight=$13,
