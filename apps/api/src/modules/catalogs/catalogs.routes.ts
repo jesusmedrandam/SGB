@@ -5,7 +5,9 @@ import type { RequestMetadata } from '../auth/auth.types.js';
 import {
   catalogItemParamsSchema, catalogItemStateSchema, catalogParamsSchema, createCatalogItemSchema,
 } from './catalogs.schemas.js';
-import { createCatalogItem, getCatalogReference, listCatalogItems, setCatalogItemActive } from './catalogs.service.js';
+import { createCatalogItem, getCatalogReference, listCatalogItems, updateCatalogItem } from './catalogs.service.js';
+import {createProduct,listProducts,updateProduct} from '../cleanings/cleanings.service.js';
+import {productSchema,productUpdateSchema} from '../cleanings/cleanings.schemas.js';
 import {createMedicine,listMedicines,updateMedicine} from '../health/health.service.js';
 import {medicineSchema,medicineUpdateSchema,idSchema} from '../health/health.schemas.js';
 
@@ -15,6 +17,17 @@ const metadata = (request: Request): RequestMetadata => ({
 
 export const catalogsRouter = Router();
 catalogsRouter.use(authenticate, requirePropertyContext);
+catalogsRouter.get('/products',requirePermission('CATALOG_VIEW'),asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await listProducts(request.propertyContext!)});
+}));
+catalogsRouter.post('/products',requirePermission('CATALOG_MANAGE'),asyncHandler(async(request,response)=>{
+  response.status(201).json({ok:true,data:await createProduct(request.auth!,request.propertyContext!,
+    productSchema.parse(request.body),metadata(request),'CATALOG_MANAGE')});
+}));
+catalogsRouter.patch('/products/:id',requirePermission('CATALOG_MANAGE'),asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await updateProduct(request.auth!,request.propertyContext!,idSchema.parse(request.params).id,
+    productUpdateSchema.parse(request.body),metadata(request))});
+}));
 catalogsRouter.get('/medicines',requirePermission('CATALOG_VIEW'),asyncHandler(async(request,response)=>{
   response.json({ok:true,data:await listMedicines(request.propertyContext!)});
 }));
@@ -42,8 +55,8 @@ catalogsRouter.post('/:catalogCode/items', requirePermission('CATALOG_MANAGE'), 
 }));
 catalogsRouter.patch('/:catalogCode/items/:id', requirePermission('CATALOG_MANAGE'), asyncHandler(async (request, response) => {
   const { catalogCode, id } = catalogItemParamsSchema.parse(request.params);
-  const { active } = catalogItemStateSchema.parse(request.body);
-  response.json({ ok: true, data: await setCatalogItemActive(
-    request.auth!, request.propertyContext!, catalogCode, id, active, metadata(request),
+  const input = catalogItemStateSchema.parse(request.body);
+  response.json({ ok: true, data: await updateCatalogItem(
+    request.auth!, request.propertyContext!, catalogCode, id, input, metadata(request),
   ) });
 }));

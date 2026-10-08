@@ -5,7 +5,7 @@ import {pool} from '../../database/pool.js';
 import {getSessionOverview,login,register,resendEmailVerification,verifyEmail} from '../auth/auth.service.js';
 import {createLocation} from '../groups/groups.service.js';
 import {applyCleaning,cancelCleaning,createCleaning,createProduct,listCleanings,
-  listCleaningOptions,listProducts,updateCleaning} from './cleanings.service.js';
+  listCleaningOptions,listProducts,updateCleaning,updateProduct} from './cleanings.service.js';
 
 const metadata={ipAddress:'127.0.0.1',userAgent:'sgb-cleaning-test'};
 test('limpieza calcula área y consumo y preserva el historial por propiedad',async()=>{
@@ -60,6 +60,9 @@ test('limpieza calcula área y consumo y preserva el historial por propiedad',as
     assert.equal(Number(edited.products[0]?.totalQuantity),8);
     const completed=await applyCleaning(auth,context,draft.id,metadata);
     assert.equal(completed.status,'COMPLETADO');
+    await updateProduct(auth,context,product.id,{name:'Producto corregido',active:false,expectedVersion:product.version},metadata);
+    assert.equal((await listCleanings(context))[0]?.products[0]?.productName,'Producto fumigación');
+    assert.equal(Number((await listCleanings(context))[0]?.products[0]?.totalQuantity),8);
     await assert.rejects(()=>applyCleaning(auth,context,draft.id,metadata),
       (error:{code?:string})=>error.code==='CLEANING_FINAL');
     const cancelled=await createCleaning(auth,context,{...input,areaType:'TOTAL',

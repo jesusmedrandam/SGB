@@ -37,7 +37,7 @@ app.disable('x-powered-by');
 if (env.TRUST_PROXY) app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({ origin: env.FRONTEND_URL, credentials: true,
-  exposedHeaders: ['etag', 'x-idempotent-replay'] }));
+  exposedHeaders: ['etag', 'x-idempotent-replay','retry-after'] }));
 app.use(requestId);
 app.use(express.json({ limit: '1mb' }));
 app.use((request, response, next) => {
@@ -52,7 +52,7 @@ app.use((request, response, next) => {
 
 app.get('/health', (_request, response) => {
   response.json({ ok: true, service: 'sgb-api', version: '2.0.0-alpha.1',
-    capabilities:['superadmin-support','media-details','selective-offline-media','explicit-support-mode','medicine-weight-dose','medicine-classification-dose','pasture-occupation-history','user-profile','account-email-change','account-sessions','medicine-edit-history','condition-treatment-history'] });
+    capabilities:['superadmin-support','media-details','selective-offline-media','explicit-support-mode','medicine-weight-dose','medicine-classification-dose','pasture-occupation-history','user-profile','account-email-change','account-sessions','medicine-edit-history','condition-treatment-history','account-catalog-editing','cleaning-sync-validation'] });
 });
 
 app.get('/health/ready', asyncHandler(async (_request, response) => {
@@ -69,7 +69,10 @@ app.get('/health/ready', asyncHandler(async (_request, response) => {
     to_regclass('public.email_change_token') IS NOT NULL AS account_security_ready,
     EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='health_campaign'
       AND column_name='medicine_snapshot') AS medicine_history_ready`);
-  response.json({ ok: true, database: 'ready',supportReady:result.rows[0]?.support_ready===true,
+  const catalogs=await pool.query(`SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
+    AND table_name='pasture_cleaning_product' AND column_name='product_name') AND EXISTS(SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='governed_catalog_item' AND column_name='version') AS ready`);
+  response.json({ ok: true, database: 'ready',accountCatalogReady:catalogs.rows[0]?.ready===true,supportReady:result.rows[0]?.support_ready===true,
     supportModesReady:result.rows[0]?.support_modes_ready===true,medicineDosesReady:result.rows[0]?.medicine_doses_ready===true,
     medicineClassificationDosesReady:result.rows[0]?.medicine_classification_doses_ready===true,
     userProfileReady:result.rows[0]?.user_profile_ready===true,

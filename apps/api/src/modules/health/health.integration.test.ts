@@ -174,7 +174,7 @@ test('sanidad respeta propiedad, dosis, selección, borradores y aplicación ún
     await pool.query(`INSERT INTO role_permission(role_id,permission_code) VALUES($1,'CATALOG_MANAGE')`,[custom.id]);
     await assert.rejects(()=>updateMedicine({...auth,activeRoleId:custom.id},
       {...context,roleId:custom.id,roleCode:'ADMINISTRATOR'},medicine.id as string,{...edit,expectedVersion:2},metadata),
-      (error:{code?:string})=>error.code==='MEDICINE_ADMIN_REQUIRED');
+      (error:{code?:string})=>error.code==='CATALOG_ADMIN_REQUIRED');
     await pool.query(`INSERT INTO health_campaign(account_id,property_id,medicine_id,administration_route,
       selection_mode,applied_on,created_by,updated_by,created_at)
       SELECT $1,$2,$3,'ORAL','MANUAL',$4,$5,$5,now()+make_interval(secs=>n)

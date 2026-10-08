@@ -3,8 +3,8 @@ import {asyncHandler} from '../../core/async-handler.js';
 import {authenticate,requireModule,requirePermission,requirePropertyContext} from '../auth/auth.middleware.js';
 import type {RequestMetadata} from '../auth/auth.types.js';
 import {applyCleaning,cancelCleaning,createCleaning,createProduct,listCleanings,
-  listCleaningOptions,listProducts,updateCleaning} from './cleanings.service.js';
-import {cleaningSchema,idSchema,productSchema} from './cleanings.schemas.js';
+  listCleaningOptions,listProducts,updateCleaning,updateProduct} from './cleanings.service.js';
+import {cleaningSchema,idSchema,productSchema,productUpdateSchema} from './cleanings.schemas.js';
 const metadata=(request:Request):RequestMetadata=>({ipAddress:request.ip||null,
   userAgent:request.header('user-agent')?.slice(0,1000)??null});
 export const cleaningsRouter=Router();
@@ -15,6 +15,10 @@ cleaningsRouter.get('/products',requirePermission('CLEANING_VIEW'),asyncHandler(
 cleaningsRouter.post('/products',requirePermission('CLEANING_MANAGE'),asyncHandler(async(request,response)=>{
   response.status(201).json({ok:true,data:await createProduct(request.auth!,request.propertyContext!,
     productSchema.parse(request.body),metadata(request))});
+}));
+cleaningsRouter.patch('/products/:id',requirePermission('CATALOG_MANAGE'),asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await updateProduct(request.auth!,request.propertyContext!,idSchema.parse(request.params).id,
+    productUpdateSchema.parse(request.body),metadata(request))});
 }));
 cleaningsRouter.get('/options',requirePermission('CLEANING_VIEW'),asyncHandler(async(request,response)=>{
   response.json({ok:true,data:await listCleaningOptions(request.propertyContext!)});

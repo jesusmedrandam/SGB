@@ -53,6 +53,16 @@ const verificationLimiter = rateLimit({
   },
 });
 
+// Session renewal must not spend the allowance reserved for sign-in attempts.
+const refreshLimiter=rateLimit({windowMs:15*60*1000,limit:30,standardHeaders:'draft-8',legacyHeaders:false,
+  handler(request,response){
+    const reset=(request as Request&{rateLimit?:{resetTime?:Date}}).rateLimit?.resetTime?.getTime()??Date.now()+15*60*1000;
+    const seconds=Math.max(1,Math.ceil((reset-Date.now())/1000));
+    response.status(429).json({ok:false,error:{code:'SESSION_REFRESH_RATE_LIMIT',retryAfterSeconds:seconds,
+      message:`Se renovó la sesión demasiadas veces. Volveremos a intentar en ${Math.ceil(seconds/60)} minuto(s). Tus cambios siguen guardados.`}});
+  },
+});
+
 function metadata(request: Request): RequestMetadata {
   return {
     ipAddress: request.ip || null,
@@ -134,7 +144,7 @@ authRouter.post('/login', authLimiter, asyncHandler(async (request, response) =>
   response.json({ ok: true, data: sessionPayload(session) });
 }));
 
-authRouter.post('/refresh', authLimiter, asyncHandler(async (request, response) => {
+authRouter.post('/refresh', refreshLimiter, asyncHandler(async (request, response) => {
   const refreshToken = readCookie(request, env.REFRESH_COOKIE_NAME);
   if (!refreshToken) throw unauthorized();
   const session = await refreshSession(refreshToken, metadata(request));

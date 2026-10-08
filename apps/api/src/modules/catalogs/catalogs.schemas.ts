@@ -10,4 +10,7 @@ export const createCatalogItemSchema = z.object({
   name: z.string().trim().min(2).max(160),
   speciesCode: z.literal('BOVINE').nullable().optional(),
 });
-export const catalogItemStateSchema = z.object({ active: z.boolean() });
+export const catalogItemStateSchema = z.object({active:z.boolean().optional(),
+  name:z.string().trim().min(2).max(160).optional(),expectedVersion:z.number().int().positive().optional()})
+  .refine(value=>value.active!==undefined||value.name!==undefined,'Indica los cambios de la opción.')
+  .refine(value=>value.name===undefined||value.expectedVersion!==undefined,'Actualiza la opción antes de editar su nombre.');

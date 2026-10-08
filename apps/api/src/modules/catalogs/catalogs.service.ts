@@ -7,6 +7,7 @@ import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.t
 import type { EditableCatalogCode } from './catalogs.schemas.js';
 
 interface CatalogItemRow {
+  version:number;
   id: string;
   catalog_code: EditableCatalogCode;
   name: string;
@@ -17,7 +18,7 @@ interface CatalogItemRow {
 }
 
 function item(row: CatalogItemRow) {
-  return { id: row.id, catalogCode: row.catalog_code, name: row.name,
+  return { id: row.id, version:row.version, catalogCode: row.catalog_code, name: row.name,
     speciesCode: row.species_code, systemDefined: row.system_defined, active: row.active, itemCode: row.item_code };
 }
 
@@ -47,7 +48,7 @@ export async function getCatalogReference(context: PropertyContext) {
 
 export async function listCatalogItems(context: PropertyContext, code: EditableCatalogCode) {
   const result = await pool.query<CatalogItemRow>(
-    `SELECT ci.id, ci.catalog_code, ci.name, ci.species_code, ci.system_defined, ci.active, ci.item_code
+    `SELECT ci.id, ci.version, ci.catalog_code, ci.name, ci.species_code, ci.system_defined, ci.active, ci.item_code
      FROM governed_catalog_item ci
      JOIN catalog_definition cd ON cd.code = ci.catalog_code AND cd.active
      WHERE ci.catalog_code = $2 AND ci.deleted_at IS NULL
@@ -105,6 +106,13 @@ async function audit(client: PoolClient, auth: AuthState, context: PropertyConte
   );
 }
 
+export async function ensureCatalogAdministrator(client:PoolClient,auth:AuthState,context:PropertyContext){
+  if(auth.isSuperadmin&&auth.supportMode)return;
+  if(!(await client.query(`SELECT 1 FROM property_role WHERE id=$1 AND property_id=$2
+    AND active AND is_system AND code IN ('OWNER','ADMINISTRATOR') FOR SHARE`,[context.roleId,context.propertyId])).rowCount)
+    throw forbidden('CATALOG_ADMIN_REQUIRED','Solo un administrador puede modificar los registros de esta cuenta.');
+}
+
 export async function createCatalogItem(auth: AuthState, context: PropertyContext,
   code: EditableCatalogCode, input: { name: string; speciesCode?: 'BOVINE' | null | undefined }, metadata: RequestMetadata) {
   return inTransaction(async (client) => {
@@ -119,7 +127,7 @@ export async function createCatalogItem(auth: AuthState, context: PropertyContex
       `INSERT INTO governed_catalog_item(catalog_code, account_id, property_id, species_code,
          name, created_by)
        VALUES($1,$2,$3,$4,$5,$6)
-       RETURNING id, catalog_code, name, species_code, system_defined, active, item_code`,
+       RETURNING id, version, catalog_code, name, species_code, system_defined, active, item_code`,
       [code, accountId, context.propertyId, speciesCode, input.name, auth.userId],
     );
     const created = item(result.rows[0]!);
@@ -130,17 +138,29 @@ export async function createCatalogItem(auth: AuthState, context: PropertyContex
 
 export async function setCatalogItemActive(auth: AuthState, context: PropertyContext,
   code: EditableCatalogCode, id: string, active: boolean, metadata: RequestMetadata) {
+  return updateCatalogItem(auth,context,code,id,{active},metadata);
+}
+export async function updateCatalogItem(auth:AuthState,context:PropertyContext,code:EditableCatalogCode,id:string,
+  input:{name?:string|undefined;active?:boolean|undefined;expectedVersion?:number|undefined},metadata:RequestMetadata){
   return inTransaction(async (client) => {
     const accountId = await ensureManageAccess(client, auth, context, code, null);
+    await ensureCatalogAdministrator(client,auth,context);
+    await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
     const current = await client.query<CatalogItemRow>(
-      `SELECT id, catalog_code, name, species_code, system_defined, active, item_code
+      `SELECT id, version, catalog_code, name, species_code, system_defined, active, item_code
        FROM governed_catalog_item
        WHERE id = $1 AND catalog_code = $2 AND account_id = $3 AND NOT system_defined AND deleted_at IS NULL
        FOR UPDATE`,
       [id, code, accountId],
     );
     if (!current.rows[0]) throw invalidRequest('CATALOG_ITEM_UNAVAILABLE', 'La opción no pertenece a esta cuenta.');
-    if (current.rows[0].active === active) return item(current.rows[0]);
+    if(input.expectedVersion!==undefined&&input.expectedVersion!==current.rows[0].version)
+      throw conflict('CATALOG_VERSION_CONFLICT','La opción cambió. Actualiza el catálogo antes de guardar.');
+    const active=input.active??current.rows[0].active;const name=input.name??current.rows[0].name;
+    if(current.rows[0].active===active&&current.rows[0].name===name)return item(current.rows[0]);
+    if((await client.query(`SELECT 1 FROM governed_catalog_item WHERE catalog_code=$1
+      AND lower(name)=lower($2) AND id<>$3 AND deleted_at IS NULL AND (system_defined OR account_id=$4)`,
+      [code,name,id,accountId])).rowCount)throw conflict('CATALOG_NAME_TAKEN','Esta opción ya existe para la cuenta.');
     if (active && current.rows[0].species_code) {
       const species = await client.query(
         `SELECT 1 FROM effective_property_species
@@ -150,11 +170,11 @@ export async function setCatalogItemActive(auth: AuthState, context: PropertyCon
       if (!species.rowCount) throw conflict('SPECIES_DISABLED', 'La especie de esta opción ya no está habilitada.');
     }
     const updated = await client.query<CatalogItemRow>(
-      `UPDATE governed_catalog_item SET active = $2 WHERE id = $1
-       RETURNING id, catalog_code, name, species_code, system_defined, active, item_code`, [id, active],
+      `UPDATE governed_catalog_item SET active = $2,name=$3 WHERE id = $1
+       RETURNING id, version, catalog_code, name, species_code, system_defined, active, item_code`, [id, active,name],
     );
     const after = item(updated.rows[0]!);
-    await audit(client, auth, context, metadata, 'CATALOG_ITEM_STATE_CHANGED', id,
+    await audit(client, auth, context, metadata, input.name===undefined?'CATALOG_ITEM_STATE_CHANGED':'CATALOG_ITEM_UPDATED', id,
       item(current.rows[0]), after);
     return after;
   });
