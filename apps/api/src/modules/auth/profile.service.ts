@@ -1,8 +1,19 @@
 import sharp from 'sharp';
+import type {PoolClient} from 'pg';
 import {invalidRequest,unauthorized} from '../../core/errors.js';
 import {inTransaction} from '../../database/transaction.js';
 import {hashPassword,verifyPassword} from '../../security/password.js';
 import type {AuthState,RequestMetadata} from './auth.types.js';
+
+export async function lockOwnProfile(client:PoolClient,auth:AuthState){
+  const user=(await client.query<{email:string;display_name:string;password_hash:string;profile_photo_data:string|null}>(
+    `SELECT u.email::text,u.display_name,u.password_hash,u.profile_photo_data FROM app_user u JOIN user_session s ON s.user_id=u.id
+     WHERE u.id=$1 AND s.id=$2 AND u.status='ACTIVE' AND u.deleted_at IS NULL
+       AND s.revoked_at IS NULL AND s.expires_at>now() AND s.access_expires_at>now() FOR UPDATE OF u,s`,
+    [auth.userId,auth.sessionId])).rows[0];
+  if(!user)throw unauthorized();
+  return user;
+}
 
 export async function updateProfile(auth:AuthState,input:{displayName:string;profilePhoto?:string|null|undefined},metadata:RequestMetadata){
   let photo=input.profilePhoto;
@@ -19,12 +30,7 @@ export async function updateProfile(auth:AuthState,input:{displayName:string;pro
     }catch{throw invalidRequest('INVALID_PROFILE_PHOTO','Elige una foto válida en formato JPG, PNG o WebP.');}
   }
   return inTransaction(async client=>{
-    const before=(await client.query<{display_name:string;profile_photo_data:string|null}>(
-      `SELECT u.display_name,u.profile_photo_data FROM app_user u JOIN user_session s ON s.user_id=u.id
-       WHERE u.id=$1 AND s.id=$2 AND u.status='ACTIVE' AND u.deleted_at IS NULL
-         AND s.revoked_at IS NULL AND s.expires_at>now() AND s.access_expires_at>now() FOR UPDATE OF u,s`,
-      [auth.userId,auth.sessionId])).rows[0];
-    if(!before)throw unauthorized();
+    const before=await lockOwnProfile(client,auth);
     const updated=(await client.query(
       `UPDATE app_user SET display_name=$2,profile_photo_data=$3 WHERE id=$1
        RETURNING id,email,display_name AS "displayName",is_superadmin AS "isSuperadmin",profile_photo_data AS "profilePhoto"`,
@@ -44,12 +50,7 @@ export async function updateProfile(auth:AuthState,input:{displayName:string;pro
 
 export async function changePassword(auth:AuthState,input:{currentPassword:string;newPassword:string},metadata:RequestMetadata){
   await inTransaction(async client=>{
-    const user=(await client.query<{password_hash:string}>(
-      `SELECT u.password_hash FROM app_user u JOIN user_session s ON s.user_id=u.id
-       WHERE u.id=$1 AND s.id=$2 AND u.status='ACTIVE' AND u.deleted_at IS NULL
-         AND s.revoked_at IS NULL AND s.expires_at>now() AND s.access_expires_at>now() FOR UPDATE OF u,s`,
-      [auth.userId,auth.sessionId])).rows[0];
-    if(!user)throw unauthorized();
+    const user=await lockOwnProfile(client,auth);
     if(!await verifyPassword(input.currentPassword,user.password_hash))
       throw invalidRequest('CURRENT_PASSWORD_INVALID','La contraseña actual no es correcta.');
     await client.query(`UPDATE app_user SET password_hash=$2,failed_login_count=0,locked_until=NULL WHERE id=$1`,
@@ -57,6 +58,7 @@ export async function changePassword(auth:AuthState,input:{currentPassword:strin
     await client.query(`UPDATE user_session SET revoked_at=now() WHERE user_id=$1 AND id<>$2 AND revoked_at IS NULL`,
       [auth.userId,auth.sessionId]);
     await client.query(`UPDATE password_reset_token SET consumed_at=now() WHERE user_id=$1 AND consumed_at IS NULL`,[auth.userId]);
+    await client.query('UPDATE email_change_token SET consumed_at=now() WHERE user_id=$1 AND consumed_at IS NULL',[auth.userId]);
     await client.query(`INSERT INTO audit_event(actor_user_id,property_id,active_role_id,action,entity_type,
       entity_id,ip_address,user_agent) VALUES($1::uuid,$2,$3,'USER_PASSWORD_CHANGED','APP_USER',$1::text,$4,$5)`,
       [auth.userId,auth.activePropertyId,auth.activeRoleId,metadata.ipAddress,metadata.userAgent]);

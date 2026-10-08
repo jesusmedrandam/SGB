@@ -460,6 +460,7 @@ export async function resetPassword(token:string,password:string,metadata:Reques
       locked_until=NULL WHERE id=$1`,[current.user_id,passwordHash]);
     await client.query(`UPDATE password_reset_token SET consumed_at=now()
       WHERE user_id=$1 AND consumed_at IS NULL`,[current.user_id]);
+    await client.query('UPDATE email_change_token SET consumed_at=now() WHERE user_id=$1 AND consumed_at IS NULL',[current.user_id]);
     await client.query(`UPDATE user_session SET revoked_at=now()
       WHERE user_id=$1 AND revoked_at IS NULL`,[current.user_id]);
     await client.query(`INSERT INTO audit_event(actor_user_id,action,entity_type,entity_id,

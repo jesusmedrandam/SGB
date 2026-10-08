@@ -58,3 +58,7 @@ export const contextSchema = z.object({
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+
+export const emailChangeSchema=z.strictObject({email:z.email().max(254).transform(value=>value.trim().toLowerCase()),
+  currentPassword:z.string().min(1).max(128)});
+export const sessionIdSchema=z.object({id:z.uuid()});

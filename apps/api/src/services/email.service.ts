@@ -129,3 +129,18 @@ export async function sendPropertyInvitationEmail(input: {
       </div></body></html>`,
   });
 }
+
+export async function sendEmailChangeConfirmation(input:{email:string;displayName:string;token:string;expiresAt:Date}){
+  const link=frontendUrl({'change-email':input.token});
+  const expires=new Intl.DateTimeFormat('es-EC',{dateStyle:'long',timeStyle:'short',timeZone:'America/Guayaquil'}).format(input.expiresAt);
+  return sendTransactionalEmail({email:input.email,displayName:input.displayName,subject:'Confirma tu nuevo correo en SGB',tag:'sgb-email-change',
+    htmlContent:`<html><body><h1>Cambiar correo electrónico</h1><p>Hola, ${escapeHtml(input.displayName)}.</p>
+    <p>Confirma este correo para usarlo al iniciar sesión. Se cerrarán las sesiones de tu cuenta.</p>
+    <p><a href="${escapeHtml(link)}">Confirmar mi nuevo correo</a></p><p>El enlace vence el ${escapeHtml(expires)}.
+    Si no solicitaste el cambio, ignora este mensaje.</p></body></html>`});
+}
+export async function sendEmailChangedNotice(input:{email:string;displayName:string;newEmail:string}){
+  return sendTransactionalEmail({email:input.email,displayName:input.displayName,subject:'Tu correo de SGB cambió',tag:'sgb-email-changed',
+    htmlContent:`<html><body><p>Hola, ${escapeHtml(input.displayName)}.</p><p>Tu correo para iniciar sesión ahora es
+    ${escapeHtml(input.newEmail)}. Se cerraron todas las sesiones. Si no autorizaste el cambio, contacta al administrador de SGB.</p></body></html>`});
+}
