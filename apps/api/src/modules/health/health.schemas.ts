@@ -61,3 +61,5 @@ export const campaignSchema=z.object({
 export type MedicineInput=z.infer<typeof medicineSchema>;
 export type CampaignInput=z.infer<typeof campaignSchema>;
 export type ConditionInput=z.infer<typeof conditionSchema>;
+
+export const medicineUpdateSchema=z.strictObject({medicine:medicineSchema,active:z.boolean(),expectedVersion:z.number().int().positive()});

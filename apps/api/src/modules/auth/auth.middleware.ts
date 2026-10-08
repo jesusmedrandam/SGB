@@ -52,6 +52,8 @@ export const authenticate: RequestHandler = async (request, response, next) => {
       activePropertyId: row.active_property_id,
       activeRoleId: row.active_role_id,
     };
+    await pool.query(`UPDATE user_session SET last_seen_at=now() WHERE id=$1
+      AND last_seen_at<now()-interval '1 minute'`,[row.session_id]);
     await idempotentMutation(request, response, next);
   } catch (error) {
     next(error);

@@ -10,7 +10,7 @@ import {createAccountProperty} from '../properties/properties.service.js';
 import {createWeighing,voidWeighing} from '../weighings/weighings.service.js';
 import {medicineSchema} from './health.schemas.js';
 import {applyCampaign,cancelCampaign,createCampaign,createMedicine,listCampaigns,
-  listHealthOptions,listMedicines,updateCampaign} from './health.service.js';
+  listHealthOptions,listMedicines,updateCampaign,updateMedicine,listConditionTreatments} from './health.service.js';
 import {createCondition,listConditions,resolveCondition,updateCondition} from './conditions.service.js';
 
 const metadata={ipAddress:'127.0.0.1',userAgent:'sgb-health-test'};
@@ -152,5 +152,34 @@ test('sanidad respeta propiedad, dosis, selección, borradores y aplicación ún
     assert.ok((await listMedicines(extraContext)).some(item=>item.id===classified.id));
     assert.ok((await listCatalogItems(extraContext,'ADMINISTRATION_ROUTES')).some(item=>item.id===customRoute.id));
     assert.equal((await pool.query(`SELECT actor_user_id FROM audit_event WHERE entity_id=$1 AND action='HEALTH_MEDICINE_CREATED'`,[weighted.id])).rows[0]?.actor_user_id,auth.userId);
+    const edit={medicine:medicineSchema.parse({name:'Vacuna corregida',kind:'OTRO',defaultUnitCode:'GRAM',
+      administrationRoutes:['ORAL'],withdrawalMilkDays:5,withdrawalMeatDays:15,activeIngredient:'Ingrediente nuevo'}),active:false,expectedVersion:1};
+    const updatedMedicine=await updateMedicine(auth,context,medicine.id as string,edit,metadata);
+    assert.equal(updatedMedicine.version,2);assert.equal(updatedMedicine.active,false);
+    await assert.rejects(()=>updateMedicine(auth,context,medicine.id as string,edit,metadata),
+      (error:{code?:string})=>error.code==='MEDICINE_VERSION_CONFLICT');
+    await assert.rejects(()=>updateMedicine(auth,context,medicine.id as string,{...edit,expectedVersion:2,
+      medicine:{...edit.medicine,administrationRoutes:[randomUUID()]}},metadata),
+      (error:{code?:string})=>error.code==='HEALTH_ROUTE_INVALID');
+    const historical=(await listConditionTreatments(context,condition.id))[0]!;
+    assert.equal(historical.medicineName,'Vacuna de prueba');assert.equal(historical.kind,'VACUNA');
+    assert.equal(historical.withdrawalMilkDays,2);assert.equal(historical.withdrawalMeatDays,7);
+    assert.equal(historical.animals[0].unitCode,'MILLILITER');assert.equal(historical.administrationRoute,'INTRAMUSCULAR');
+    await assert.rejects(()=>listConditionTreatments(extraContext,condition.id),
+      (error:{code?:string})=>error.code==='HEALTH_CONDITION_NOT_FOUND');
+    const custom=(await pool.query(`INSERT INTO property_role(property_id,code,name,created_by)
+      VALUES($1,'CUSTOM_MEDICINE','Colaborador de catálogos',$2) RETURNING id`,[property.id,auth.userId])).rows[0]!;
+    await pool.query(`INSERT INTO membership_role(membership_id,property_id,role_id,assigned_by)
+      SELECT id,property_id,$3,$2 FROM property_membership WHERE property_id=$1 AND user_id=$2`,[property.id,auth.userId,custom.id]);
+    await pool.query(`INSERT INTO role_permission(role_id,permission_code) VALUES($1,'CATALOG_MANAGE')`,[custom.id]);
+    await assert.rejects(()=>updateMedicine({...auth,activeRoleId:custom.id},
+      {...context,roleId:custom.id,roleCode:'ADMINISTRATOR'},medicine.id as string,{...edit,expectedVersion:2},metadata),
+      (error:{code?:string})=>error.code==='MEDICINE_ADMIN_REQUIRED');
+    await pool.query(`INSERT INTO health_campaign(account_id,property_id,medicine_id,administration_route,
+      selection_mode,applied_on,created_by,updated_by,created_at)
+      SELECT $1,$2,$3,'ORAL','MANUAL',$4,$5,$5,now()+make_interval(secs=>n)
+      FROM generate_series(1,251) n`,[registration.accountId,property.id,weighted.id,today,auth.userId]);
+    assert.equal((await listCampaigns(context)).some(row=>row.id===historical.id),false);
+    assert.equal((await listConditionTreatments(context,condition.id))[0]?.id,historical.id);
   }finally{await pool.end();}
 });

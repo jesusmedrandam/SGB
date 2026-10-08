@@ -52,11 +52,11 @@ app.use((request, response, next) => {
 
 app.get('/health', (_request, response) => {
   response.json({ ok: true, service: 'sgb-api', version: '2.0.0-alpha.1',
-    capabilities:['superadmin-support','media-details','selective-offline-media','explicit-support-mode','medicine-weight-dose','medicine-classification-dose','pasture-occupation-history','user-profile'] });
+    capabilities:['superadmin-support','media-details','selective-offline-media','explicit-support-mode','medicine-weight-dose','medicine-classification-dose','pasture-occupation-history','user-profile','account-email-change','account-sessions','medicine-edit-history','condition-treatment-history'] });
 });
 
 app.get('/health/ready', asyncHandler(async (_request, response) => {
-  const result=await pool.query<{support_ready:boolean;support_modes_ready:boolean;medicine_doses_ready:boolean;medicine_classification_doses_ready:boolean;user_profile_ready:boolean}>(`SELECT EXISTS(
+  const result=await pool.query<{support_ready:boolean;support_modes_ready:boolean;medicine_doses_ready:boolean;medicine_classification_doses_ready:boolean;user_profile_ready:boolean;account_security_ready:boolean;medicine_history_ready:boolean}>(`SELECT EXISTS(
     SELECT 1 FROM pg_trigger WHERE tgname='audit_event_mark_superadmin' AND NOT tgisinternal
   ) AS support_ready,EXISTS(SELECT 1 FROM information_schema.columns
     WHERE table_schema='public' AND table_name='user_session' AND column_name='support_mode') AS support_modes_ready,
@@ -65,11 +65,17 @@ app.get('/health/ready', asyncHandler(async (_request, response) => {
     EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='health_medicine'
       AND column_name='dose_classification_ranges') AS medicine_classification_doses_ready,
     EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='app_user'
-      AND column_name='profile_photo_data') AS user_profile_ready`);
+      AND column_name='profile_photo_data') AS user_profile_ready,
+    to_regclass('public.email_change_token') IS NOT NULL AS account_security_ready,
+    EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='health_campaign'
+      AND column_name='medicine_snapshot') AS medicine_history_ready`);
   response.json({ ok: true, database: 'ready',supportReady:result.rows[0]?.support_ready===true,
     supportModesReady:result.rows[0]?.support_modes_ready===true,medicineDosesReady:result.rows[0]?.medicine_doses_ready===true,
     medicineClassificationDosesReady:result.rows[0]?.medicine_classification_doses_ready===true,
-    userProfileReady:result.rows[0]?.user_profile_ready===true });
+    userProfileReady:result.rows[0]?.user_profile_ready===true,
+    accountSecurityReady:result.rows[0]?.account_security_ready===true,
+    medicineHistoryReady:result.rows[0]?.medicine_history_ready===true,
+    emailDeliveryReady:Boolean(env.BREVO_API_KEY&&env.BREVO_SENDER_EMAIL) });
 }));
 
 app.use('/auth', authRouter);

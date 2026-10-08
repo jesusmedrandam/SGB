@@ -7,7 +7,7 @@ import { clearRefreshCookie, readCookie, setRefreshCookie } from '../../security
 import { authenticate } from './auth.middleware.js';
 import {
   contextSchema,
-  profileSchema,changePasswordSchema,
+  profileSchema,changePasswordSchema,emailChangeSchema,sessionIdSchema,
   loginSchema,
   registerSchema,
   resendVerificationSchema,
@@ -28,6 +28,7 @@ import {
 import type { RequestMetadata } from './auth.types.js';
 import {updateProfile,changePassword} from './profile.service.js';
 
+import {requestEmailChange,confirmEmailChange,listOwnSessions,revokeOwnSessions} from './account-security.service.js';
 export const authRouter = Router();
 
 const authLimiter = rateLimit({
@@ -169,4 +170,22 @@ authRouter.post('/context', authenticate, asyncHandler(async (request, response)
   const { propertyId, roleId } = contextSchema.parse(request.body);
   const data = await changeContext(request.auth!, propertyId, roleId, metadata(request));
   response.json({ ok: true, data });
+}));
+
+authRouter.post('/email',verificationLimiter,authenticate,asyncHandler(async(request,response)=>{
+  const data=await requestEmailChange(request.auth!,emailChangeSchema.parse(request.body),metadata(request));
+  response.status(202).json({ok:true,data});
+}));
+authRouter.post('/email/confirm',authLimiter,asyncHandler(async(request,response)=>{
+  await confirmEmailChange(verifyEmailSchema.parse(request.body).token,metadata(request));
+  response.json({ok:true,data:{changed:true}});
+}));
+authRouter.get('/sessions',authenticate,asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await listOwnSessions(request.auth!)});
+}));
+authRouter.post('/sessions/revoke-others',authenticate,asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await revokeOwnSessions(request.auth!,null,metadata(request))});
+}));
+authRouter.delete('/sessions/:id',authenticate,asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await revokeOwnSessions(request.auth!,sessionIdSchema.parse(request.params).id,metadata(request))});
 }));

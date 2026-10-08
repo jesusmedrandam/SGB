@@ -30,7 +30,7 @@ export async function healthAudit(client:PoolClient,auth:AuthState,context:Prope
       before===null?null:JSON.stringify(before),JSON.stringify(after),metadata.ipAddress,metadata.userAgent]);
 }
 function medicine(row:Record<string,unknown>){return {
-  id:row.id,name:row.name,kind:row.kind,activeIngredient:row.active_ingredient,
+  id:row.id,version:row.version,name:row.name,kind:row.kind,activeIngredient:row.active_ingredient,
   defaultUnitCode:row.default_unit_code,suggestedDose:row.suggested_dose,
   treatmentCatalogItemId:row.treatment_catalog_item_id,
   indications:row.indications,withdrawalMilkDays:row.withdrawal_milk_days,
@@ -108,7 +108,11 @@ export async function listHealthOptions(context:PropertyContext){
   return {animals:animals.rows,groups:groups.rows,units:units.rows,classifications:classifications.rows,
     administrationRoutes:await listCatalogItems(context,'ADMINISTRATION_ROUTES')};
 }
-const fields=`c.id,c.medicine_id AS "medicineId",m.name AS "medicineName",m.kind,
+const fields=`c.id,c.medicine_id AS "medicineId",COALESCE(c.medicine_snapshot->>'name',m.name) AS "medicineName",
+ COALESCE(c.medicine_snapshot->>'kind',m.kind) AS kind,
+ c.medicine_snapshot->>'active_ingredient' AS "activeIngredient",
+ (c.medicine_snapshot->>'withdrawal_milk_days')::int AS "withdrawalMilkDays",
+ (c.medicine_snapshot->>'withdrawal_meat_days')::int AS "withdrawalMeatDays",
  c.administration_route AS "administrationRoute",c.selection_mode AS "selectionMode",
  c.group_id AS "groupId",g.name AS "groupName",c.applied_on::text AS "appliedOn",
  c.responsible,c.notes,c.status,c.version::int,c.created_at AS "createdAt",
@@ -266,5 +270,44 @@ export async function cancelCampaign(auth:AuthState,context:PropertyContext,id:s
     await healthAudit(client,auth,context,metadata,'HEALTH_CAMPAIGN_CANCELLED',
       'HEALTH_CAMPAIGN',id,before,after);
     return after;
+  });
+}
+
+export async function listConditionTreatments(context:PropertyContext,id:string){
+  if(!(await pool.query('SELECT 1 FROM health_condition WHERE id=$1 AND property_id=$2',[id,context.propertyId])).rowCount)
+    throw new ApiError(404,'HEALTH_CONDITION_NOT_FOUND','Condición no encontrada en esta propiedad.');
+  return (await pool.query(`SELECT ${fields} ${joins} WHERE c.property_id=$1 AND c.status='COMPLETADO'
+    AND EXISTS(SELECT 1 FROM health_campaign_animal d WHERE d.campaign_id=c.id AND d.condition_id=$2 AND d.selected)
+    ORDER BY c.applied_on DESC,c.created_at DESC,c.id DESC`,[context.propertyId,id])).rows;
+}
+export async function updateMedicine(auth:AuthState,context:PropertyContext,id:string,
+  input:{medicine:MedicineInput;active:boolean;expectedVersion:number},metadata:RequestMetadata){
+  return inTransaction(async client=>{
+    const accountId=await ensureManageAccess(client,auth,context,'TREATMENT_TYPES',null);
+    const administrator=await client.query(`SELECT 1 FROM property_role WHERE id=$1 AND property_id=$2
+      AND active AND is_system AND code IN ('OWNER','ADMINISTRATOR') FOR SHARE`,[context.roleId,context.propertyId]);
+    if(!administrator.rowCount)throw forbidden('MEDICINE_ADMIN_REQUIRED','Solo un administrador puede editar medicamentos.');
+    await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
+    const current=(await client.query('SELECT * FROM health_medicine WHERE id=$1 AND account_id=$2 FOR UPDATE',[id,accountId])).rows[0];
+    if(!current)throw new ApiError(404,'HEALTH_MEDICINE_NOT_FOUND','Medicamento no encontrado en esta cuenta.');
+    if(current.version!==input.expectedVersion)throw conflict('MEDICINE_VERSION_CONFLICT','El medicamento cambi?. Actualiza la pantalla antes de editar.');
+    const config=input.medicine;const routes=config.administrationRoutes??current.administration_routes;
+    await validateRoutes(client,accountId,routes);
+    if(config.treatmentCatalogItemId&&(await client.query(`SELECT 1 FROM governed_catalog_item WHERE id=$1
+      AND catalog_code='TREATMENT_TYPES' AND active AND deleted_at IS NULL AND (system_defined OR account_id=$2)`,
+      [config.treatmentCatalogItemId,accountId])).rowCount!==1)
+      throw invalidRequest('TREATMENT_TYPE_INVALID','Selecciona una clase farmacológica disponible.');
+    if((await client.query('SELECT 1 FROM health_medicine WHERE account_id=$1 AND lower(name)=lower($2) AND id<>$3',[accountId,config.name,id])).rowCount)
+      throw conflict('HEALTH_MEDICINE_EXISTS','Este medicamento ya est? registrado en la cuenta.');
+    const saved=(await client.query(`UPDATE health_medicine SET name=$2,kind=$3,active_ingredient=$4,
+      default_unit_code=$5,suggested_dose=$6,indications=$7,withdrawal_milk_days=$8,withdrawal_meat_days=$9,
+      treatment_catalog_item_id=$10,administration_routes=$11,dose_amount=$12,dose_weight=$13,
+      dose_weight_unit_code=$14,dose_classification_ranges=$15::jsonb,active=$16 WHERE id=$1 RETURNING *`,
+      [id,config.name,config.kind,config.activeIngredient??null,config.defaultUnitCode,config.suggestedDose??null,
+        config.indications??null,config.withdrawalMilkDays,config.withdrawalMeatDays,config.treatmentCatalogItemId??null,
+        routes,config.doseAmount??null,config.doseWeight??null,config.doseWeightUnitCode??null,
+        JSON.stringify(config.doseClassificationRanges??[]),input.active])).rows[0];
+    await healthAudit(client,auth,context,metadata,'HEALTH_MEDICINE_UPDATED','HEALTH_MEDICINE',id,medicine(current),medicine(saved));
+    return medicine(saved);
   });
 }

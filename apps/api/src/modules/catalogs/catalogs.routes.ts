@@ -6,8 +6,8 @@ import {
   catalogItemParamsSchema, catalogItemStateSchema, catalogParamsSchema, createCatalogItemSchema,
 } from './catalogs.schemas.js';
 import { createCatalogItem, getCatalogReference, listCatalogItems, setCatalogItemActive } from './catalogs.service.js';
-import {createMedicine,listMedicines} from '../health/health.service.js';
-import {medicineSchema} from '../health/health.schemas.js';
+import {createMedicine,listMedicines,updateMedicine} from '../health/health.service.js';
+import {medicineSchema,medicineUpdateSchema,idSchema} from '../health/health.schemas.js';
 
 const metadata = (request: Request): RequestMetadata => ({
   ipAddress: request.ip || null, userAgent: request.header('user-agent')?.slice(0, 1000) ?? null,
@@ -21,6 +21,10 @@ catalogsRouter.get('/medicines',requirePermission('CATALOG_VIEW'),asyncHandler(a
 catalogsRouter.post(['/medicines','/medicines/classification'],requirePermission('CATALOG_MANAGE'),asyncHandler(async(request,response)=>{
   response.status(201).json({ok:true,data:await createMedicine(request.auth!,request.propertyContext!,
     medicineSchema.parse(request.body),metadata(request),'CATALOG_MANAGE')});
+}));
+catalogsRouter.patch('/medicines/:id',requirePermission('CATALOG_MANAGE'),asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await updateMedicine(request.auth!,request.propertyContext!,idSchema.parse(request.params).id,
+    medicineUpdateSchema.parse(request.body),metadata(request))});
 }));
 catalogsRouter.get('/reference', requirePermission('CATALOG_VIEW'), asyncHandler(async (request, response) => {
   response.json({ ok: true, data: await getCatalogReference(request.propertyContext!) });

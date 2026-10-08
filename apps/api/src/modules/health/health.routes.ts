@@ -2,7 +2,7 @@ import {Router,type Request} from 'express';
 import {asyncHandler} from '../../core/async-handler.js';
 import {authenticate,requireModule,requirePermission,requirePropertyContext} from '../auth/auth.middleware.js';
 import type {RequestMetadata} from '../auth/auth.types.js';
-import {applyCampaign,cancelCampaign,createCampaign,createMedicine,listCampaigns,
+import {applyCampaign,cancelCampaign,createCampaign,createMedicine,listCampaigns,listConditionTreatments,
   listHealthOptions,listMedicines,updateCampaign} from './health.service.js';
 import {campaignSchema,idSchema,medicineSchema} from './health.schemas.js';
 import {conditionSchema,resolutionSchema} from './health.schemas.js';
@@ -14,6 +14,9 @@ export const healthRouter=Router();
 healthRouter.use(authenticate,requirePropertyContext,requireModule('HEALTH'));
 healthRouter.get('/conditions',requirePermission('HEALTH_VIEW'),asyncHandler(async(request,response)=>{
   response.json({ok:true,data:await listConditions(request.propertyContext!)});
+}));
+healthRouter.get('/conditions/:id/treatments',requirePermission('HEALTH_VIEW'),asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await listConditionTreatments(request.propertyContext!,idSchema.parse(request.params).id)});
 }));
 healthRouter.post('/conditions',requirePermission('HEALTH_MANAGE'),asyncHandler(async(request,response)=>{
   response.status(201).json({ok:true,data:await createCondition(request.auth!,request.propertyContext!,
