@@ -1,15 +1,18 @@
 import { app } from './app.js';
 import { env } from './config.js';
 import { pool } from './database/pool.js';
+import {expireDrafts} from './core/drafts.js';
 import { processPendingDeletions } from './modules/media/media.service.js';
 
 const server = app.listen(env.PORT, () => {
   console.log(`SGB API escuchando en el puerto ${env.PORT}`);
 });
 const deletionTimer=setInterval(()=>{
+  void expireDrafts().catch(error=>console.error('Caducidad de borradores:',error));
   void processPendingDeletions().catch(error=>console.error('Reintento multimedia:',error));
 },10*60*1000);
 deletionTimer.unref();
+void expireDrafts().catch(error=>console.error('Caducidad de borradores:',error));
 void processPendingDeletions().catch(error=>console.error('Reintento multimedia:',error));
 
 const shutdown = (signal: string) => {

@@ -1,3 +1,4 @@
+import {requireLiveDraft} from '../../core/drafts.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type {PoolClient} from 'pg';
 import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
@@ -43,7 +44,8 @@ async function read(client:PoolClient,id:string){
   return row;
 }
 export async function listActivities(context:PropertyContext){
-  return (await pool.query(`SELECT ${fields} ${joins} WHERE ac.property_id=$1
+  return (await pool.query(`SELECT ${fields} ${joins} WHERE ac.property_id=$1 AND ac.expired_at IS NULL
+    AND (ac.status<>'BORRADOR' OR ac.created_at>now()-interval '24 hours')
     ORDER BY ac.occurred_on DESC,ac.created_at DESC LIMIT 250`,[context.propertyId])).rows;
 }
 export async function listActivityOptions(context:PropertyContext){
@@ -100,10 +102,11 @@ export async function createActivity(auth:AuthState,context:PropertyContext,inpu
   });
 }
 async function draft(client:PoolClient,context:PropertyContext,id:string){
-  const row=(await client.query<{status:string;version:number}>(`SELECT status,version::int
-    FROM livestock_activity WHERE id=$1 AND property_id=$2 FOR UPDATE`,
+  const row=(await client.query<{status:string;version:number;expired:boolean}>(`SELECT status,version::int
+    ,(expired_at IS NOT NULL OR status='BORRADOR' AND created_at<=now()-interval '24 hours') AS expired FROM livestock_activity WHERE id=$1 AND property_id=$2 FOR UPDATE`,
     [id,context.propertyId])).rows[0];
   if(!row)throw new ApiError(404,'ACTIVITY_NOT_FOUND','Actividad no encontrada en esta propiedad.');
+  requireLiveDraft(row);
   if(row.status!=='BORRADOR')throw conflict('ACTIVITY_FINAL','La actividad ya fue aplicada o cancelada.');
   return row;
 }

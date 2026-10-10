@@ -232,9 +232,9 @@ export async function register(input: RegisterInput, metadata: RequestMetadata) 
           [accountId, userId],
         );
         const propertyResult = await client.query<{ id: string }>(
-          `INSERT INTO property(account_id, owner_user_id, name, created_by)
-           VALUES($1,$2,$3,$2) RETURNING id`,
-          [accountId, userId, propertyName],
+          `INSERT INTO property(account_id, owner_user_id, name, created_by,owner_name,area_value,area_unit_code,address)
+           VALUES($1,$2,$3,$2,$4,$5,$6,$7) RETURNING id`,
+          [accountId, userId, propertyName,input.propertyInformation?.ownerName??null,input.propertyInformation?.areaValue??null,input.propertyInformation?.areaUnitCode??null,input.propertyInformation?.address??null],
         );
         propertyId = propertyResult.rows[0]!.id;
         await client.query(

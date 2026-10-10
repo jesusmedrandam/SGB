@@ -1,3 +1,4 @@
+import {requireLiveDraft} from '../../core/drafts.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type {PoolClient} from 'pg';
 import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
@@ -119,7 +120,8 @@ async function read(client:PoolClient,id:string){
   return row;
 }
 export async function listCleanings(context:PropertyContext){
-  return (await pool.query(`SELECT ${fields} ${joins} WHERE c.property_id=$1
+  return (await pool.query(`SELECT ${fields} ${joins} WHERE c.property_id=$1 AND c.expired_at IS NULL
+    AND (c.status<>'BORRADOR' OR c.created_at>now()-interval '24 hours')
     ORDER BY c.started_on DESC,c.created_at DESC LIMIT 250`,[context.propertyId])).rows;
 }
 async function calculatedArea(client:PoolClient,context:PropertyContext,input:CleaningInput,
@@ -176,10 +178,11 @@ export async function createCleaning(auth:AuthState,context:PropertyContext,inpu
   });
 }
 async function draft(client:PoolClient,context:PropertyContext,id:string){
-  const row=(await client.query<{status:string;version:number}>(`SELECT status,version::int
-    FROM pasture_cleaning WHERE id=$1 AND property_id=$2 FOR UPDATE`,
+  const row=(await client.query<{status:string;version:number;expired:boolean}>(`SELECT status,version::int
+    ,(expired_at IS NOT NULL OR status='BORRADOR' AND created_at<=now()-interval '24 hours') AS expired FROM pasture_cleaning WHERE id=$1 AND property_id=$2 FOR UPDATE`,
     [id,context.propertyId])).rows[0];
   if(!row)throw new ApiError(404,'CLEANING_NOT_FOUND','Limpieza no encontrada en esta propiedad.');
+  requireLiveDraft(row);
   if(row.status!=='BORRADOR')throw conflict('CLEANING_FINAL','La limpieza ya fue completada o cancelada.');
   return row;
 }

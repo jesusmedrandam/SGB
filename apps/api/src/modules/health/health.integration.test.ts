@@ -1,3 +1,5 @@
+import {inTransaction} from '../../database/transaction.js';
+import {expireDrafts} from '../../core/drafts.js';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import test from 'node:test';
@@ -181,5 +183,16 @@ test('sanidad respeta propiedad, dosis, selección, borradores y aplicación ún
       FROM generate_series(1,251) n`,[registration.accountId,property.id,weighted.id,today,auth.userId]);
     assert.equal((await listCampaigns(context)).some(row=>row.id===historical.id),false);
     assert.equal((await listConditionTreatments(context,condition.id))[0]?.id,historical.id);
+
+    const expires=byRoute;
+    // Test clock fixture: creation timestamps are immutable through normal application writes.
+    await inTransaction(async client=>{await client.query('SET LOCAL session_replication_role=replica');await client.query("UPDATE health_campaign SET created_at=now()-interval '24 hours' WHERE id=$1",[expires.id]);});
+    assert.equal((await listCampaigns(context)).some(row=>row.id===expires.id),false,'Expired drafts disappear at the 24-hour boundary');
+    await assert.rejects(()=>applyCampaign(auth,context,expires.id,metadata),(error:{code?:string})=>error.code==='DRAFT_EXPIRED');
+    assert.ok(await expireDrafts()>=1);
+    assert.ok((await pool.query('SELECT expired_at FROM health_campaign WHERE id=$1',[expires.id])).rows[0].expired_at);
+    assert.equal((await pool.query("SELECT count(*)::int AS total FROM audit_event WHERE entity_id=$1 AND action LIKE '%DRAFT_EXPIRED'",[expires.id])).rows[0].total,1);
+    assert.equal(await expireDrafts(),0,'Expiration is idempotent');
+    assert.equal((await pool.query('SELECT expired_at FROM health_campaign WHERE id=$1',[historical.id])).rows[0].expired_at,null,'Applied records survive');
   }finally{await pool.end();}
 });

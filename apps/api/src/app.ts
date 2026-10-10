@@ -52,7 +52,7 @@ app.use((request, response, next) => {
 
 app.get('/health', (_request, response) => {
   response.json({ ok: true, service: 'sgb-api', version: '2.0.0-alpha.1',
-    capabilities:['superadmin-support','media-details','selective-offline-media','explicit-support-mode','medicine-weight-dose','medicine-classification-dose','pasture-occupation-history','user-profile','account-email-change','account-sessions','medicine-edit-history','condition-treatment-history','account-catalog-editing','cleaning-sync-validation'] });
+    capabilities:['superadmin-support','media-details','selective-offline-media','explicit-support-mode','medicine-weight-dose','medicine-classification-dose','pasture-occupation-history','user-profile','account-email-change','account-sessions','medicine-edit-history','condition-treatment-history','account-catalog-editing','cleaning-sync-validation','draft-expiry-24h','property-information'] });
 });
 
 app.get('/health/ready', asyncHandler(async (_request, response) => {
@@ -72,7 +72,9 @@ app.get('/health/ready', asyncHandler(async (_request, response) => {
   const catalogs=await pool.query(`SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
     AND table_name='pasture_cleaning_product' AND column_name='product_name') AND EXISTS(SELECT 1 FROM information_schema.columns
     WHERE table_schema='public' AND table_name='governed_catalog_item' AND column_name='version') AS ready`);
-  response.json({ ok: true, database: 'ready',accountCatalogReady:catalogs.rows[0]?.ready===true,supportReady:result.rows[0]?.support_ready===true,
+  const features=await pool.query(`SELECT to_regprocedure('public.expire_unapplied_drafts()') IS NOT NULL AS drafts,
+    EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='property' AND column_name='owner_name') AS properties`);
+  response.json({ draftExpiryReady:features.rows[0].drafts,propertyInformationReady:features.rows[0].properties,ok: true, database: 'ready',accountCatalogReady:catalogs.rows[0]?.ready===true,supportReady:result.rows[0]?.support_ready===true,
     supportModesReady:result.rows[0]?.support_modes_ready===true,medicineDosesReady:result.rows[0]?.medicine_doses_ready===true,
     medicineClassificationDosesReady:result.rows[0]?.medicine_classification_doses_ready===true,
     userProfileReady:result.rows[0]?.user_profile_ready===true,

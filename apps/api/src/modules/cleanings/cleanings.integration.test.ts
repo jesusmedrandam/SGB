@@ -1,3 +1,6 @@
+import {inTransaction} from '../../database/transaction.js';
+import {getPropertySettings,updatePropertyInformation,createAccountProperty} from '../properties/properties.service.js';
+import {expireDrafts} from '../../core/drafts.js';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import test from 'node:test';
@@ -75,5 +78,27 @@ test('limpieza calcula área y consumo y preserva el historial por propiedad',as
     await assert.rejects(()=>createProduct({...auth,activeRoleId:viewer.id},
       {...context,roleId:viewer.id},{name:'No permitido'},metadata),
       (error:{code?:string})=>error.code==='CLEANING_DENIED');
+
+    const expires=await createCleaning(auth,context,{...input,products:[],applicationCount:null,areaType:'TOTAL',partialPercent:null},metadata);
+    // Test clock fixture: creation timestamps are immutable through normal application writes.
+    await inTransaction(async client=>{await client.query('SET LOCAL session_replication_role=replica');await client.query("UPDATE pasture_cleaning SET created_at=now()-interval '24 hours' WHERE id=$1",[expires.id]);});
+    assert.equal((await listCleanings(context)).some(row=>row.id===expires.id),false,'Expired drafts disappear at the 24-hour boundary');
+    await assert.rejects(()=>applyCleaning(auth,context,expires.id,metadata),(error:{code?:string})=>error.code==='DRAFT_EXPIRED');
+    assert.ok(await expireDrafts()>=1);
+    assert.ok((await pool.query('SELECT expired_at FROM pasture_cleaning WHERE id=$1',[expires.id])).rows[0].expired_at);
+    assert.equal((await pool.query("SELECT count(*)::int AS total FROM audit_event WHERE entity_id=$1 AND action LIKE '%DRAFT_EXPIRED'",[expires.id])).rows[0].total,1);
+    assert.equal(await expireDrafts(),0,'Expiration is idempotent');
+    assert.equal((await pool.query('SELECT expired_at FROM pasture_cleaning WHERE id=$1',[completed.id])).rows[0].expired_at,null,'Applied records survive');
+
+    const information={name:'Finca con ficha',ownerName:'Propietario de prueba',areaValue:12.5,areaUnitCode:'HECTARE' as const,address:'Sector Los Montes, Ecuador'};
+    await updatePropertyInformation(auth,context,information,metadata);
+    const settings=await getPropertySettings(context);assert.equal(settings.property.areaValue,12.5);assert.equal(settings.property.ownerName,information.ownerName);
+    const viewerContext={...context,roleId:viewer.id,permissions:new Set<string>()};
+    assert.equal((await getPropertySettings(viewerContext)).property.address,information.address);
+    assert.deepEqual((await getPropertySettings(viewerContext)).modules,[]);
+    await assert.rejects(()=>updatePropertyInformation({...auth,activeRoleId:viewer.id},viewerContext,information,metadata),(error:{code?:string})=>error.code==='MODULE_MANAGE_DENIED');
+    await pool.query('UPDATE administrative_account SET max_properties=2 WHERE id=$1',[registration.accountId]);
+    const added=await createAccountProperty(auth,context,'Segunda propiedad con ficha',metadata,{...information,name:'Segunda propiedad con ficha'});
+    assert.equal((await getPropertySettings({...context,propertyId:added.propertyId,roleId:added.roleId})).property.address,information.address);
   }finally{await pool.end();}
 });

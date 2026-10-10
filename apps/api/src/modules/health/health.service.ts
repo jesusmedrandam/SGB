@@ -1,3 +1,4 @@
+import {requireLiveDraft} from '../../core/drafts.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type {PoolClient} from 'pg';
 import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
@@ -131,7 +132,8 @@ async function read(client:PoolClient,id:string){
   return row;
 }
 export async function listCampaigns(context:PropertyContext){
-  return (await pool.query(`SELECT ${fields} ${joins} WHERE c.property_id=$1
+  return (await pool.query(`SELECT ${fields} ${joins} WHERE c.property_id=$1 AND c.expired_at IS NULL
+    AND (c.status<>'BORRADOR' OR c.created_at>now()-interval '24 hours')
     ORDER BY c.created_at DESC,c.id DESC LIMIT 250`,[context.propertyId])).rows;
 }
 async function validate(client:PoolClient,context:PropertyContext,input:CampaignInput,
@@ -198,10 +200,11 @@ export async function createCampaign(auth:AuthState,context:PropertyContext,inpu
   });
 }
 async function draft(client:PoolClient,context:PropertyContext,id:string){
-  const row=(await client.query<{status:string;version:number;account_id:string}>(
-    `SELECT status,version::int,account_id FROM health_campaign WHERE id=$1 AND property_id=$2 FOR UPDATE`,
+  const row=(await client.query<{status:string;version:number;expired:boolean;account_id:string}>(
+    `SELECT status,version::int,account_id ,(expired_at IS NOT NULL OR status='BORRADOR' AND created_at<=now()-interval '24 hours') AS expired FROM health_campaign WHERE id=$1 AND property_id=$2 FOR UPDATE`,
     [id,context.propertyId])).rows[0];
   if(!row)throw new ApiError(404,'HEALTH_CAMPAIGN_NOT_FOUND','Jornada no encontrada en esta propiedad.');
+  requireLiveDraft(row);
   if(row.status!=='BORRADOR')throw conflict('HEALTH_CAMPAIGN_FINAL','La jornada ya fue aplicada o cancelada.');
   return row;
 }

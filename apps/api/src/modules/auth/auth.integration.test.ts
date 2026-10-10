@@ -54,11 +54,14 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       password,
       displayName: 'Prueba de integración',
       propertyName: `Finca ${suffix}`,
+      propertyInformation:{name:`Finca ${suffix}`,ownerName:'Dueño inicial',areaValue:25,areaUnitCode:'HECTARE',address:'Ubicación de prueba'},
     }, metadata);
 
     assert.match(registration.userId, /^[0-9a-f-]{36}$/);
     assert.ok(registration.accountId);
     assert.ok(registration.propertyId);
+    const initial=(await pool.query('SELECT owner_name,area_value,address FROM property WHERE id=$1',[registration.propertyId])).rows[0];
+    assert.equal(initial.owner_name,'Dueño inicial');assert.equal(Number(initial.area_value),25);assert.equal(initial.address,'Ubicación de prueba');
     const accountId = registration.accountId;
     await pool.query(
       `UPDATE email_verification_token
