@@ -20,12 +20,12 @@ async function record(client: PoolClient, auth: AuthState, metadata: RequestMeta
 
 // This is shared by an owner's first property and a later property in an existing account.
 async function seedProperty(client: PoolClient, input: {
-  accountId: string; ownerId: string; creatorId: string; name: string; creatorIsSuperadmin?:boolean;
+  accountId: string; ownerId: string; creatorId: string; name: string; creatorIsSuperadmin?:boolean;information?:PropertyInformationInput;
 }) {
   const inserted = await client.query<{ id: string }>(
-    `INSERT INTO property(account_id, owner_user_id, name, created_by)
-     VALUES($1,$2,$3,$4) RETURNING id`,
-    [input.accountId, input.ownerId, input.name, input.creatorId],
+    `INSERT INTO property(account_id, owner_user_id, name, created_by,owner_name,area_value,area_unit_code,address)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [input.accountId, input.ownerId, input.name, input.creatorId,input.information?.ownerName??null,input.information?.areaValue??null,input.information?.areaUnitCode??null,input.information?.address??null],
   );
   const propertyId = inserted.rows[0]!.id;
   await client.query(
@@ -124,7 +124,7 @@ export async function createOwnAccount(auth: AuthState, name: string, metadata: 
 }
 
 export async function getPropertySettings(context: PropertyContext) {
-  const [account, modules] = await Promise.all([
+  const [account, modules,information] = await Promise.all([
     pool.query<{ id: string; name: string; max_properties: number; used: string; owner_user_id: string }>(
       `SELECT aa.id, aa.name, aa.max_properties, aa.owner_user_id,
               (SELECT count(*) FROM property other WHERE other.account_id = aa.id
@@ -143,15 +143,18 @@ export async function getPropertySettings(context: PropertyContext) {
        WHERE p.id = $1 ORDER BY m.is_core DESC, m.name`,
       [context.propertyId],
     ),
+    pool.query(`SELECT p.id,p.name,coalesce(p.owner_name,u.display_name) AS "ownerName",p.area_value::float8 AS "areaValue",
+     p.area_unit_code AS "areaUnitCode",p.address,p.timezone FROM property p JOIN app_user u ON u.id=p.owner_user_id WHERE p.id=$1`,[context.propertyId]),
   ]);
   const row = account.rows[0];
   if (!row) throw forbidden('PROPERTY_UNAVAILABLE', 'Esta propiedad ya no está disponible.');
   return {
+    property:information.rows[0],canViewModules:context.permissions.has('MODULE_VIEW'),
     account: { id: row.id, name: row.name, maxProperties: row.max_properties,
       usedProperties: Number(row.used) },
     canCreate: context.permissions.has('PROPERTY_CREATE'),
     canManageModules: context.permissions.has('MODULE_MANAGE'),
-    modules: modules.rows.map((module) => ({
+    modules: (context.permissions.has('MODULE_VIEW')?modules.rows:[]).map((module) => ({
       code: module.code, name: module.name, isCore: module.is_core,
       accountEnabled: module.account_enabled, propertyEnabled: module.property_enabled,
       enabled: module.is_core || (module.account_enabled && module.property_enabled),
@@ -160,7 +163,7 @@ export async function getPropertySettings(context: PropertyContext) {
 }
 
 export async function createAccountProperty(auth: AuthState, context: PropertyContext,
-  name: string, metadata: RequestMetadata) {
+  name: string, metadata: RequestMetadata,information?:PropertyInformationInput) {
   return inTransaction(async (client) => {
     // Serialize account creation and superadmin quota changes on this account row.
     const account = await client.query<{ id: string; owner_user_id: string; max_properties: number }>(
@@ -198,7 +201,7 @@ export async function createAccountProperty(auth: AuthState, context: PropertyCo
     );
     if (duplicate.rowCount) throw conflict('PROPERTY_NAME_TAKEN', 'Ya existe una propiedad con ese nombre en esta cuenta.');
     const created = await seedProperty(client, {
-      accountId: row.id, ownerId: row.owner_user_id, creatorId: auth.userId, name,creatorIsSuperadmin:Boolean(context.isSuperadmin),
+      accountId: row.id, ownerId: row.owner_user_id, creatorId: auth.userId, name,creatorIsSuperadmin:Boolean(context.isSuperadmin),...(information?{information}:{}),
     });
     await activateSession(client, auth, created.propertyId, created.roleId);
     await record(client, auth, metadata, 'PROPERTY_CREATED', 'PROPERTY', created.propertyId,
@@ -210,23 +213,7 @@ export async function createAccountProperty(auth: AuthState, context: PropertyCo
 export async function updatePropertyModule(auth: AuthState, context: PropertyContext,
   moduleCode: string, enabled: boolean, metadata: RequestMetadata) {
   return inTransaction(async (client) => {
-    const account = await client.query<{ id: string }>(
-      `SELECT aa.id FROM administrative_account aa
-       JOIN property p ON p.account_id = aa.id
-       WHERE p.id = $1 AND ($2::boolean OR aa.status='ACTIVE') FOR UPDATE OF aa`,
-      [context.propertyId,Boolean(context.isSuperadmin)],
-    );
-    if (!account.rows[0]) throw forbidden('ACCOUNT_UNAVAILABLE', 'La cuenta administrativa no está disponible.');
-    const grant = (await superadminPropertyAccess(client,auth,context))?{rowCount:1}:await client.query(
-      `SELECT 1 FROM property_membership pm
-       JOIN property p ON p.id = pm.property_id AND p.status = 'ACTIVE' AND p.deleted_at IS NULL
-       JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
-       JOIN property_role pr ON pr.id = mr.role_id AND pr.active
-       JOIN role_permission rp ON rp.role_id = pr.id AND rp.permission_code = 'MODULE_MANAGE'
-       WHERE pm.property_id = $1 AND pm.user_id = $2 AND pm.status = 'ACTIVE' AND pr.id = $3`,
-      [context.propertyId, auth.userId, context.roleId],
-    );
-    if (!grant.rowCount) throw forbidden('MODULE_MANAGE_DENIED', 'El rol activo no permite configurar módulos.');
+    await ensurePropertyManagement(client,auth,context);
     const module = await client.query<{ name: string; is_core: boolean; account_enabled: boolean; property_enabled: boolean }>(
       `SELECT m.name, m.is_core,
          CASE WHEN m.is_core THEN true ELSE coalesce(am.enabled, false) END AS account_enabled,
@@ -255,4 +242,38 @@ export async function updatePropertyModule(auth: AuthState, context: PropertyCon
       { enabled: current.property_enabled }, { enabled: current.is_core || enabled });
     return { code: moduleCode, enabled: current.is_core || (current.account_enabled && enabled) };
   });
+}
+
+async function ensurePropertyManagement(client:PoolClient,auth:AuthState,context:PropertyContext){
+    const account = await client.query<{ id: string }>(
+      `SELECT aa.id FROM administrative_account aa
+       JOIN property p ON p.account_id = aa.id
+       WHERE p.id = $1 AND ($2::boolean OR aa.status='ACTIVE') FOR UPDATE OF aa`,
+      [context.propertyId,Boolean(context.isSuperadmin)],
+    );
+    if (!account.rows[0]) throw forbidden('ACCOUNT_UNAVAILABLE', 'La cuenta administrativa no está disponible.');
+    const grant = (await superadminPropertyAccess(client,auth,context))?{rowCount:1}:await client.query(
+      `SELECT 1 FROM property_membership pm
+       JOIN property p ON p.id = pm.property_id AND p.status = 'ACTIVE' AND p.deleted_at IS NULL
+       JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
+       JOIN property_role pr ON pr.id = mr.role_id AND pr.active
+       JOIN role_permission rp ON rp.role_id = pr.id AND rp.permission_code = 'MODULE_MANAGE'
+       WHERE pm.property_id = $1 AND pm.user_id = $2 AND pm.status = 'ACTIVE' AND pr.id = $3`,
+      [context.propertyId, auth.userId, context.roleId],
+    );
+    if (!grant.rowCount) throw forbidden('MODULE_MANAGE_DENIED', 'El rol activo no permite configurar módulos.');
+}
+
+export interface PropertyInformationInput {name:string;ownerName:string;areaValue:number;areaUnitCode:'HECTARE'|'SQUARE_METER';address:string}
+export async function updatePropertyInformation(auth:AuthState,context:PropertyContext,input:PropertyInformationInput,metadata:RequestMetadata){
+ return inTransaction(async client=>{
+  await ensurePropertyManagement(client,auth,context);
+  const before=(await client.query('SELECT * FROM property WHERE id=$1 FOR UPDATE',[context.propertyId])).rows[0];
+  if((await client.query('SELECT 1 FROM property WHERE account_id=$1 AND lower(name)=lower($2) AND id<>$3 AND deleted_at IS NULL',[before.account_id,input.name,context.propertyId])).rowCount)
+   throw conflict('PROPERTY_NAME_TAKEN','Ya existe una propiedad con ese nombre en esta cuenta.');
+  const after=(await client.query(`UPDATE property SET name=$2,owner_name=$3,area_value=$4,area_unit_code=$5,address=$6,updated_at=now()
+   WHERE id=$1 RETURNING *`,[context.propertyId,input.name,input.ownerName,input.areaValue,input.areaUnitCode,input.address])).rows[0];
+  await record(client,auth,metadata,'PROPERTY_INFORMATION_UPDATED','PROPERTY',context.propertyId,context.propertyId,context.roleId,before,after);
+  return {id:after.id,name:after.name,ownerName:after.owner_name,areaValue:Number(after.area_value),areaUnitCode:after.area_unit_code,address:after.address,timezone:after.timezone};
+ });
 }

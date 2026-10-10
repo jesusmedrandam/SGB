@@ -1,3 +1,5 @@
+import {inTransaction} from '../../database/transaction.js';
+import {expireDrafts} from '../../core/drafts.js';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import test from 'node:test';
@@ -70,5 +72,16 @@ test('actividades aplican herraje una vez, conservan historial y respetan la pro
     await assert.rejects(()=>createActivity({...auth,activeRoleId:viewer.id},
       {...context,roleId:viewer.id},base,metadata),
       (error:{code?:string})=>error.code==='ACTIVITY_DENIED');
+
+    const expires=await createActivity(auth,context,{kind:'DESCORNE',title:'Borrador temporal',occurredOn:today,animalIds:[other.id]},metadata);
+    // Test clock fixture: creation timestamps are immutable through normal application writes.
+    await inTransaction(async client=>{await client.query('SET LOCAL session_replication_role=replica');await client.query("UPDATE livestock_activity SET created_at=now()-interval '24 hours' WHERE id=$1",[expires.id]);});
+    assert.equal((await listActivities(context)).some(row=>row.id===expires.id),false,'Expired drafts disappear at the 24-hour boundary');
+    await assert.rejects(()=>applyActivity(auth,context,expires.id,metadata),(error:{code?:string})=>error.code==='DRAFT_EXPIRED');
+    assert.ok(await expireDrafts()>=1);
+    assert.ok((await pool.query('SELECT expired_at FROM livestock_activity WHERE id=$1',[expires.id])).rows[0].expired_at);
+    assert.equal((await pool.query("SELECT count(*)::int AS total FROM audit_event WHERE entity_id=$1 AND action LIKE '%DRAFT_EXPIRED'",[expires.id])).rows[0].total,1);
+    assert.equal(await expireDrafts(),0,'Expiration is idempotent');
+    assert.equal((await pool.query('SELECT expired_at FROM livestock_activity WHERE id=$1',[applied.id])).rows[0].expired_at,null,'Applied records survive');
   }finally{await pool.end();}
 });

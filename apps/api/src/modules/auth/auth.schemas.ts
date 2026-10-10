@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {propertyInformationSchema} from '../properties/properties.schemas.js';
 
 const password = z.string()
   .min(12, 'La contraseña debe tener al menos 12 caracteres.')
@@ -20,6 +21,7 @@ export const registerSchema = z.object({
   email: z.email().max(254).transform((value) => value.trim().toLowerCase()),
   password,
   displayName: z.string().trim().min(2).max(160),
+  propertyInformation:propertyInformationSchema.optional(),
   propertyName: z.string().trim().min(2).max(160).optional(),
   invitationToken: z.string().trim().min(40).max(200).optional(),
 }).superRefine((value, context) => {

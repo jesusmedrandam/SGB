@@ -1,3 +1,4 @@
+import {requireLiveDraft} from '../../core/drafts.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type {PoolClient} from 'pg';
 import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
@@ -15,7 +16,7 @@ type Draft={id:string;account_id:string;source_property_id:string;destination_pr
   kind:MovementInput['kind'];selection_mode:MovementInput['selectionMode'];
   source_group_id:string;destination_group_id:string;source_location_id:string|null;
   destination_location_id:string|null;movement_on:string;reason:string;notes:string|null;
-  status:string;version:string};
+  status:string;version:string;expired:boolean};
 type Resolved={source:Group;destination:Group;destinationLocationId:string|null;
   animals:Animal[];sourceLocationId:string|null;accountId:string};
 
@@ -109,8 +110,8 @@ async function read(client:QueryClient,id:string){
 }
 export async function listMovements(context:PropertyContext){
   const result=await pool.query(`SELECT ${fields} ${joins}
-    WHERE m.source_property_id=$1 OR m.destination_property_id=$1
-    ORDER BY m.created_at DESC,m.id DESC LIMIT 250`,[context.propertyId]);
+    WHERE (m.source_property_id=$1 OR m.destination_property_id=$1)
+    AND m.expired_at IS NULL AND (m.status<>'BORRADOR' OR m.created_at>now()-interval '24 hours') ORDER BY m.created_at DESC,m.id DESC LIMIT 250`,[context.propertyId]);
   return result.rows.map(view);
 }
 export async function listMovementOptions(auth:AuthState,context:PropertyContext){
@@ -263,10 +264,11 @@ export async function createMovement(auth:AuthState,context:PropertyContext,inpu
 async function lockDraft(client:PoolClient,context:PropertyContext,id:string){
   const row=(await client.query<Draft>(`SELECT id,account_id,source_property_id,destination_property_id,
     kind,selection_mode,source_group_id,destination_group_id,source_location_id,
-    destination_location_id,movement_on::text,reason,notes,status,version::text
+    destination_location_id,movement_on::text,reason,notes,status,version::text,(expired_at IS NOT NULL OR status='BORRADOR' AND created_at<=now()-interval '24 hours') AS expired
     FROM livestock_movement WHERE id=$1 AND source_property_id=$2 FOR UPDATE`,
     [id,context.propertyId])).rows[0];
   if(!row)throw new ApiError(404,'MOVEMENT_NOT_FOUND','El movimiento no pertenece a esta propiedad.');
+  requireLiveDraft(row);
   if(row.status!=='BORRADOR')throw conflict('MOVEMENT_ALREADY_FINAL','El movimiento ya fue aplicado o cancelado.');
   return row;
 }

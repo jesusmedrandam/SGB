@@ -129,7 +129,7 @@ test('el soporte accede sin membresía, conserva aislamiento, contexto y autor r
     await request(token,'GET','/weighings');
     await request(token,'PUT',`/superadmin/accounts/${first.accountId}/modules/WEIGHING`,{enabled:true});
     await request(token,'PATCH',`/superadmin/accounts/${first.accountId}`,{maxProperties:2});
-    const newProperty=await request(token,'POST','/property-settings/properties',{name:'Propiedad creada por soporte'},201);
+    const newProperty=await request(token,'POST','/property-settings/properties',{name:'Propiedad creada por soporte',ownerName:'Dueño de prueba',areaValue:10,areaUnitCode:'HECTARE',address:'Sector de prueba'},201);
     assert.equal(newProperty.accountId,first.accountId);
     assert.equal((await pool.query('SELECT owner_user_id FROM property WHERE id=$1',[newProperty.propertyId])).rows[0].owner_user_id,first.id);
     assert.equal((await pool.query('SELECT 1 FROM property_membership WHERE user_id=$1 AND property_id=$2',[admin.id,newProperty.propertyId])).rowCount,0);
