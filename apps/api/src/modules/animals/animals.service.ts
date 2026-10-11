@@ -269,78 +269,7 @@ export async function createAnimal(auth: AuthState, context: PropertyContext,
   try {
     return await inTransaction(async (client) => {
       const { account_id: accountId, today } = await accessForCreate(client, auth, context);
-      const entryDate = input.entryDate ?? today;
-      if (entryDate > today || (input.birthDate && (input.birthDate > today || input.birthDate > entryDate))) {
-        throw invalidRequest('INVALID_ANIMAL_DATES', 'Nacimiento e ingreso deben ser fechas válidas hasta hoy en la zona de la finca.');
-      }
-      if (input.initialWeightUnitCode) {
-        const unit = await client.query(
-          `SELECT 1 FROM allowed_context_unit acu
-           JOIN measurement_unit mu ON mu.code = acu.unit_code AND mu.active
-           WHERE acu.context_code = 'ANIMAL_WEIGHT' AND acu.unit_code = $1`,
-          [input.initialWeightUnitCode],
-        );
-        if (!unit.rowCount) throw invalidRequest('INVALID_WEIGHT_UNIT', 'La unidad no admite pesajes de animales.');
-      }
-      const result = await client.query<AnimalRow>(
-        `INSERT INTO animal(account_id, property_id, species_code, name, description, sex, ear_tag_code,
-           birth_date, entry_date, initial_weight, initial_weight_unit_code, created_by, updated_by)
-         VALUES($1,$2,'BOVINE',$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)
-         RETURNING id`,
-        [accountId, context.propertyId, input.name, input.description || null,
-          input.sex, input.earTagCode ?? null,
-          input.birthDate ?? null, entryDate, input.initialWeight ?? null,
-          input.initialWeightUnitCode ?? null, auth.userId],
-      );
-      if(input.groupId){
-        const destination=await client.query<{location_id:string|null}>(`
-          SELECT gla.location_id FROM livestock_group g
-          LEFT JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
-          WHERE g.id=$1 AND g.property_id=$2 AND g.active FOR SHARE OF g`,
-          [input.groupId,context.propertyId]);
-        if(!destination.rows[0])throw invalidRequest('GROUP_UNAVAILABLE','Selecciona un grupo activo de esta propiedad.');
-        await client.query(`INSERT INTO animal_group_assignment(property_id,animal_id,group_id,
-          started_at,start_reason,created_by) VALUES($1,$2,$3,now(),'Registro del animal',$4)`,
-          [context.propertyId,result.rows[0]!.id,input.groupId,auth.userId]);
-        if(destination.rows[0].location_id){
-          const enabled=await client.query(`SELECT module_code FROM effective_property_module
-            WHERE property_id=$1 AND module_code IN ('PASTURES','CORRALS','MOVEMENTS') AND enabled`,
-            [context.propertyId]);
-          if(enabled.rowCount===3)await client.query(`INSERT INTO animal_location_assignment(
-            property_id,animal_id,location_id,started_at,start_reason,created_by)
-            VALUES($1,$2,$3,now(),'Ubicación del grupo',$4)`,
-            [context.propertyId,result.rows[0]!.id,destination.rows[0].location_id,auth.userId]);
-        }
-      }
-      await insertInitialParents(client,context,result.rows[0]!.id,input.birthDate??null,
-        input.mother??null,input.father??null,auth.userId);
-      const selection = { breedId: input.breedId ?? null, breedIds: input.breedIds, colorIds: input.colorIds ?? [] };
-      await validateSelections(client, context, 'BOVINE', selection);
-      await insertSelections(client, auth, context, result.rows[0]!.id, selection);
-      await validateBrands(client, context, input.brandIds ?? []);
-      await insertBrands(client, auth, context, result.rows[0]!.id, input.brandIds ?? []);
-      if (input.owners?.length) {
-        const validOwners = await client.query<{ id: string }>(
-          `SELECT id FROM property_party WHERE id = ANY($1::uuid[]) AND account_id = $2
-           AND active AND deleted_at IS NULL FOR SHARE`,
-          [input.owners.map((owner) => owner.partyId), accountId]);
-        if (validOwners.rows.length !== input.owners.length)
-          throw invalidRequest('OWNER_UNAVAILABLE', 'Selecciona propietarios activos de esta cuenta.');
-        for (const owner of input.owners) await client.query(
-          `INSERT INTO animal_ownership(property_id, account_id, animal_id, party_id,
-            ownership_percent, is_primary, created_by) VALUES($1,$2,$3,$4,$5,$6,$7)`,
-          [context.propertyId, accountId, result.rows[0]!.id, owner.partyId,
-            owner.percent, owner.isPrimary, auth.userId]);
-      }
-      const created = await readAnimal(client, context, result.rows[0]!.id);
-      await client.query(
-        `INSERT INTO audit_event(actor_user_id, property_id, active_role_id, action,
-           entity_type, entity_id, after_data, ip_address, user_agent)
-         VALUES($1,$2,$3,'ANIMAL_CREATED','ANIMAL',$4,$5::jsonb,$6,$7)`,
-        [auth.userId, context.propertyId, context.roleId, created.id,
-          JSON.stringify(created), metadata.ipAddress, metadata.userAgent],
-      );
-      return created;
+      return insertAnimalInTransaction(client,auth,context,input,metadata,accountId,today);
     });
   } catch (error) {
     const databaseError = error as { code?: string; constraint?: string };
@@ -460,4 +389,80 @@ export async function updateAnimalCatalogs(auth: AuthState, context: PropertyCon
     );
     return after;
   });
+}
+
+export async function insertAnimalInTransaction(client:PoolClient,auth:AuthState,context:PropertyContext,
+  input:CreateAnimalInput,metadata:RequestMetadata,accountId:string,today:string,allowAccountParents=false){
+      const entryDate = input.entryDate ?? today;
+      if (entryDate > today || (input.birthDate && (input.birthDate > today || input.birthDate > entryDate))) {
+        throw invalidRequest('INVALID_ANIMAL_DATES', 'Nacimiento e ingreso deben ser fechas válidas hasta hoy en la zona de la finca.');
+      }
+      if (input.initialWeightUnitCode) {
+        const unit = await client.query(
+          `SELECT 1 FROM allowed_context_unit acu
+           JOIN measurement_unit mu ON mu.code = acu.unit_code AND mu.active
+           WHERE acu.context_code = 'ANIMAL_WEIGHT' AND acu.unit_code = $1`,
+          [input.initialWeightUnitCode],
+        );
+        if (!unit.rowCount) throw invalidRequest('INVALID_WEIGHT_UNIT', 'La unidad no admite pesajes de animales.');
+      }
+      const result = await client.query<AnimalRow>(
+        `INSERT INTO animal(account_id, property_id, species_code, name, description, sex, ear_tag_code,
+           birth_date, entry_date, initial_weight, initial_weight_unit_code, created_by, updated_by)
+         VALUES($1,$2,'BOVINE',$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)
+         RETURNING id`,
+        [accountId, context.propertyId, input.name, input.description || null,
+          input.sex, input.earTagCode ?? null,
+          input.birthDate ?? null, entryDate, input.initialWeight ?? null,
+          input.initialWeightUnitCode ?? null, auth.userId],
+      );
+      if(input.groupId){
+        const destination=await client.query<{location_id:string|null}>(`
+          SELECT gla.location_id FROM livestock_group g
+          LEFT JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
+          WHERE g.id=$1 AND g.property_id=$2 AND g.active FOR SHARE OF g`,
+          [input.groupId,context.propertyId]);
+        if(!destination.rows[0])throw invalidRequest('GROUP_UNAVAILABLE','Selecciona un grupo activo de esta propiedad.');
+        await client.query(`INSERT INTO animal_group_assignment(property_id,animal_id,group_id,
+          started_at,start_reason,created_by) VALUES($1,$2,$3,now(),'Registro del animal',$4)`,
+          [context.propertyId,result.rows[0]!.id,input.groupId,auth.userId]);
+        if(destination.rows[0].location_id){
+          const enabled=await client.query(`SELECT module_code FROM effective_property_module
+            WHERE property_id=$1 AND module_code IN ('PASTURES','CORRALS','MOVEMENTS') AND enabled`,
+            [context.propertyId]);
+          if(enabled.rowCount===3)await client.query(`INSERT INTO animal_location_assignment(
+            property_id,animal_id,location_id,started_at,start_reason,created_by)
+            VALUES($1,$2,$3,now(),'Ubicación del grupo',$4)`,
+            [context.propertyId,result.rows[0]!.id,destination.rows[0].location_id,auth.userId]);
+        }
+      }
+      await insertInitialParents(client,context,result.rows[0]!.id,input.birthDate??null,
+        input.mother??null,input.father??null,auth.userId,allowAccountParents);
+      const selection = { breedId: input.breedId ?? null, breedIds: input.breedIds, colorIds: input.colorIds ?? [] };
+      await validateSelections(client, context, 'BOVINE', selection);
+      await insertSelections(client, auth, context, result.rows[0]!.id, selection);
+      await validateBrands(client, context, input.brandIds ?? []);
+      await insertBrands(client, auth, context, result.rows[0]!.id, input.brandIds ?? []);
+      if (input.owners?.length) {
+        const validOwners = await client.query<{ id: string }>(
+          `SELECT id FROM property_party WHERE id = ANY($1::uuid[]) AND account_id = $2
+           AND active AND deleted_at IS NULL FOR SHARE`,
+          [input.owners.map((owner) => owner.partyId), accountId]);
+        if (validOwners.rows.length !== input.owners.length)
+          throw invalidRequest('OWNER_UNAVAILABLE', 'Selecciona propietarios activos de esta cuenta.');
+        for (const owner of input.owners) await client.query(
+          `INSERT INTO animal_ownership(property_id, account_id, animal_id, party_id,
+            ownership_percent, is_primary, created_by) VALUES($1,$2,$3,$4,$5,$6,$7)`,
+          [context.propertyId, accountId, result.rows[0]!.id, owner.partyId,
+            owner.percent, owner.isPrimary, auth.userId]);
+      }
+      const created = await readAnimal(client, context, result.rows[0]!.id);
+      await client.query(
+        `INSERT INTO audit_event(actor_user_id, property_id, active_role_id, action,
+           entity_type, entity_id, after_data, ip_address, user_agent)
+         VALUES($1,$2,$3,'ANIMAL_CREATED','ANIMAL',$4,$5::jsonb,$6,$7)`,
+        [auth.userId, context.propertyId, context.roleId, created.id,
+          JSON.stringify(created), metadata.ipAddress, metadata.userAgent],
+      );
+      return created;
 }

@@ -27,7 +27,7 @@ animalsRouter.get('/summary',requirePermission('ANIMAL_VIEW'),asyncHandler(async
   res.json({ok:true,data:await getAnimalSummary(req.propertyContext!)});
 }));
 animalsRouter.get('/classification',requirePermission('ANIMAL_VIEW'),asyncHandler(async(req,res)=>{
-  res.json({ok:true,data:await getClassificationPolicy(req.propertyContext!)});
+  res.json({ok:true,data:await getClassificationPolicy(req.propertyContext!,req.auth!)});
 }));
 animalsRouter.put('/classification',requirePermission('CATALOG_MANAGE'),asyncHandler(async(req,res)=>{
   res.json({ok:true,data:await updateClassificationPolicy(req.auth!,req.propertyContext!,

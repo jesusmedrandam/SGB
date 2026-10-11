@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {createAnimalSchema} from '../animals/animals.schemas.js';
 
 const note = z.string().trim().max(500).nullable().optional();
 export const idSchema = z.object({ id: z.uuid() });
@@ -43,10 +44,15 @@ export const createServiceSchema = z.object({
 
 export const createBirthSchema = z.object({
   pregnancyId: z.uuid(), occurredOn: z.iso.date(),
-  calves: z.array(z.object({
-    name: z.string().trim().min(1).max(160),
-    sex: z.enum(['FEMALE','MALE']), earTagCode: z.string().trim().min(1).max(80).optional(),
-  })).max(8),
+  kind:z.enum(['NORMAL','ASSISTED','CAESAREAN','UNKNOWN']).optional(),
+  calves:z.array(z.object({name:createAnimalSchema.shape.name,sex:createAnimalSchema.shape.sex,
+    earTagCode:createAnimalSchema.shape.earTagCode,description:createAnimalSchema.shape.description,
+    groupId:createAnimalSchema.shape.groupId,initialWeight:createAnimalSchema.shape.initialWeight,
+    initialWeightUnitCode:createAnimalSchema.shape.initialWeightUnitCode,breedIds:createAnimalSchema.shape.breedIds,
+    colorIds:createAnimalSchema.shape.colorIds,owners:createAnimalSchema.shape.owners,
+    birthCondition:z.enum(['ALIVE','WEAK','UNKNOWN']).optional()})
+    .refine(v=>(v.initialWeight===undefined)===(v.initialWeightUnitCode===undefined),
+      'Indica juntos el peso y su unidad.')).max(8),
   stillbornCount: z.number().int().min(0).max(8),
   notes: z.string().trim().max(5000).nullable().optional(),
 }).refine((value) => value.calves.length + value.stillbornCount > 0

@@ -84,7 +84,7 @@ async function activateSession(client: PoolClient, auth: AuthState, propertyId: 
   );
 }
 
-export async function createOwnAccount(auth: AuthState, name: string, metadata: RequestMetadata) {
+export async function createOwnAccount(auth: AuthState, name: string, metadata: RequestMetadata,information?:PropertyInformationInput) {
   return inTransaction(async (client) => {
     const user = await client.query(
       `SELECT id FROM app_user WHERE id = $1 AND status = 'ACTIVE' AND deleted_at IS NULL FOR UPDATE`,
@@ -114,7 +114,7 @@ export async function createOwnAccount(auth: AuthState, name: string, metadata: 
       [accountId, auth.userId],
     );
     const created = await seedProperty(client, {
-      accountId, ownerId: auth.userId, creatorId: auth.userId, name,
+      accountId, ownerId: auth.userId, creatorId: auth.userId, name,...(information?{information}:{}),
     });
     await activateSession(client, auth, created.propertyId, created.roleId);
     await record(client, auth, metadata, 'ACCOUNT_CREATED', 'ADMINISTRATIVE_ACCOUNT', accountId,
@@ -123,7 +123,7 @@ export async function createOwnAccount(auth: AuthState, name: string, metadata: 
   });
 }
 
-export async function getPropertySettings(context: PropertyContext) {
+export async function getPropertySettings(context: PropertyContext,auth?:AuthState) {
   const [account, modules,information] = await Promise.all([
     pool.query<{ id: string; name: string; max_properties: number; used: string; owner_user_id: string }>(
       `SELECT aa.id, aa.name, aa.max_properties, aa.owner_user_id,
@@ -152,7 +152,7 @@ export async function getPropertySettings(context: PropertyContext) {
     property:information.rows[0],canViewModules:context.permissions.has('MODULE_VIEW'),
     account: { id: row.id, name: row.name, maxProperties: row.max_properties,
       usedProperties: Number(row.used) },
-    canCreate: context.permissions.has('PROPERTY_CREATE'),
+    canCreate: row.owner_user_id===auth?.userId&&context.permissions.has('PROPERTY_CREATE'),
     canManageModules: context.permissions.has('MODULE_MANAGE'),
     modules: (context.permissions.has('MODULE_VIEW')?modules.rows:[]).map((module) => ({
       code: module.code, name: module.name, isCore: module.is_core,
@@ -175,6 +175,8 @@ export async function createAccountProperty(auth: AuthState, context: PropertyCo
     );
     const row = account.rows[0];
     if (!row) throw forbidden('ACCOUNT_UNAVAILABLE', 'La cuenta administrativa no está disponible.');
+    if(row.owner_user_id!==auth.userId)throw forbidden('PROPERTY_OWNER_REQUIRED',
+      'Solo puedes crear propiedades de tu propia cuenta. Selecciona una propiedad tuya o crea tu cuenta.');
     const grant = (await superadminPropertyAccess(client,auth,context))?{rowCount:1}:await client.query(
       `SELECT 1 FROM property_membership pm
        JOIN property p ON p.id = pm.property_id AND p.status = 'ACTIVE' AND p.deleted_at IS NULL
@@ -211,7 +213,7 @@ export async function createAccountProperty(auth: AuthState, context: PropertyCo
 }
 
 export async function updatePropertyModule(auth: AuthState, context: PropertyContext,
-  moduleCode: string, enabled: boolean, metadata: RequestMetadata) {
+  moduleCode: string, enabled: boolean, metadata: RequestMetadata,information?:PropertyInformationInput) {
   return inTransaction(async (client) => {
     await ensurePropertyManagement(client,auth,context);
     const module = await client.query<{ name: string; is_core: boolean; account_enabled: boolean; property_enabled: boolean }>(

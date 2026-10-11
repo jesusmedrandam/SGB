@@ -1,3 +1,5 @@
+import {requireRulesAdministrator} from './reproduction.rules.js';
+import {insertAnimalInTransaction} from '../animals/animals.service.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type { PoolClient } from 'pg';
 import { ApiError, conflict, forbidden, invalidRequest } from '../../core/errors.js';
@@ -33,30 +35,35 @@ const settingFields = `
   COALESCE(s.use_last_valid_heat, true) AS "useLastValidHeat",
   COALESCE(s.max_milking_days, 305) AS "maxMilkingDays"`;
 
-async function settings(client: PoolClient, propertyId: string): Promise<ReproductionSettingInput> {
-  const result = await client.query<ReproductionSettingInput>(
-    `SELECT ${settingFields} FROM property p LEFT JOIN reproduction_setting s ON s.property_id = p.id
+async function settings(client: PoolClient, propertyId: string): Promise<ReproductionSettingInput&{accountId:string}> {
+  const result = await client.query<ReproductionSettingInput&{accountId:string}>(
+    `SELECT p.account_id AS "accountId",${settingFields} FROM property p LEFT JOIN account_reproduction_setting s ON s.account_id = p.account_id
      WHERE p.id = $1`, [propertyId]);
   return result.rows[0]!;
 }
 
-export async function getReproductionSettings(context: PropertyContext) {
+export async function getReproductionSettings(context: PropertyContext,auth?:AuthState) {
   const client = await pool.connect();
-  try { return await settings(client, context.propertyId); }
+  try {
+    let canManageRules=false;if(auth){try{await requireRulesAdministrator(client,auth,context);canManageRules=true;}catch(error){if((error as {code?:string}).code!=='RULES_ADMINISTRATOR_REQUIRED')throw error;}}
+    return {...await settings(client, context.propertyId),canManageRules};
+  }
   finally { client.release(); }
 }
 
 export async function updateReproductionSettings(auth: AuthState, context: PropertyContext,
   input: ReproductionSettingInput, metadata: RequestMetadata) {
   return inTransaction(async (client) => {
-    await access(client, auth, context, 'REPRODUCTION_MANAGE');
+    const {account_id:accountId}=await access(client, auth, context, 'REPRODUCTION_MANAGE');
+    await requireRulesAdministrator(client,auth,context);
+    await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
     const before = await settings(client, context.propertyId);
-    await client.query(`INSERT INTO reproduction_setting(property_id, days_after_birth_heat,
+    await client.query(`INSERT INTO account_reproduction_setting(account_id, days_after_birth_heat,
       days_after_birth_pregnancy, days_after_loss_heat, days_after_loss_pregnancy,
       minimum_cow_months, minimum_bull_months, allow_second_heat,
       allow_false_heat_in_pregnancy, use_last_valid_heat, max_milking_days, updated_by)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-      ON CONFLICT(property_id) DO UPDATE SET
+      ON CONFLICT(account_id) DO UPDATE SET
         days_after_birth_heat = EXCLUDED.days_after_birth_heat,
         days_after_birth_pregnancy = EXCLUDED.days_after_birth_pregnancy,
         days_after_loss_heat = EXCLUDED.days_after_loss_heat,
@@ -68,13 +75,13 @@ export async function updateReproductionSettings(auth: AuthState, context: Prope
         use_last_valid_heat = EXCLUDED.use_last_valid_heat,
         max_milking_days = EXCLUDED.max_milking_days,
         updated_by = EXCLUDED.updated_by, updated_at = now()`,
-    [context.propertyId, input.daysAfterBirthHeat, input.daysAfterBirthPregnancy,
+    [accountId, input.daysAfterBirthHeat, input.daysAfterBirthPregnancy,
       input.daysAfterLossHeat, input.daysAfterLossPregnancy, input.minimumCowMonths,
       input.minimumBullMonths, input.allowSecondHeat, input.allowFalseHeatInPregnancy,
       input.useLastValidHeat, input.maxMilkingDays, auth.userId]);
     await audit(client, auth, context, metadata, 'REPRODUCTION_SETTINGS_UPDATED',
-      'REPRODUCTION_SETTING', context.propertyId, before, input);
-    return input;
+      'ACCOUNT', accountId, before, input);
+    return {...input,accountId,canManageRules:true};
   });
 }
 
@@ -200,8 +207,10 @@ export async function listReproduction(context: PropertyContext) {
       WHERE p.property_id = $1 ORDER BY p.confirmed_on DESC, p.created_at DESC LIMIT 300`, [context.propertyId]),
     pool.query(`SELECT b.id, b.pregnancy_id AS "pregnancyId", b.mother_id AS "motherId",
       a.name AS "motherName", b.occurred_on::text AS "occurredOn",
-      b.live_count AS "liveCount", b.stillborn_count AS "stillbornCount", b.notes,
-      COALESCE((SELECT json_agg(json_build_object('id', c.id, 'name', c.name, 'sex', c.sex)
+      b.live_count AS "liveCount", b.stillborn_count AS "stillbornCount", b.notes,b.kind,
+      COALESCE((SELECT json_agg(json_build_object('id', c.id, 'name', c.name, 'sex', c.sex,
+          'earTagCode',c.ear_tag_code,'birthCondition',bc.birth_condition,
+          'initialWeight',c.initial_weight::float8,'initialWeightUnitCode',c.initial_weight_unit_code)
         ORDER BY c.name) FROM reproduction_birth_calf bc JOIN animal c ON c.id = bc.animal_id
         WHERE bc.birth_id = b.id), '[]'::json) AS calves
       FROM reproduction_birth b JOIN animal a ON a.id = b.mother_id
@@ -287,7 +296,7 @@ export async function cancelService(auth: AuthState, context: PropertyContext,
 
 export async function listReproductionCandidates(context: PropertyContext) {
   const result = await pool.query<{ id: string; name: string; sex: CowRow['sex'] }>(
-    `SELECT id, name, sex FROM animal WHERE property_id = $1 AND species_code = 'BOVINE'
+    `SELECT id, name, sex,birth_date::text AS "birthDate" FROM animal WHERE property_id = $1 AND species_code = 'BOVINE'
       AND record_status = 'CURRENT' AND availability_status_code = 'ACTIVE'
       ORDER BY lower(name), id LIMIT 2000`, [context.propertyId]);
   return result.rows;
@@ -393,7 +402,8 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
         conceptionOn = addDays(input.confirmedOn, -gestationDays);
       }
       if (fatherId) await eligibleAnimal(client, context, fatherId, 'MALE', accountId,
-        input.confirmedOn, false, config.minimumBullMonths);
+        conceptionOn??input.confirmedOn, false, config.minimumBullMonths);
+      if(conceptionOn)await eligibleAnimal(client,context,input.cowId,'FEMALE',accountId,conceptionOn,true,config.minimumCowMonths);
       const expectedBirthOn = conceptionOn ? addDays(conceptionOn, GESTATION_DAYS) : null;
       const result = await client.query<{ id: string }>(
         `INSERT INTO reproduction_pregnancy(account_id, property_id, cow_id, heat_id, service_id,
@@ -450,42 +460,28 @@ export async function recordBirth(auth: AuthState, context: PropertyContext,
       if (!mother.rows[0]) throw invalidRequest('MOTHER_UNAVAILABLE', 'La madre no está disponible.');
       const birth = await client.query<{ id: string }>(
         `INSERT INTO reproduction_birth(account_id, property_id, pregnancy_id, mother_id,
-          occurred_on, live_count, stillborn_count, notes, created_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+          occurred_on, live_count, stillborn_count, notes, created_by,kind)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
         [accountId, context.propertyId, pregnancy.id, pregnancy.cow_id, input.occurredOn,
-          input.calves.length, input.stillbornCount, input.notes ?? null, auth.userId]);
+          input.calves.length, input.stillbornCount, input.notes ?? null, auth.userId,input.kind??'NORMAL']);
       const ownership = await client.query<{ party_id: string; ownership_percent: string; is_primary: boolean }>(
         `SELECT party_id, ownership_percent::text, is_primary FROM animal_ownership
          WHERE animal_id = $1 AND valid_until IS NULL`, [pregnancy.cow_id]);
-      if (!ownership.rows.length) throw invalidRequest('MOTHER_OWNERS_REQUIRED',
+      if (input.calves.some(calf=>!calf.owners?.length)&&!ownership.rows.length) throw invalidRequest('MOTHER_OWNERS_REQUIRED',
         'Asigna propietarios a la madre antes de registrar sus crías.');
       const calves: Array<{ id: string; name: string; sex: 'FEMALE' | 'MALE' }> = [];
       for (const calf of input.calves) {
-        const created = await client.query<{ id: string }>(
-          `INSERT INTO animal(account_id, property_id, species_code, name, sex, ear_tag_code,
-            birth_date, entry_date, created_by, updated_by)
-           VALUES($1,$2,'BOVINE',$3,$4,$5,$6,$6,$7,$7) RETURNING id`,
-          [accountId, context.propertyId, calf.name, calf.sex, calf.earTagCode ?? null,
-            input.occurredOn, auth.userId]);
-        const calfId = created.rows[0]!.id;
-        await client.query(`INSERT INTO reproduction_birth_calf(birth_id, animal_id) VALUES($1,$2)`,
-          [birth.rows[0]!.id, calfId]);
-        for (const owner of ownership.rows) await client.query(
-          `INSERT INTO animal_ownership(account_id, property_id, animal_id, party_id,
-            ownership_percent, is_primary, created_by) VALUES($1,$2,$3,$4,$5,$6,$7)`,
-          [accountId, context.propertyId, calfId, owner.party_id,
-            owner.ownership_percent, owner.is_primary, auth.userId]);
-        await client.query(`INSERT INTO animal_parentage(property_id, child_animal_id,
-          role, parent_animal_id, created_by) VALUES($1,$2,'MOTHER',$3,$4)`,
-        [context.propertyId, calfId, pregnancy.cow_id, auth.userId]);
-        if (pregnancy.father_id) await client.query(
-          `INSERT INTO animal_parentage(property_id, child_animal_id, role, parent_animal_id, created_by)
-           VALUES($1,$2,'FATHER',$3,$4)`,
-          [context.propertyId, calfId, pregnancy.father_id, auth.userId]);
-        else if (pregnancy.external_father) await client.query(
-          `INSERT INTO animal_parentage(property_id, child_animal_id, role, reported_parent_name, created_by)
-           VALUES($1,$2,'FATHER',$3,$4)`,
-          [context.propertyId, calfId, pregnancy.external_father, auth.userId]);
+        const owners=calf.owners??ownership.rows.map(owner=>({partyId:owner.party_id,
+          percent:Number(owner.ownership_percent),isPrimary:owner.is_primary}));
+        const created=await insertAnimalInTransaction(client,auth,context,{
+          ...calf,speciesCode:'BOVINE',birthDate:input.occurredOn,entryDate:input.occurredOn,
+          owners,mother:{animalId:pregnancy.cow_id},
+          father:pregnancy.father_id?{animalId:pregnancy.father_id}:pregnancy.external_father?
+            {reportedName:pregnancy.external_father}:null,
+        },metadata,accountId,today,true);
+        const calfId=created.id;
+        await client.query(`INSERT INTO reproduction_birth_calf(birth_id,animal_id,birth_condition)
+          VALUES($1,$2,$3)`,[birth.rows[0]!.id,calfId,calf.birthCondition??'ALIVE']);
         calves.push({ id: calfId, name: calf.name, sex: calf.sex });
       }
       await client.query(`UPDATE reproduction_pregnancy SET status = 'BORN',
@@ -529,7 +525,9 @@ export async function recordLoss(auth: AuthState, context: PropertyContext,
 export async function cancelPregnancy(auth: AuthState, context: PropertyContext,
   id: string, metadata: RequestMetadata) {
   return inTransaction(async (client) => {
-    await access(client, auth, context, 'REPRODUCTION_MANAGE');
+    const {account_id:accountId}=await access(client, auth, context, 'REPRODUCTION_MANAGE');
+    await requireRulesAdministrator(client,auth,context);
+    await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
     const before = await lockPregnancy(client, context, id);
     await client.query(`UPDATE reproduction_pregnancy SET status = 'CANCELLED',
       resolved_at = now(), resolved_by = $2 WHERE id = $1`, [id, auth.userId]);
