@@ -20,7 +20,7 @@ async function access(client: PoolClient, auth: AuthState, context: PropertyCont
      JOIN role_permission rp ON rp.role_id=pr.id AND rp.permission_code=$4
      JOIN effective_property_module epm ON epm.property_id=p.id
        AND epm.module_code='PRODUCTION' AND epm.enabled
-     LEFT JOIN reproduction_setting rs ON rs.property_id=p.id
+     LEFT JOIN account_reproduction_setting rs ON rs.account_id=p.account_id
      WHERE p.id=$1 AND pr.id=$3 AND p.status='ACTIVE' AND p.deleted_at IS NULL
      FOR SHARE OF p,pm,pr`,
     [context.propertyId, auth.userId, context.roleId, permission]);
@@ -73,7 +73,7 @@ export async function listProduction(context: PropertyContext) {
       (SELECT l.id FROM milk_lactation l WHERE l.cow_id=a.id AND l.ended_on IS NULL
        LIMIT 1) AS "lactationId"
       FROM animal a LEFT JOIN milk_animal_state ms ON ms.cow_id=a.id
-      LEFT JOIN reproduction_setting rs ON rs.property_id=a.property_id
+      LEFT JOIN account_reproduction_setting rs ON rs.account_id=a.account_id
       WHERE a.property_id=$1 AND a.sex='FEMALE' AND a.record_status='CURRENT'
         AND a.availability_status_code='ACTIVE'
         AND EXISTS(SELECT 1 FROM reproduction_birth b WHERE b.mother_id=a.id

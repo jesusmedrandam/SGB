@@ -20,7 +20,7 @@ reproductionRouter.get('/candidates', requirePermission('REPRODUCTION_VIEW'), as
   response.json({ ok: true, data: await listReproductionCandidates(request.propertyContext!) });
 }));
 reproductionRouter.get('/settings', requirePermission('REPRODUCTION_VIEW'), asyncHandler(async (request, response) => {
-  response.json({ ok: true, data: await getReproductionSettings(request.propertyContext!) });
+  response.json({ ok: true, data: await getReproductionSettings(request.propertyContext!,request.auth!) });
 }));
 reproductionRouter.put('/settings', requirePermission('REPRODUCTION_MANAGE'), asyncHandler(async (request, response) => {
   response.json({ ok: true, data: await updateReproductionSettings(request.auth!, request.propertyContext!,

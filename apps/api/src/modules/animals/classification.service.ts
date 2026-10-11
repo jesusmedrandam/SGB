@@ -1,3 +1,4 @@
+import {requireRulesAdministrator} from '../reproduction/reproduction.rules.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type {PoolClient} from 'pg';
 import {forbidden} from '../../core/errors.js';
@@ -10,7 +11,7 @@ export type ClassificationInput={femaleAdultMonths:number;maleAdultMonths:number
 
 async function policy(client:PoolClient,propertyId:string){
   const result=await client.query<{femaleAdultMonths:number;maleAdultMonths:number;
-    names:ClassificationInput['names']}>(`SELECT COALESCE(policy.female_adult_months,12) AS "femaleAdultMonths",
+    names:ClassificationInput['names'];accountId:string}>(`SELECT p.account_id AS "accountId",COALESCE(policy.female_adult_months,12) AS "femaleAdultMonths",
     COALESCE(policy.male_adult_months,12) AS "maleAdultMonths",
     (SELECT json_object_agg(c.code,COALESCE(n.name,c.name)) FROM animal_classification_catalog c
       LEFT JOIN account_animal_classification_name n ON n.account_id=p.account_id AND n.code=c.code)
@@ -19,13 +20,14 @@ async function policy(client:PoolClient,propertyId:string){
     WHERE p.id=$1 AND p.deleted_at IS NULL`,[propertyId]);
   return result.rows[0]!;
 }
-export async function getClassificationPolicy(context:PropertyContext){
-  const client=await pool.connect();try{return await policy(client,context.propertyId);}
+export async function getClassificationPolicy(context:PropertyContext,auth?:AuthState){
+  const client=await pool.connect();try{let canManageRules=false;if(auth){try{await requireRulesAdministrator(client,auth,context);canManageRules=true;}catch(error){if((error as {code?:string}).code!=='RULES_ADMINISTRATOR_REQUIRED')throw error;}}return {...await policy(client,context.propertyId),canManageRules};}
   finally{client.release();}
 }
 export async function updateClassificationPolicy(auth:AuthState,context:PropertyContext,
   input:ClassificationInput,metadata:RequestMetadata){
   return inTransaction(async client=>{
+    await requireRulesAdministrator(client,auth,context);
     const supportGrant=await superadminPropertyAccess(client,auth,context);
     const grant=supportGrant?{rows:[supportGrant],rowCount:1}:await client.query<{account_id:string}>(`SELECT p.account_id FROM property p
       JOIN administrative_account aa ON aa.id=p.account_id AND aa.status='ACTIVE'
@@ -58,7 +60,7 @@ export async function updateClassificationPolicy(auth:AuthState,context:Property
       VALUES($1,$2,$3,'CLASSIFICATION_POLICY_UPDATED','ACCOUNT',$4,$5::jsonb,$6::jsonb,$7,$8)`,
       [auth.userId,context.propertyId,context.roleId,accountId,JSON.stringify(before),
         JSON.stringify(after),metadata.ipAddress,metadata.userAgent]);
-    return after;
+    return {...after,canManageRules:true};
   });
 }
 

@@ -16,15 +16,15 @@ function metadata(request: Request): RequestMetadata {
 
 export const ownAccountRouter = Router();
 ownAccountRouter.post('/', authenticate, asyncHandler(async (request, response) => {
-  const { name } = newPropertySchema.parse(request.body);
-  response.status(201).json({ ok: true, data: await createOwnAccount(request.auth!, name, metadata(request)) });
+  const input=propertyInformationSchema.parse(request.body);const {name}=input;
+  response.status(201).json({ ok: true, data: await createOwnAccount(request.auth!, name, metadata(request),input) });
 }));
 
 export const propertySettingsRouter = Router();
 propertySettingsRouter.use(authenticate, requirePropertyContext);
 
 propertySettingsRouter.get('/', asyncHandler(async (request, response) => {
-  response.json({ ok: true, data: await getPropertySettings(request.propertyContext!) });
+  response.json({ ok: true, data: await getPropertySettings(request.propertyContext!,request.auth!) });
 }));
 
 propertySettingsRouter.post('/properties', requirePermission('PROPERTY_CREATE'), asyncHandler(async (request, response) => {

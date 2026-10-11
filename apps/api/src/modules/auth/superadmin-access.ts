@@ -15,7 +15,7 @@ export async function superadminPropertyAccess(client:Pick<PoolClient,'query'>,
     JOIN app_user actor ON actor.id=$2 AND actor.is_superadmin AND actor.status='ACTIVE' AND actor.deleted_at IS NULL
     JOIN app_user owner ON owner.id=p.owner_user_id
     JOIN property_role pr ON pr.property_id=p.id AND (($3::uuid IS NULL AND pr.code='OWNER') OR pr.id=$3)
-    LEFT JOIN reproduction_setting rs ON rs.property_id=p.id
+    LEFT JOIN account_reproduction_setting rs ON rs.account_id=p.account_id
     WHERE p.id=$1 AND p.deleted_at IS NULL FOR SHARE OF p,aa,actor,pr`,
     [context.propertyId,auth.userId,context.roleId??null]);
   if(!result.rows[0])throw forbidden('SUPPORT_CONTEXT_DENIED','La propiedad o el acceso de superadministrador ya no están disponibles.');
