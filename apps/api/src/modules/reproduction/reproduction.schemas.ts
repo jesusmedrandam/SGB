@@ -8,6 +8,7 @@ export const createHeatSchema = z.object({
   cowId: z.uuid(), bullId: z.uuid().nullable().optional(),
   startsOn: z.iso.date(), endsOn: z.iso.date().nullable().optional(),
   isFalse: z.boolean().default(false), notes: note,
+  trueHeatId:z.union([z.uuid(),z.literal('NEW')]).optional(),
 }).refine((value) => !value.endsOn || value.endsOn >= value.startsOn,
   'La fecha final del celo no puede preceder a la inicial.');
 

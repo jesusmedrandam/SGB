@@ -3,6 +3,16 @@ import {forbidden,invalidRequest} from '../../core/errors.js';
 import type {AuthState,PropertyContext} from '../auth/auth.types.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 
+export async function cycleTrueHeats(client:PoolClient,cowId:string,on:string){
+  return (await client.query<{id:string;is_false:boolean}>(`WITH boundaries AS (
+    SELECT occurred_on FROM reproduction_birth WHERE mother_id=$1
+    UNION SELECT occurred_on FROM reproduction_loss WHERE cow_id=$1
+  ) SELECT id,is_false FROM reproduction_heat WHERE cow_id=$1 AND cancelled_at IS NULL AND NOT is_false
+    AND starts_on>=COALESCE((SELECT max(occurred_on) FROM boundaries WHERE occurred_on<=$2::date),'-infinity'::date)
+    AND starts_on<COALESCE((SELECT min(occurred_on) FROM boundaries WHERE occurred_on>$2::date),'infinity'::date)
+    ORDER BY starts_on DESC,created_at DESC`,[cowId,on])).rows;
+}
+
 export async function requireRulesAdministrator(client:PoolClient,auth:AuthState,context:PropertyContext){
   if(await superadminPropertyAccess(client,auth,context))return;
   const grant=await client.query(`SELECT 1 FROM property_membership pm

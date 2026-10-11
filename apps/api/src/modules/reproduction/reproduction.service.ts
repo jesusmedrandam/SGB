@@ -1,4 +1,4 @@
-import {requireRulesAdministrator} from './reproduction.rules.js';
+import {cycleTrueHeats,requireRulesAdministrator} from './reproduction.rules.js';
 import {insertAnimalInTransaction} from '../animals/animals.service.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type { PoolClient } from 'pg';
@@ -145,7 +145,7 @@ async function femalePolicy(client: PoolClient, cowId: string, eventOn: string,
     `SELECT 1 FROM reproduction_pregnancy WHERE cow_id = $1 AND status = 'CONFIRMED' LIMIT 1`, [cowId]);
   if (action === 'HEAT' && activePregnancy.rowCount && !isFalse)
     throw conflict('PREGNANCY_CONFIRMED', 'La vaca tiene una preñez confirmada; marca falso el celo aparente.');
-  if (action === 'HEAT' && isFalse && !config.allowFalseHeatInPregnancy)
+  if (action === 'HEAT' && isFalse && activePregnancy.rowCount && !config.allowFalseHeatInPregnancy)
     throw conflict('FALSE_HEAT_DISABLED', 'Esta propiedad no permite registrar celos falsos.');
   if (action === 'PREGNANCY' && activePregnancy.rowCount)
     throw conflict('PREGNANCY_CONFIRMED', 'La vaca ya tiene una preñez confirmada.');
@@ -155,7 +155,7 @@ async function femalePolicy(client: PoolClient, cowId: string, eventOn: string,
     const boundary = birth && loss ? (birth > loss ? birth : loss) : birth ?? loss ?? '0001-01-01';
     const recentHeat = await client.query(
       `SELECT 1 FROM reproduction_heat WHERE cow_id = $1 AND cancelled_at IS NULL
-       AND starts_on > $2::date AND starts_on <= $3::date LIMIT 1`,
+       AND starts_on >= $2::date AND starts_on <= $3::date LIMIT 1`,
       [cowId, boundary, eventOn]);
     if (recentHeat.rowCount) throw conflict('SECOND_HEAT_DISABLED',
       'Esta propiedad no permite otro celo en el mismo ciclo.');
@@ -251,6 +251,8 @@ export async function createService(auth: AuthState, context: PropertyContext,
       await femalePolicy(client, input.cowId, input.occurredOn, 'PREGNANCY', config);
       let fatherId = input.fatherId ?? null;
       if (input.heatId) {
+        if(!(await cycleTrueHeats(client,input.cowId,input.occurredOn)).some(heat=>heat.id===input.heatId))
+          throw invalidRequest('HEAT_UNAVAILABLE','Selecciona un celo verdadero del ciclo actual.');
         const heat = await client.query<{ bull_id: string | null }>(
           `SELECT bull_id FROM reproduction_heat WHERE id=$1 AND property_id=$2
            AND cow_id=$3 AND cancelled_at IS NULL AND NOT is_false
@@ -262,7 +264,7 @@ export async function createService(auth: AuthState, context: PropertyContext,
       if (fatherId) await eligibleAnimal(client, context, fatherId, 'MALE', accountId,
         input.occurredOn, false, config.minimumBullMonths);
       if (input.donorId) await eligibleAnimal(client, context, input.donorId, 'FEMALE', accountId,
-        input.occurredOn, false, 0);
+        input.occurredOn, false, config.minimumCowMonths);
       const result = await client.query<{ id: string }>(
         `INSERT INTO reproduction_service(account_id, property_id, cow_id, heat_id,
           father_id, external_father, donor_id, external_donor, kind, occurred_on,
@@ -322,13 +324,28 @@ export async function createHeat(auth: AuthState, context: PropertyContext,
       if (input.bullId) await eligibleAnimal(client, context, input.bullId, 'MALE', accountId,
         input.startsOn, false, config.minimumBullMonths);
       await femalePolicy(client, input.cowId, input.startsOn, 'HEAT', config, input.isFalse);
+      const previous=await cycleTrueHeats(client,input.cowId,input.startsOn);
+      let isFalse=input.isFalse;
+      if(!isFalse&&previous.length){
+        if(!input.trueHeatId)throw conflict('TRUE_HEAT_SELECTION_REQUIRED',
+          'Ya hay un celo verdadero en este ciclo. Elige cuál conservar como verdadero.');
+        if(input.trueHeatId!=='NEW'&&!previous.some(heat=>heat.id===input.trueHeatId))
+          throw conflict('TRUE_HEAT_CHANGED','El celo verdadero cambió. Actualiza el registro y vuelve a elegir.');
+        isFalse=input.trueHeatId!=='NEW';
+        for(const heat of previous.filter(heat=>heat.id!==input.trueHeatId)){
+          await client.query('UPDATE reproduction_heat SET is_false=true WHERE id=$1',[heat.id]);
+          await audit(client,auth,context,metadata,'REPRODUCTION_HEAT_MARKED_FALSE','REPRODUCTION_HEAT',heat.id,
+            {id:heat.id,isFalse:false},{id:heat.id,isFalse:true});
+        }
+      }else if(input.trueHeatId)throw conflict('TRUE_HEAT_CHANGED',
+        'El celo verdadero cambió. Actualiza el registro y vuelve a elegir.');
       const result = await client.query<{ id: string }>(
         `INSERT INTO reproduction_heat(account_id, property_id, cow_id, bull_id,
          starts_on, ends_on, is_false, notes, created_by)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
         [accountId, context.propertyId, input.cowId, input.bullId ?? null, input.startsOn,
-          input.endsOn ?? null, input.isFalse, input.notes ?? null, auth.userId]);
-      const created = { id: result.rows[0]!.id, ...input };
+          input.endsOn ?? null, isFalse, input.notes ?? null, auth.userId]);
+      const created = { id: result.rows[0]!.id, ...input,isFalse };
       await audit(client, auth, context, metadata, 'REPRODUCTION_HEAT_CREATED',
         'REPRODUCTION_HEAT', created.id, null, created);
       return created;
@@ -360,8 +377,11 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
           father_id: string | null; external_father: string | null; kind: string }>(
           `SELECT occurred_on::text,heat_id,father_id,external_father,kind
            FROM reproduction_service WHERE id=$1 AND property_id=$2 AND cow_id=$3
-             AND account_id=$4 AND cancelled_at IS NULL FOR SHARE`,
-          [input.serviceId, context.propertyId, input.cowId, accountId]);
+             AND account_id=$4 AND cancelled_at IS NULL
+             AND occurred_on>=GREATEST(
+               COALESCE((SELECT max(occurred_on) FROM reproduction_birth WHERE mother_id=$3 AND occurred_on<=$5::date),'-infinity'::date),
+               COALESCE((SELECT max(occurred_on) FROM reproduction_loss WHERE cow_id=$3 AND occurred_on<=$5::date),'-infinity'::date)) FOR SHARE`,
+          [input.serviceId, context.propertyId, input.cowId, accountId,input.confirmedOn]);
         const selected = service.rows[0];
         if (!selected || selected.kind !== input.conceptionMethod || selected.occurred_on > input.confirmedOn
           || (heatId && heatId !== selected.heat_id)
@@ -369,6 +389,8 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
           || (externalFather && externalFather !== selected.external_father))
           throw invalidRequest('SERVICE_UNAVAILABLE', 'El servicio no corresponde a esta preñez.');
         heatId = selected.heat_id;
+        if(heatId&&!(await cycleTrueHeats(client,input.cowId,input.confirmedOn)).some(heat=>heat.id===heatId))
+          throw invalidRequest('SERVICE_UNAVAILABLE','El servicio está relacionado con un celo falso o de un ciclo anterior.');
         fatherId = selected.father_id;
         externalFather = selected.external_father;
         conceptionOn = selected.occurred_on;
@@ -381,7 +403,7 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
         const latest = await client.query<{ id: string }>(
           `SELECT id FROM reproduction_heat WHERE cow_id = $1 AND property_id = $2
            AND cancelled_at IS NULL AND NOT is_false AND starts_on <= $3::date
-           AND starts_on > GREATEST(
+           AND starts_on >= GREATEST(
              COALESCE((SELECT max(occurred_on) FROM reproduction_birth
                WHERE mother_id = $1 AND occurred_on <= $3::date), '-infinity'::date),
              COALESCE((SELECT max(occurred_on) FROM reproduction_loss
@@ -391,6 +413,8 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
         heatId = latest.rows[0]?.id ?? null;
       }
       if (!input.serviceId && heatId) {
+        if(!(await cycleTrueHeats(client,input.cowId,input.confirmedOn)).some(heat=>heat.id===heatId))
+          throw invalidRequest('HEAT_UNAVAILABLE','Selecciona un celo verdadero del ciclo actual.');
         const heat = await client.query<{ starts_on: string; ends_on: string | null; bull_id: string | null }>(
           `SELECT starts_on::text, ends_on::text, bull_id FROM reproduction_heat WHERE id = $1 AND cow_id = $2
            AND property_id = $3 AND cancelled_at IS NULL AND NOT is_false FOR SHARE`,
