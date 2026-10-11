@@ -46,7 +46,9 @@ export async function getReproductionSettings(context: PropertyContext,auth?:Aut
   const client = await pool.connect();
   try {
     let canManageRules=false;if(auth){try{await requireRulesAdministrator(client,auth,context);canManageRules=true;}catch(error){if((error as {code?:string}).code!=='RULES_ADMINISTRATOR_REQUIRED')throw error;}}
-    return {...await settings(client, context.propertyId),canManageRules};
+    const sections=await client.query<{module_code:string}>(`SELECT module_code FROM effective_property_module
+      WHERE property_id=$1 AND enabled AND module_code LIKE 'REPRODUCTION_%' ORDER BY module_code`,[context.propertyId]);
+    return {...await settings(client, context.propertyId),canManageRules,enabledSections:sections.rows.map(row=>row.module_code)};
   }
   finally { client.release(); }
 }
@@ -81,7 +83,9 @@ export async function updateReproductionSettings(auth: AuthState, context: Prope
       input.useLastValidHeat, input.maxMilkingDays, auth.userId]);
     await audit(client, auth, context, metadata, 'REPRODUCTION_SETTINGS_UPDATED',
       'ACCOUNT', accountId, before, input);
-    return {...input,accountId,canManageRules:true};
+    const sections=await client.query<{module_code:string}>(`SELECT module_code FROM effective_property_module
+      WHERE property_id=$1 AND enabled AND module_code LIKE 'REPRODUCTION_%' ORDER BY module_code`,[context.propertyId]);
+    return {...input,accountId,canManageRules:true,enabledSections:sections.rows.map(row=>row.module_code)};
   });
 }
 
@@ -238,6 +242,7 @@ export async function createService(auth: AuthState, context: PropertyContext,
   try {
     return await inTransaction(async (client) => {
       const { account_id: accountId, today } = await access(client, auth, context, 'REPRODUCTION_MANAGE');
+      await requireSection(client,context,input.kind==='INSEMINATION'?'REPRODUCTION_INSEMINATION':'REPRODUCTION_EMBRYO_TRANSFER');
       if (input.occurredOn > today) throw invalidRequest('FUTURE_REPRODUCTION_DATE',
         'La fecha del servicio no puede ser futura.');
       const config = await settings(client, context.propertyId);
@@ -279,9 +284,10 @@ export async function cancelService(auth: AuthState, context: PropertyContext,
   id: string, metadata: RequestMetadata) {
   return inTransaction(async (client) => {
     await access(client, auth, context, 'REPRODUCTION_MANAGE');
-    const service = await client.query(`SELECT id FROM reproduction_service WHERE id=$1
+    const service = await client.query(`SELECT id,kind FROM reproduction_service WHERE id=$1
       AND property_id=$2 AND cancelled_at IS NULL FOR UPDATE`, [id, context.propertyId]);
     if (!service.rows[0]) throw new ApiError(404, 'SERVICE_NOT_FOUND', 'El servicio no está disponible.');
+    await requireSection(client,context,service.rows[0].kind==='INSEMINATION'?'REPRODUCTION_INSEMINATION':'REPRODUCTION_EMBRYO_TRANSFER');
     const linked = await client.query(`SELECT 1 FROM reproduction_pregnancy
       WHERE service_id=$1 AND status<>'CANCELLED' LIMIT 1`, [id]);
     if (linked.rowCount) throw conflict('SERVICE_HAS_PREGNANCY',
@@ -307,6 +313,7 @@ export async function createHeat(auth: AuthState, context: PropertyContext,
   try {
     return await inTransaction(async (client) => {
       const { account_id: accountId, today } = await access(client, auth, context, 'REPRODUCTION_MANAGE');
+      await requireSection(client,context,'REPRODUCTION_HEATS');
       const config = await settings(client, context.propertyId);
       if (input.startsOn > today || (input.endsOn && input.endsOn > today))
         throw invalidRequest('FUTURE_REPRODUCTION_DATE', 'Las fechas del celo no pueden ser futuras.');
@@ -334,6 +341,9 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
   try {
     return await inTransaction(async (client) => {
       const { account_id: accountId, today } = await access(client, auth, context, 'REPRODUCTION_MANAGE');
+      await requireSection(client,context,'REPRODUCTION_PREGNANCIES');
+      if(input.conceptionMethod==='INSEMINATION'||input.conceptionMethod==='EMBRYO_TRANSFER')await requireSection(client,context,
+        input.conceptionMethod==='INSEMINATION'?'REPRODUCTION_INSEMINATION':'REPRODUCTION_EMBRYO_TRANSFER');
       const config = await settings(client, context.propertyId);
       if (input.confirmedOn > today) throw invalidRequest('FUTURE_REPRODUCTION_DATE',
         'La confirmación no puede ser futura.');
@@ -448,6 +458,7 @@ export async function recordBirth(auth: AuthState, context: PropertyContext,
   try {
     return await inTransaction(async (client) => {
       const { account_id: accountId, today } = await access(client, auth, context, 'REPRODUCTION_MANAGE');
+      await requireSection(client,context,'REPRODUCTION_BIRTHS');
       if (input.occurredOn > today) throw invalidRequest('FUTURE_REPRODUCTION_DATE',
         'La fecha del parto no puede ser futura.');
       const pregnancy = await lockPregnancy(client, context, input.pregnancyId);
@@ -469,7 +480,7 @@ export async function recordBirth(auth: AuthState, context: PropertyContext,
          WHERE animal_id = $1 AND valid_until IS NULL`, [pregnancy.cow_id]);
       if (input.calves.some(calf=>!calf.owners?.length)&&!ownership.rows.length) throw invalidRequest('MOTHER_OWNERS_REQUIRED',
         'Asigna propietarios a la madre antes de registrar sus crías.');
-      const calves: Array<{ id: string; name: string; sex: 'FEMALE' | 'MALE' }> = [];
+      const calves: Array<Awaited<ReturnType<typeof insertAnimalInTransaction>> & {birthCondition:string}> = [];
       for (const calf of input.calves) {
         const owners=calf.owners??ownership.rows.map(owner=>({partyId:owner.party_id,
           percent:Number(owner.ownership_percent),isPrimary:owner.is_primary}));
@@ -482,12 +493,13 @@ export async function recordBirth(auth: AuthState, context: PropertyContext,
         const calfId=created.id;
         await client.query(`INSERT INTO reproduction_birth_calf(birth_id,animal_id,birth_condition)
           VALUES($1,$2,$3)`,[birth.rows[0]!.id,calfId,calf.birthCondition??'ALIVE']);
-        calves.push({ id: calfId, name: calf.name, sex: calf.sex });
+        calves.push({ ...created, birthCondition:calf.birthCondition??'ALIVE' });
       }
       await client.query(`UPDATE reproduction_pregnancy SET status = 'BORN',
         resolved_at = now(), resolved_by = $2 WHERE id = $1`, [pregnancy.id, auth.userId]);
       const response = { id: birth.rows[0]!.id, pregnancyId: pregnancy.id,
-        motherId: pregnancy.cow_id, occurredOn: input.occurredOn, calves,
+        motherId: pregnancy.cow_id, motherName:mother.rows[0].name,
+        kind:input.kind??'NORMAL',notes:input.notes??null,occurredOn: input.occurredOn, calves,
         liveCount: calves.length, stillbornCount: input.stillbornCount };
       await audit(client, auth, context, metadata, 'REPRODUCTION_BIRTH_REGISTERED',
         'REPRODUCTION_BIRTH', response.id, null, response);
@@ -501,6 +513,7 @@ export async function recordLoss(auth: AuthState, context: PropertyContext,
   try {
     return await inTransaction(async (client) => {
       const { account_id: accountId, today } = await access(client, auth, context, 'REPRODUCTION_MANAGE');
+      await requireSection(client,context,'REPRODUCTION_LOSSES');
       if (input.occurredOn > today) throw invalidRequest('FUTURE_REPRODUCTION_DATE',
         'La fecha de la pérdida no puede ser futura.');
       const pregnancy = await lockPregnancy(client, context, input.pregnancyId);
@@ -526,6 +539,7 @@ export async function cancelPregnancy(auth: AuthState, context: PropertyContext,
   id: string, metadata: RequestMetadata) {
   return inTransaction(async (client) => {
     const {account_id:accountId}=await access(client, auth, context, 'REPRODUCTION_MANAGE');
+      await requireSection(client,context,'REPRODUCTION_PREGNANCIES');
     await requireRulesAdministrator(client,auth,context);
     await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
     const before = await lockPregnancy(client, context, id);
@@ -541,6 +555,7 @@ export async function cancelHeat(auth: AuthState, context: PropertyContext,
   id: string, metadata: RequestMetadata) {
   return inTransaction(async (client) => {
     await access(client, auth, context, 'REPRODUCTION_MANAGE');
+      await requireSection(client,context,'REPRODUCTION_HEATS');
     const heat = await client.query(`SELECT id FROM reproduction_heat WHERE id = $1 AND property_id = $2
       AND cancelled_at IS NULL FOR UPDATE`, [id, context.propertyId]);
     if (!heat.rows[0]) throw new ApiError(404, 'HEAT_NOT_FOUND', 'El celo no está disponible.');
@@ -553,5 +568,28 @@ export async function cancelHeat(auth: AuthState, context: PropertyContext,
     await audit(client, auth, context, metadata, 'REPRODUCTION_HEAT_CANCELLED',
       'REPRODUCTION_HEAT', id, { id, cancelled: false }, { id, cancelled: true });
     return { id, cancelled: true };
+  });
+}
+
+
+async function requireSection(client:PoolClient,context:PropertyContext,code:string){
+  const enabled=await client.query(`SELECT 1 FROM effective_property_module WHERE property_id=$1 AND module_code=$2 AND enabled`,[context.propertyId,code]);
+  if(!enabled.rowCount)throw forbidden('REPRODUCTION_SECTION_DISABLED','Esta sección de reproducción está deshabilitada en las políticas de operación.');
+}
+
+export async function finishHeat(auth:AuthState,context:PropertyContext,id:string,endsOn:string,metadata:RequestMetadata){
+  return inTransaction(async client=>{
+    const {today}=await access(client,auth,context,'REPRODUCTION_MANAGE');
+    await requireSection(client,context,'REPRODUCTION_HEATS');
+    const target=await client.query<{cow_id:string}>(`SELECT cow_id FROM reproduction_heat WHERE id=$1 AND property_id=$2`,[id,context.propertyId]);
+    if(!target.rows[0])throw new ApiError(404,'HEAT_NOT_FOUND','El celo no está disponible en esta propiedad.');
+    await client.query('SELECT id FROM animal WHERE id=$1 FOR UPDATE',[target.rows[0].cow_id]);
+    const heat=(await client.query<{starts_on:string;ends_on:string|null;cancelled_at:string|null}>(`SELECT starts_on::text,ends_on::text,cancelled_at FROM reproduction_heat WHERE id=$1 AND property_id=$2 FOR UPDATE`,[id,context.propertyId])).rows[0]!;
+    if(heat.cancelled_at||heat.ends_on)throw conflict('HEAT_FINISHED','Este celo ya fue finalizado o cancelado.');
+    if(endsOn<heat.starts_on||endsOn>today)throw invalidRequest('HEAT_END_INVALID','La fecha de fin debe estar entre el inicio del celo y hoy.');
+    await client.query('UPDATE reproduction_heat SET ends_on=$2 WHERE id=$1',[id,endsOn]);
+    await audit(client,auth,context,metadata,'REPRODUCTION_HEAT_FINISHED','REPRODUCTION_HEAT',id,
+      {id,endsOn:null},{id,endsOn});
+    return {id,endsOn};
   });
 }

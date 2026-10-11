@@ -3,6 +3,7 @@ import {createAnimalSchema} from '../animals/animals.schemas.js';
 
 const note = z.string().trim().max(500).nullable().optional();
 export const idSchema = z.object({ id: z.uuid() });
+export const finishHeatSchema=z.object({endsOn:z.iso.date()});
 export const createHeatSchema = z.object({
   cowId: z.uuid(), bullId: z.uuid().nullable().optional(),
   startsOn: z.iso.date(), endsOn: z.iso.date().nullable().optional(),

@@ -163,6 +163,7 @@ export async function addMedia(auth:AuthState,context:PropertyContext,type:strin
   const canonical=await canonicalize(input,kind);
   const digest=createHash('sha256').update(canonical.data).digest('hex');
   const reservationId=randomUUID();let accountId='';let reused:string|null=null;
+  let relatedAttachments:Array<{id:string;entity_type:string;entity_id:string}>=[];
   await inTransaction(async client=>{
     await superadminPropertyAccess(client,auth,context);
     for(const targetId of ids)await validateTarget(client,context,type,targetId);
@@ -226,25 +227,34 @@ export async function addMedia(auth:AuthState,context:PropertyContext,type:strin
           completed_at=now() WHERE id=$1`,[reservationId,objectId]);
       }
       const attachmentIds:string[]=[];
-      for(const targetId of ids){
+      const attachmentTargets=ids.map(entityId=>({type,id:entityId}));
+      if(type==='REPRODUCTION_BIRTH'){
+        const animals=await client.query<{id:string}>(`SELECT b.mother_id AS id FROM reproduction_birth b
+          WHERE b.id=$1 AND b.property_id=$2 UNION SELECT bc.animal_id FROM reproduction_birth_calf bc
+          JOIN reproduction_birth b ON b.id=bc.birth_id WHERE b.id=$1 AND b.property_id=$2`,[id,context.propertyId]);
+        for(const animal of animals.rows)attachmentTargets.push({type:'ANIMAL',id:animal.id});
+      }
+      relatedAttachments=[];
+      for(const target of attachmentTargets){
+        const targetId=target.id;
         const attached=await client.query<{id:string}>(`INSERT INTO media_attachment(account_id,storage_object_id,
           property_id,entity_type,entity_id,relation_code,created_by,description,captured_on)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
           ON CONFLICT (storage_object_id,entity_type,entity_id,relation_code) WHERE deleted_at IS NULL
           DO UPDATE SET description=EXCLUDED.description,captured_on=EXCLUDED.captured_on RETURNING id`,
-          [accountId,objectId,context.propertyId,type,targetId,relation,auth.userId,
+          [accountId,objectId,context.propertyId,target.type,targetId,relation,auth.userId,
             options.description??null,options.capturedOn??null]);
         const attachmentId=attached.rows[0]!.id;
         await client.query('DELETE FROM media_attachment_tag WHERE attachment_id=$1',[attachmentId]);
         for(const tagId of options.tagIds??[])await client.query(`INSERT INTO media_attachment_tag(
           attachment_id,tag_id) VALUES($1,$2)`,[attachmentId,tagId]);
-        attachmentIds.push(attachmentId);
+        attachmentIds.push(attachmentId);relatedAttachments.push({id:attachmentId,entity_type:target.type,entity_id:targetId});
       }
       await auditMedia(client,auth,context,'MEDIA_UPLOADED',objectId,null,
         {attachmentIds,animalIds:ids,relation,description:options.description??null,capturedOn:options.capturedOn??null,tagIds:options.tagIds??[]},options.metadata);
       return attachmentIds;
     });
-    return {id:result[0],attachmentIds:result};
+    return {id:result[0],attachmentIds:result,relatedAttachments};
   }catch(error){
     if(uploaded){try{await cloudinary.uploader.destroy(key,{resource_type:kind==='VIDEO'?'video':'image'});}catch{console.error('Cloudinary cleanup pending:',key);}}
     throw error;
@@ -272,6 +282,13 @@ export async function updateMediaDetails(auth:AuthState,context:PropertyContext,
     if(!refs.rows.length)throw invalidRequest('MEDIA_NOT_FOUND','El archivo no pertenece a esta propiedad.');
     if(refs.rows.length!==input.expectedAttachmentIds.length||refs.rows.some(row=>!input.expectedAttachmentIds.includes(row.id)))
       throw conflict('MEDIA_RELATIONS_CHANGED','Las relaciones cambiaron. Vuelve a abrir la foto antes de editarla.');
+    const birthIds=refs.rows.filter(row=>row.entity_type==='REPRODUCTION_BIRTH').map(row=>row.entity_id);
+    if(birthIds.length){
+      const relatives=await client.query<{id:string}>(`SELECT mother_id AS id FROM reproduction_birth
+        WHERE id=ANY($1::uuid[]) AND property_id=$2 UNION SELECT bc.animal_id FROM reproduction_birth_calf bc
+        JOIN reproduction_birth b ON b.id=bc.birth_id WHERE b.id=ANY($1::uuid[]) AND b.property_id=$2`,[birthIds,context.propertyId]);
+      input={...input,animalIds:[...new Set([...input.animalIds,...relatives.rows.map(row=>row.id)])]};
+    }
     for(const ref of refs.rows)await validateTarget(client,context,ref.entity_type,ref.entity_id);
     for(const animalId of input.animalIds)await validateTarget(client,context,'ANIMAL',animalId);
     if(refs.rows.some(row=>row.entity_type==='ANIMAL'&&row.relation_code!=='GENERAL'&&!input.animalIds.includes(row.entity_id)))
