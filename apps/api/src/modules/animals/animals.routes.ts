@@ -8,6 +8,7 @@ import { updateAnimalParents } from './parents.service.js';
 import { updateAnimalDescription } from './description.service.js';
 import { setAnimalOwners } from './owners.service.js';
 import { z } from 'zod';
+import {getReproductionSettings} from '../reproduction/reproduction.service.js';
 import {getAnimalSummary,getClassificationPolicy,updateClassificationPolicy}
   from './classification.service.js';
 
@@ -23,6 +24,10 @@ const metadata = (request: Request): RequestMetadata => ({
 
 export const animalsRouter = Router();
 animalsRouter.use(authenticate, requirePropertyContext);
+animalsRouter.get('/parent-age-rules',requirePermission('ANIMAL_VIEW'),asyncHandler(async(req,res)=>{
+  const {minimumCowMonths,minimumBullMonths}=await getReproductionSettings(req.propertyContext!);
+  res.json({ok:true,data:{minimumCowMonths,minimumBullMonths}});
+}));
 animalsRouter.get('/summary',requirePermission('ANIMAL_VIEW'),asyncHandler(async(req,res)=>{
   res.json({ok:true,data:await getAnimalSummary(req.propertyContext!)});
 }));
