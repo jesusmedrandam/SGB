@@ -155,7 +155,7 @@ async function femalePolicy(client: PoolClient, cowId: string, eventOn: string,
     const boundary = birth && loss ? (birth > loss ? birth : loss) : birth ?? loss ?? '0001-01-01';
     const recentHeat = await client.query(
       `SELECT 1 FROM reproduction_heat WHERE cow_id = $1 AND cancelled_at IS NULL
-       AND starts_on > $2::date AND starts_on <= $3::date LIMIT 1`,
+       AND starts_on >= $2::date AND starts_on <= $3::date LIMIT 1`,
       [cowId, boundary, eventOn]);
     if (recentHeat.rowCount) throw conflict('SECOND_HEAT_DISABLED',
       'Esta propiedad no permite otro celo en el mismo ciclo.');
@@ -378,7 +378,7 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
           `SELECT occurred_on::text,heat_id,father_id,external_father,kind
            FROM reproduction_service WHERE id=$1 AND property_id=$2 AND cow_id=$3
              AND account_id=$4 AND cancelled_at IS NULL
-             AND occurred_on>GREATEST(
+             AND occurred_on>=GREATEST(
                COALESCE((SELECT max(occurred_on) FROM reproduction_birth WHERE mother_id=$3 AND occurred_on<=$5::date),'-infinity'::date),
                COALESCE((SELECT max(occurred_on) FROM reproduction_loss WHERE cow_id=$3 AND occurred_on<=$5::date),'-infinity'::date)) FOR SHARE`,
           [input.serviceId, context.propertyId, input.cowId, accountId,input.confirmedOn]);
@@ -403,7 +403,7 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
         const latest = await client.query<{ id: string }>(
           `SELECT id FROM reproduction_heat WHERE cow_id = $1 AND property_id = $2
            AND cancelled_at IS NULL AND NOT is_false AND starts_on <= $3::date
-           AND starts_on > GREATEST(
+           AND starts_on >= GREATEST(
              COALESCE((SELECT max(occurred_on) FROM reproduction_birth
                WHERE mother_id = $1 AND occurred_on <= $3::date), '-infinity'::date),
              COALESCE((SELECT max(occurred_on) FROM reproduction_loss

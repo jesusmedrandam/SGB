@@ -143,5 +143,12 @@ test('reglas compartidas por dueño, administradores, edad de padres y ficha com
   assert.equal(concurrent.filter(row=>row.status==='fulfilled').length,1);
   assert.equal(concurrent.filter(row=>row.status==='rejected'&&row.reason.code==='TRUE_HEAT_SELECTION_REQUIRED').length,1);
   assert.equal((await pool.query('SELECT count(*)::int AS count FROM reproduction_heat WHERE cow_id=$1 AND NOT is_false',[concurrentCow.id])).rows[0].count,1);
+  await updateReproductionSettings(auth,context,{...config,minimumCowMonths:18,minimumBullMonths:24,allowSecondHeat:true,daysAfterBirthHeat:0},metadata);
+  const concurrentPregnancy=await createPregnancy(auth,context,{cowId:concurrentCow.id,conceptionMethod:'NATURAL',confirmationMethod:'PALPATION',confirmedOn:'2024-01-03'},metadata);
+  await recordBirth(auth,context,{pregnancyId:concurrentPregnancy.id,occurredOn:'2024-09-01',calves:[],stillbornCount:1},metadata);
+  const sameDay=await createHeat(auth,context,{cowId:concurrentCow.id,startsOn:'2024-09-01',isFalse:false},metadata);
+  await assert.rejects(()=>createHeat(auth,context,{cowId:concurrentCow.id,startsOn:'2024-09-01',isFalse:false},metadata),(e:{code?:string})=>e.code==='TRUE_HEAT_SELECTION_REQUIRED');
+  const sameDayPregnancy=await createPregnancy(auth,context,{cowId:concurrentCow.id,conceptionMethod:'NATURAL',confirmationMethod:'PALPATION',confirmedOn:'2024-10-16'},metadata);
+  assert.equal(sameDayPregnancy.heatId,sameDay.id);
  }finally{await pool.end();}
 });

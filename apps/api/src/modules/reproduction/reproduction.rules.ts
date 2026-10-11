@@ -8,7 +8,7 @@ export async function cycleTrueHeats(client:PoolClient,cowId:string,on:string){
     SELECT occurred_on FROM reproduction_birth WHERE mother_id=$1
     UNION SELECT occurred_on FROM reproduction_loss WHERE cow_id=$1
   ) SELECT id,is_false FROM reproduction_heat WHERE cow_id=$1 AND cancelled_at IS NULL AND NOT is_false
-    AND starts_on>COALESCE((SELECT max(occurred_on) FROM boundaries WHERE occurred_on<=$2::date),'-infinity'::date)
+    AND starts_on>=COALESCE((SELECT max(occurred_on) FROM boundaries WHERE occurred_on<=$2::date),'-infinity'::date)
     AND starts_on<COALESCE((SELECT min(occurred_on) FROM boundaries WHERE occurred_on>$2::date),'infinity'::date)
     ORDER BY starts_on DESC,created_at DESC`,[cowId,on])).rows;
 }
