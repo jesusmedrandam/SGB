@@ -9,7 +9,7 @@ import {createOwner} from '../animals/owners.service.js';
 import {updateAnimalParents} from '../animals/parents.service.js';
 import {getClassificationPolicy,updateClassificationPolicy} from '../animals/classification.service.js';
 import {createGroup} from '../groups/groups.service.js';
-import {createHeat,createPregnancy,getReproductionSettings,recordBirth,updateReproductionSettings} from './reproduction.service.js';
+import {cancelPregnancy,createHeat,createService,createPregnancy,getReproductionSettings,recordBirth,recordLoss,updateReproductionSettings} from './reproduction.service.js';
 
 const metadata={ipAddress:'127.0.0.1',userAgent:'account-reproduction-rules-test'};
 test('reglas compartidas por dueño, administradores, edad de padres y ficha completa del parto',async()=>{
@@ -60,6 +60,34 @@ test('reglas compartidas por dueño, administradores, edad de padres y ficha com
   const ownership=[{partyId:party.id,percent:100,isPrimary:true}];
   const youngCow=await createAnimal(auth,context,{name:'Hembra joven',sex:'FEMALE',speciesCode:'BOVINE',birthDate:'2023-01-31',owners:ownership},metadata);
   const youngBull=await createAnimal(auth,context,{name:'Macho joven',sex:'MALE',speciesCode:'BOVINE',birthDate:'2023-01-31',owners:ownership},metadata);
+  async function classify(id:string,on:string){return (await pool.query('SELECT classify_animal($1,$2::date) AS code',[id,on])).rows[0].code;}
+  assert.equal(await classify(youngCow.id,'2024-09-29'),'TERNERA');
+  assert.equal(await classify(youngCow.id,'2024-09-30'),'VACONA');
+  assert.equal(await classify(youngBull.id,'2025-07-30'),'TERNERO');
+  assert.equal(await classify(youngBull.id,'2025-07-31'),'TORETE');
+  const unknownCow=await createAnimal(auth,context,{name:'Hembra sin nacimiento',sex:'FEMALE',speciesCode:'BOVINE',owners:ownership},metadata);
+  const unknownBull=await createAnimal(auth,secondContext,{name:'Macho sin nacimiento',sex:'MALE',speciesCode:'BOVINE',owners:ownership},metadata);
+  assert.equal((await getAnimal(context,unknownCow.id)).classification?.code,'VACONA');
+  assert.equal((await getAnimal(secondContext,unknownBull.id)).classification?.code,'TORETE');
+  await createHeat(auth,context,{cowId:unknownCow.id,bullId:unknownBull.id,startsOn:'2024-01-01',endsOn:'2024-01-02',isFalse:false},metadata);
+  const service=await createService(auth,context,{cowId:unknownCow.id,fatherId:unknownBull.id,donorId:unknownCow.id,kind:'EMBRYO_TRANSFER',occurredOn:'2024-01-03'},metadata);
+  const unknownPregnancy=await createPregnancy(auth,context,{cowId:unknownCow.id,serviceId:service.id,conceptionMethod:'EMBRYO_TRANSFER',confirmationMethod:'PALPATION',confirmedOn:'2024-02-01'},metadata);
+  assert.equal((await getAnimal(secondContext,unknownBull.id)).classification?.code,'TORO');
+  await recordLoss(auth,context,{pregnancyId:unknownPregnancy.id,occurredOn:'2024-02-02',notes:'Pérdida confirmada'},metadata);
+  assert.equal((await getAnimal(secondContext,unknownBull.id)).classification?.code,'TORO');
+  assert.equal((await getAnimal(context,unknownCow.id)).classification?.code,'VACONA');
+  const stillbornPregnancy=await createPregnancy(auth,context,{cowId:unknownCow.id,fatherId:unknownBull.id,conceptionMethod:'NATURAL',confirmationMethod:'PALPATION',confirmedOn:'2025-01-01'},metadata);
+  await recordBirth(auth,context,{pregnancyId:stillbornPregnancy.id,occurredOn:'2025-10-01',calves:[],stillbornCount:1},metadata);
+  assert.equal((await getAnimal(context,unknownCow.id)).classification?.code,'VACA');
+  const cancelledBull=await createAnimal(auth,context,{name:'Padre de preñez anulada',sex:'MALE',speciesCode:'BOVINE'},metadata);
+  const cancelledCow=await createAnimal(auth,context,{name:'Hembra de preñez anulada',sex:'FEMALE',speciesCode:'BOVINE'},metadata);
+  const cancelled=await createPregnancy(auth,context,{cowId:cancelledCow.id,fatherId:cancelledBull.id,conceptionMethod:'NATURAL',confirmationMethod:'PALPATION',confirmedOn:'2024-01-01'},metadata);
+  await cancelPregnancy(auth,context,cancelled.id,metadata);
+  assert.equal((await getAnimal(context,cancelledBull.id)).classification?.code,'TORETE');
+  const unknownChild=await createAnimal(auth,context,{name:'Cría de padres sin fecha',sex:'FEMALE',speciesCode:'BOVINE',birthDate:'2024-01-01',mother:{animalId:unknownCow.id},father:{animalId:cancelledBull.id}},metadata);
+  assert.equal((await getAnimal(context,unknownChild.id)).father?.animalId,cancelledBull.id);
+  const corrected=await updateAnimalParents(auth,context,unknownChild.id,{mother:{animalId:cancelledCow.id},father:{animalId:cancelledBull.id},expectedVersion:unknownChild.version},metadata);
+  assert.equal(corrected.mother?.animalId,cancelledCow.id);
   await assert.rejects(()=>createHeat(auth,context,{cowId:youngCow.id,startsOn:'2024-07-30',isFalse:false},metadata),(e:{code?:string})=>e.code==='REPRODUCTION_MINIMUM_AGE');
   await createHeat(auth,context,{cowId:youngCow.id,startsOn:'2024-07-31',isFalse:false},metadata);
   await assert.rejects(()=>createHeat(auth,context,{cowId:youngCow.id,bullId:youngBull.id,startsOn:'2024-08-01',isFalse:false},metadata),(e:{code?:string})=>e.code==='REPRODUCTION_MINIMUM_AGE');

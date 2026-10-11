@@ -75,8 +75,9 @@ app.get('/health/ready', asyncHandler(async (_request, response) => {
   const features=await pool.query(`SELECT to_regprocedure('public.expire_unapplied_drafts()') IS NOT NULL AS drafts,
     EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='property' AND column_name='owner_name') AS properties,
     to_regclass('public.account_reproduction_setting') IS NOT NULL AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='reproduction_birth_calf' AND column_name='birth_condition') AS reproduction,
-    EXISTS(SELECT 1 FROM module_catalog WHERE code='REPRODUCTION_HEATS') AS reproduction_sections`);
-  response.json({ reproductionFlowReady:features.rows[0].reproduction_sections,accountReproductionRulesReady:features.rows[0].reproduction,draftExpiryReady:features.rows[0].drafts,propertyInformationReady:features.rows[0].properties,ok: true, database: 'ready',accountCatalogReady:catalogs.rows[0]?.ready===true,supportReady:result.rows[0]?.support_ready===true,
+    EXISTS(SELECT 1 FROM module_catalog WHERE code='REPRODUCTION_HEATS') AS reproduction_sections,
+    EXISTS(SELECT 1 FROM schema_migration WHERE filename='0042_animal_classification_history.sql') AS classification_rules`);
+  response.json({ animalClassificationRulesReady:features.rows[0].classification_rules,reproductionFlowReady:features.rows[0].reproduction_sections,accountReproductionRulesReady:features.rows[0].reproduction,draftExpiryReady:features.rows[0].drafts,propertyInformationReady:features.rows[0].properties,ok: true, database: 'ready',accountCatalogReady:catalogs.rows[0]?.ready===true,supportReady:result.rows[0]?.support_ready===true,
     supportModesReady:result.rows[0]?.support_modes_ready===true,medicineDosesReady:result.rows[0]?.medicine_doses_ready===true,
     medicineClassificationDosesReady:result.rows[0]?.medicine_classification_doses_ready===true,
     userProfileReady:result.rows[0]?.user_profile_ready===true,
