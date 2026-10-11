@@ -2,9 +2,9 @@ import { Router, type Request } from 'express';
 import { asyncHandler } from '../../core/async-handler.js';
 import { authenticate, requireModule, requirePermission, requirePropertyContext } from '../auth/auth.middleware.js';
 import type { RequestMetadata } from '../auth/auth.types.js';
-import { createBirthSchema, createHeatSchema, createLossSchema, createPregnancySchema, createServiceSchema, idSchema,
+import { createBirthSchema, finishHeatSchema, createHeatSchema, createLossSchema, createPregnancySchema, createServiceSchema, idSchema,
   reproductionSettingSchema } from './reproduction.schemas.js';
-import { cancelHeat, cancelPregnancy, cancelService, createHeat, createPregnancy, createService, listReproduction,
+import { finishHeat, cancelHeat, cancelPregnancy, cancelService, createHeat, createPregnancy, createService, listReproduction,
   listReproductionCandidates, getReproductionSettings, updateReproductionSettings,
   recordBirth, recordLoss } from './reproduction.service.js';
 
@@ -64,3 +64,8 @@ reproductionRouter.post('/heats/:id/cancel', requirePermission('REPRODUCTION_MAN
     response.json({ ok: true, data: await cancelHeat(request.auth!, request.propertyContext!,
       id, metadata(request)) });
   }));
+
+reproductionRouter.post('/heats/:id/finish',requirePermission('REPRODUCTION_MANAGE'),asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await finishHeat(request.auth!,request.propertyContext!,idSchema.parse(request.params).id,
+    finishHeatSchema.parse(request.body).endsOn,metadata(request))});
+}));

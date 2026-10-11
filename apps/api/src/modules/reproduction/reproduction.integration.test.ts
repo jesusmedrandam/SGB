@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
+import {env} from '../../config.js';
+import {addMedia,listMedia,updateMediaDetails} from '../media/media.service.js';
+import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { pool } from '../../database/pool.js';
 import { createAnimal, getAnimal } from '../animals/animals.service.js';
 import { createOwner } from '../animals/owners.service.js';
 import { getSessionOverview, login, register, resendEmailVerification, verifyEmail } from '../auth/auth.service.js';
-import { createHeat, createPregnancy, createService, getReproductionSettings, listReproduction,
+import { finishHeat, createHeat, createPregnancy, createService, getReproductionSettings, listReproduction,
   recordBirth, recordLoss, updateReproductionSettings } from './reproduction.service.js';
 import { createLactation, finishLactation, listProduction, recordMilk,
   recordTank, setLactationMilking, setCowMilking } from '../production/production.service.js';
@@ -64,6 +67,19 @@ test('la reproducción conserva propiedad, parentesco, espera y auditoría', asy
     (error: { code?: string }) => error.code === 'REPRODUCTION_ANIMAL_UNAVAILABLE');
     const heat = await createHeat(auth, context, { cowId: mother.id, bullId: father.id,
       startsOn: '2023-01-10', isFalse: false }, metadata);
+    await assert.rejects(()=>finishHeat(auth,context,heat.id,'2023-01-09',metadata),
+      (error:{code?:string})=>error.code==='HEAT_END_INVALID');
+    await assert.rejects(()=>finishHeat({...auth,userId:randomUUID()},context,heat.id,'2023-01-12',metadata));
+    await finishHeat(auth,context,heat.id,'2023-01-12',metadata);
+    assert.equal((await listReproduction(context)).heats.find(row=>row.id===heat.id)?.endsOn,'2023-01-12');
+    await assert.rejects(()=>finishHeat(auth,context,heat.id,'2023-01-13',metadata),
+      (error:{code?:string})=>error.code==='HEAT_FINISHED');
+    await pool.query("UPDATE property_module SET enabled=false WHERE property_id=$1 AND module_code='REPRODUCTION_HEATS'",[property.id]);
+    await assert.rejects(()=>createHeat(auth,context,{cowId:mother.id,startsOn:'2023-01-20',isFalse:false},metadata),
+      (error:{code?:string})=>error.code==='REPRODUCTION_SECTION_DISABLED');
+    assert.ok(!(await getReproductionSettings(context)).enabledSections.includes('REPRODUCTION_HEATS'));
+    assert.ok((await getReproductionSettings(context)).enabledSections.includes('REPRODUCTION_INSEMINATION'));
+    await pool.query("UPDATE property_module SET enabled=true WHERE property_id=$1 AND module_code='REPRODUCTION_HEATS'",[property.id]);
     const defaults = await getReproductionSettings(context);
     assert.equal(defaults.daysAfterBirthHeat, 30);
     await updateReproductionSettings(auth, context, { ...defaults, allowSecondHeat: false }, metadata);
@@ -76,8 +92,8 @@ test('la reproducción conserva propiedad, parentesco, espera y auditoría', asy
       conceptionMethod: 'NATURAL', confirmationMethod: 'PALPATION',
       confirmedOn: '2023-02-01' }, metadata);
     assert.equal(pregnancy.fatherId, father.id);
-    assert.equal(pregnancy.gestationDays, 22);
-    assert.equal(pregnancy.expectedBirthOn, '2023-10-20');
+    assert.equal(pregnancy.gestationDays, 20);
+    assert.equal(pregnancy.expectedBirthOn, '2023-10-22');
     await assert.rejects(() => createPregnancy(auth, context, {
       cowId: mother.id, conceptionMethod: 'NATURAL', confirmationMethod: 'PALPATION',
       confirmedOn: '2023-02-02' }, metadata),
@@ -94,13 +110,40 @@ test('la reproducción conserva propiedad, parentesco, espera y auditoría', asy
 
     const birth = await recordBirth(auth, context, { pregnancyId: pregnancy.id,
       occurredOn: '2023-10-20', stillbornCount: 1,
-      calves: [{ name: 'Cría de prueba', sex: 'FEMALE' }] }, metadata);
-    assert.equal(birth.liveCount, 1);
+      calves: [{ name: 'Cría de prueba', sex: 'FEMALE' },{name:'Segunda cría',sex:'MALE'}] }, metadata);
+    assert.equal(birth.liveCount, 2);
+    assert.equal((await getAnimal(context,birth.calves[1]!.id)).mother?.animalId,mother.id);
     const calf = await getAnimal(context, birth.calves[0]!.id);
     assert.equal(calf.birthDate, '2023-10-20');
     assert.equal(calf.mother?.animalId, mother.id);
     assert.equal(calf.father?.animalId, father.id);
     assert.equal(calf.owners[0]?.id, owner.id);
+    // Reuse one real, canonical image in storage; no external upload is needed.
+    env.CLOUDINARY_CLOUD_NAME='sgb-test';env.CLOUDINARY_API_KEY='test';env.CLOUDINARY_API_SECRET='test';
+    const image=await sharp({create:{width:16,height:16,channels:3,background:'#66aa44'}}).png().toBuffer();
+    const canonical=await sharp(image,{limitInputPixels:40000000,failOn:'error'}).rotate()
+      .resize({width:2560,height:2560,fit:'inside',withoutEnlargement:true}).webp({quality:82}).toBuffer();
+    const object=(await pool.query<{id:string}>(`INSERT INTO storage_object(account_id,origin_property_id,
+      provider,provider_asset_id,storage_key,sha256,kind,mime_type,byte_size,status,created_by)
+      VALUES($1,$2,'CLOUDINARY',$3,$3,$4,'IMAGE','image/webp',$5,'AVAILABLE',$6) RETURNING id`,
+      [registration.accountId,property.id,'birth-photo-'+suffix,createHash('sha256').update(canonical).digest('hex'),canonical.length,auth.userId])).rows[0]!.id;
+    const photo=await addMedia(auth,context,'REPRODUCTION_BIRTH',birth.id,'GENERAL','IMAGE',image,{metadata});
+    assert.equal(photo.attachmentIds.length,4,'One birth photo relates to the mother and both calves');
+    for(const id of [mother.id,...birth.calves.map(row=>row.id)]){
+      const gallery=await listMedia(context,'ANIMAL',id);assert.equal(gallery.length,1);assert.equal(gallery[0]!.storage_object_id,object);
+    }
+    assert.equal((await listMedia(context,'REPRODUCTION_BIRTH',birth.id)).length,1);
+    await updateMediaDetails(auth,context,object,{capturedOn:'2023-10-20',description:'Parto gemelar',
+      tagIds:[],animalIds:[],expectedAttachmentIds:photo.attachmentIds},metadata);
+    assert.equal((await listMedia(context,undefined,undefined,object)).length,4,'Birth relatives survive metadata editing');
+    await pool.query("UPDATE property_module SET enabled=false WHERE property_id=$1 AND module_code='REPRODUCTION_INSEMINATION'",[property.id]);
+    await assert.rejects(()=>createService(auth,context,{cowId:mother.id,kind:'INSEMINATION',occurredOn:'2024-01-01'},metadata),
+      (error:{code?:string})=>error.code==='REPRODUCTION_SECTION_DISABLED');
+    await assert.rejects(()=>createPregnancy(auth,context,{cowId:mother.id,conceptionMethod:'INSEMINATION',
+      confirmationMethod:'PALPATION',confirmedOn:'2024-01-01'},metadata),
+      (error:{code?:string})=>error.code==='REPRODUCTION_SECTION_DISABLED');
+    await pool.query("UPDATE property_module SET enabled=true WHERE property_id=$1 AND module_code='REPRODUCTION_INSEMINATION'",[property.id]);
+
     await assert.rejects(() => recordBirth(auth, context, { pregnancyId: pregnancy.id,
       occurredOn: '2023-10-20', stillbornCount: 1, calves: [] }, metadata),
     (error: { code?: string }) => error.code === 'PREGNANCY_FINISHED');
