@@ -1,3 +1,4 @@
+import {createLocation} from '../groups/groups.service.js';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import test from 'node:test';
@@ -42,7 +43,9 @@ test('una venta registra salida reversible y las finanzas privadas respetan el Ã
         VALUES($1,$2,true,$3) ON CONFLICT(property_id,module_code) DO UPDATE SET enabled=true`,
         [owner.context.propertyId,moduleCode,owner.auth.userId]);
     }
-    const group=await createGroup(owner.auth,owner.context,{name:'Lote comercio'},meta);
+    
+    const groupPlace=await createLocation(owner.auth,owner.context,{kind:'PASTURE',name:'Lote comercio'},meta);
+    const group=await createGroup(owner.auth,owner.context,{name:'Lote comercio',locationId:groupPlace.id},meta);
     const animal=await createAnimal(owner.auth,owner.context,{name:'Vaca vendida',
       sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id},meta);
     const today=(await pool.query<{today:string}>(`SELECT (now() AT TIME ZONE timezone)::date::text

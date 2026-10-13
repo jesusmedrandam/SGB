@@ -64,7 +64,8 @@ test('el soporte accede sin membresía, conserva aislamiento, contexto y autor r
     const normalRefreshed=await refreshSession(refresh,metadata);token=normalRefreshed.accessToken;refresh=normalRefreshed.refreshToken;
     assert.equal((await request(token,'GET','/auth/me')).supportMode,false);
     await request(token,'POST','/auth/context',{propertyId:normal.property_id,roleId:normal.owner_role});
-    const normalGroup=await request(token,'POST','/groups',{name:'Cambio de usuario normal'},201);
+    const normalPlace=await request(token,'POST','/locations',{name:'Ubicación normal',kind:'PASTURE'},201);
+    const normalGroup=await request(token,'POST','/groups',{name:'Cambio de usuario normal',locationId:normalPlace.id},201);
     const normalEvent=(await request(token,'GET','/audit')).items.find((event:any)=>event.entityId===normalGroup.id);
     assert.ok(normalEvent);assert.equal(normalEvent.superadminAccess,false);assert.equal(normalEvent.actorName,admin.display_name);
     // Support in a property where the administrator also belongs still preserves their normal roles.
@@ -90,11 +91,13 @@ test('el soporte accede sin membresía, conserva aislamiento, contexto y autor r
     assert.equal(searched.accounts.length,0);
     const ownerEmail=(await pool.query<{email:string}>('SELECT email FROM app_user WHERE id=$1',[first.id])).rows[0]!.email;
     assert.equal((await request(token,'GET',`/superadmin/overview?search=${encodeURIComponent(ownerEmail)}`)).accounts[0].owner.id,first.id);
-    const group=await request(token,'POST','/groups',{name:'Grupo creado por soporte'},201);
+    const place=await request(token,'POST','/locations',{name:'Ubicación soporte',kind:'PASTURE'},201);
+    const group=await request(token,'POST','/groups',{name:'Grupo creado por soporte',locationId:place.id},201);
     const animal=await request(token,'POST','/animals',{name:'Animal de soporte',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id},201);
     const changed=await request(token,'PATCH',`/animals/${animal.id}/description`,{description:'Corregido por soporte',expectedVersion:animal.version});
     assert.equal(changed.description,'Corregido por soporte');
-    const otherGroup=await request(second.token,'POST','/groups',{name:'Grupo de otra cuenta'},201);
+    const otherPlace=await request(second.token,'POST','/locations',{name:'Ubicación otra cuenta',kind:'PASTURE'},201);
+    const otherGroup=await request(second.token,'POST','/groups',{name:'Grupo de otra cuenta',locationId:otherPlace.id},201);
     const otherAnimal=await request(second.token,'POST','/animals',{name:'Otro animal',sex:'FEMALE',speciesCode:'BOVINE',groupId:otherGroup.id},201);
     await request(token,'PATCH',`/animals/${otherAnimal.id}/description`,{description:'No debe cambiar',expectedVersion:otherAnimal.version},404);
     await pool.query("UPDATE property_module SET enabled=false WHERE property_id=$1 AND module_code='WEIGHING'",[first.propertyId]);
@@ -142,7 +145,8 @@ test('el soporte accede sin membresía, conserva aislamiento, contexto y autor r
     await request(token,'DELETE','/superadmin/support-context',undefined,204);
     overview=await request(token,'GET','/auth/me');assert.equal(overview.activeContext.propertyId,normal.property_id);
     assert.equal(overview.activeContext.roleId,normal.owner_role);assert.equal(overview.supportOwner,null);assert.equal(overview.supportMode,false);
-    await request(token,'POST','/groups',{name:'Usuario después de finalizar soporte'},201);
+    const afterPlace=await request(token,'POST','/locations',{name:'Ubicación después de soporte',kind:'CORRAL'},201);
+    await request(token,'POST','/groups',{name:'Usuario después de finalizar soporte',locationId:afterPlace.id},201);
     await request(token,'POST','/auth/context',{propertyId:first.propertyId,roleId:first.roleId},403);
     await request(token,'DELETE','/superadmin/support-context',undefined,204);
     assert.equal((await request(token,'GET','/auth/me')).activeContext.roleId,normal.owner_role);

@@ -4,16 +4,16 @@ export const idSchema = z.object({ id: z.uuid() });
 const name = z.string().trim().min(1).max(160);
 const description = z.string().trim().max(5000).nullable().optional();
 export const createGroupSchema = z.strictObject({
-  name, description,
+  name, description,locationId:z.uuid(),
 });
 export const updateGroupSchema = z.object({
   name, description, expectedVersion: z.number().int().positive(),
 });
 export const groupStateSchema = z.object({
-  active: z.boolean(), expectedVersion: z.number().int().positive(),
-});
+  active: z.boolean(), expectedVersion: z.number().int().positive(),locationId:z.uuid().optional(),
+}).refine(value=>!value.active||Boolean(value.locationId),'Selecciona un potrero o corral para reactivar el grupo.');
 export const groupLocationSchema = z.object({
-  locationId: z.uuid().nullable(), expectedVersion: z.number().int().positive(),
+  locationId: z.uuid(), expectedVersion: z.number().int().positive(),
 });
 const grass = z.object({
   name: name, percent: z.number().min(0).max(100).nullable().optional(),

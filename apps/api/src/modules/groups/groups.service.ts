@@ -270,9 +270,9 @@ export async function createGroup(auth: AuthState, context: PropertyContext,
   try {
     return await inTransaction(async (client) => {
       const accountId = await access(client, auth, context, 'GROUP_MANAGE');
+      if(!input.locationId)throw invalidRequest('GROUP_LOCATION_REQUIRED','Selecciona un potrero o corral para el grupo.');
       if (input.locationId) {
         await access(client, auth, context, 'LOCATION_MANAGE');
-        await requireModules(client, context, ['PASTURES', 'CORRALS', 'MOVEMENTS']);
         await lockLocation(client, context.propertyId, input.locationId);
       }
       const inserted = await client.query<{ id: string }>(
@@ -322,7 +322,7 @@ export async function updateGroup(auth: AuthState, context: PropertyContext, id:
 }
 
 export async function setGroupState(auth: AuthState, context: PropertyContext, id: string,
-  input: { active: boolean; expectedVersion: number }, metadata: RequestMetadata) {
+  input: { active: boolean; expectedVersion: number;locationId?:string|undefined }, metadata: RequestMetadata) {
   try {
     return await inTransaction(async (client) => {
       await access(client, auth, context, 'GROUP_MANAGE');
@@ -336,6 +336,10 @@ export async function setGroupState(auth: AuthState, context: PropertyContext, i
       }
       const before = await getGroup(client, context.propertyId, id);
       if (before.active === input.active) return before;
+      if(input.active){
+        if(!input.locationId)throw invalidRequest('GROUP_LOCATION_REQUIRED','Selecciona un potrero o corral para reactivar el grupo.');
+        await access(client,auth,context,'LOCATION_MANAGE');await lockLocation(client,context.propertyId,input.locationId);
+      }
       if (!input.active) {
         const assigned = await client.query(
           `SELECT 1 FROM animal_group_assignment WHERE group_id = $1 AND ended_at IS NULL LIMIT 1`, [id],
@@ -354,6 +358,8 @@ export async function setGroupState(auth: AuthState, context: PropertyContext, i
            updated_by = $3 WHERE id = $1`,
         [id, input.active, auth.userId],
       );
+      if(input.active)await client.query(`INSERT INTO group_location_assignment(property_id,group_id,location_id,started_at,start_reason,created_by)
+        VALUES($1,$2,$3,now(),'Grupo reactivado',$4)`,[context.propertyId,id,input.locationId,auth.userId]);
       const after = await getGroup(client, context.propertyId, id);
       await audit(client, auth, context, metadata, 'GROUP_STATE_CHANGED', 'LIVESTOCK_GROUP', id, before, after);
       return after;
@@ -368,6 +374,7 @@ export async function setGroupLocation(auth: AuthState, context: PropertyContext
       await access(client, auth, context, 'GROUP_MANAGE');
       await access(client, auth, context, 'LOCATION_MANAGE');
       await access(client, auth, context, 'ANIMAL_UPDATE');
+      if(!input.locationId)throw invalidRequest('GROUP_LOCATION_REQUIRED','Un grupo debe pertenecer a un potrero o corral.');
       const locked = await client.query<{ version: string }>(
         `SELECT version::text AS version FROM livestock_group
          WHERE id = $1 AND property_id = $2 AND active FOR UPDATE`,
@@ -461,6 +468,7 @@ export async function assignAnimalToGroup(auth: AuthState, context: PropertyCont
       );
       if (current.rows[0]?.group_id === groupId) return before;
       const destination = await getGroup(client, context.propertyId, groupId);
+      if(!destination.location)throw invalidRequest('GROUP_LOCATION_REQUIRED','Asigna un potrero o corral al grupo antes de incorporar animales.');
       if (current.rowCount || destination.location) await requireModules(client, context, ['MOVEMENTS']);
       if (destination.location) await requireModules(client, context, ['PASTURES', 'CORRALS']);
       const positions = await client.query<{ location_id: string }>(

@@ -52,7 +52,8 @@ test('borrador, rotación de grupo, selección manual y traslado conservan histo
     const groupTwo=await createGroup(auth,context,{name:'Grupo secundario',locationId:groupPasture.id},metadata);
     const destGroup=await createGroup(auth,destinationContext,
       {name:'Grupo de destino',locationId:destPasture.id},metadata);
-    const newGroup=await createGroup(auth,context,{name:'Grupo recién creado'},metadata);
+    const newPlace=await createLocation(auth,context,{kind:'PASTURE',name:'Ubicación inicial'},metadata);
+    const newGroup=await createGroup(auth,context,{name:'Grupo recién creado',locationId:newPlace.id},metadata);
     const initialPasture=await createLocation(auth,context,
       {kind:'PASTURE',name:'Potrero para grupo nuevo'},metadata);
     const firstPlacement=await createMovement(auth,context,{kind:'UBICACION',selectionMode:'GRUPO',
@@ -64,9 +65,9 @@ test('borrador, rotación de grupo, selección manual y traslado conservan histo
     assert.equal((await listGroups(context)).find(entry=>entry.id===newGroup.id)?.location?.id,
       initialPasture.id);
     const first=await createAnimal(auth,context,{name:'Vaca a trasladar',sex:'FEMALE',
-      speciesCode:'BOVINE'},metadata);
+      speciesCode:'BOVINE',groupId:group.id},metadata);
     const other=await createAnimal(auth,context,{name:'Vaca que permanece',sex:'FEMALE',
-      speciesCode:'BOVINE'},metadata);
+      speciesCode:'BOVINE',groupId:group.id},metadata);
     await assignAnimalToGroup(auth,context,group.id,{animalId:first.id,
       expectedAnimalVersion:first.version},metadata);
     await assignAnimalToGroup(auth,context,group.id,{animalId:other.id,

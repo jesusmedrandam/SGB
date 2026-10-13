@@ -1,3 +1,4 @@
+import {createLocation} from '../groups/groups.service.js';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import test from 'node:test';
@@ -35,7 +36,9 @@ test('pesajes respetan finca, versión, unidades, auditoría y retención',async
     await pool.query(`INSERT INTO property_module(property_id,module_code,enabled,configured_by)
       VALUES($1,'WEIGHING',true,$2) ON CONFLICT(property_id,module_code)
       DO UPDATE SET enabled=true`,[property.id,auth.userId]);
-    const group=await createGroup(auth,context,{name:'Lote de prueba'},metadata);
+    
+    const groupPlace=await createLocation(auth,context,{kind:'PASTURE',name:'Lote de prueba'},metadata);
+    const group=await createGroup(auth,context,{name:'Lote de prueba',locationId:groupPlace.id},metadata);
     const animal=await createAnimal(auth,context,{name:'Vaca pesada',sex:'FEMALE',
       speciesCode:'BOVINE',groupId:group.id},metadata);
     const date=(await pool.query<{today:string}>(`SELECT (now() AT TIME ZONE timezone)::date::text

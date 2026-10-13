@@ -1,3 +1,4 @@
+import {createLocation} from '../groups/groups.service.js';
 import {inTransaction} from '../../database/transaction.js';
 import {expireDrafts} from '../../core/drafts.js';
 import assert from 'node:assert/strict';
@@ -37,11 +38,13 @@ test('sanidad respeta propiedad, dosis, selección, borradores y aplicación ún
     const context={propertyId:property.id,propertyName:property.name,roleId:role.id,
       roleCode:role.code,roleName:role.name,permissions:new Set(role.permissions),
       enabledModules:new Set(property.enabledModules),enabledSpecies:new Set(property.enabledSpecies)};
+    const groupPlace=await createLocation(auth,context,{kind:'PASTURE',name:'Grupo sanitario'},metadata);
+    const group=await createGroup(auth,context,{name:'Grupo sanitario',locationId:groupPlace.id},metadata);
     const first=await createAnimal(auth,context,{name:'Vaca vacunada',sex:'FEMALE',
-      speciesCode:'BOVINE'},metadata);
+      speciesCode:'BOVINE',groupId:group.id},metadata);
     const second=await createAnimal(auth,context,{name:'Vaca en grupo',sex:'FEMALE',
-      speciesCode:'BOVINE'},metadata);
-    const group=await createGroup(auth,context,{name:'Grupo sanitario'},metadata);
+      speciesCode:'BOVINE',groupId:group.id},metadata);
+    
     await assignAnimalToGroup(auth,context,group.id,{animalId:first.id,
       expectedAnimalVersion:first.version},metadata);
     await assignAnimalToGroup(auth,context,group.id,{animalId:second.id,

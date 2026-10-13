@@ -31,7 +31,7 @@ const settingFields = `
   COALESCE(s.minimum_cow_months, 12) AS "minimumCowMonths",
   COALESCE(s.minimum_bull_months, 12) AS "minimumBullMonths",
   COALESCE(s.allow_second_heat, true) AS "allowSecondHeat",
-  COALESCE(s.allow_false_heat_in_pregnancy, true) AS "allowFalseHeatInPregnancy",
+  true AS "allowFalseHeatInPregnancy",
   COALESCE(s.use_last_valid_heat, true) AS "useLastValidHeat",
   COALESCE(s.max_milking_days, 305) AS "maxMilkingDays"`;
 
@@ -55,6 +55,7 @@ export async function getReproductionSettings(context: PropertyContext,auth?:Aut
 
 export async function updateReproductionSettings(auth: AuthState, context: PropertyContext,
   input: ReproductionSettingInput, metadata: RequestMetadata) {
+  input={...input,allowFalseHeatInPregnancy:true};
   return inTransaction(async (client) => {
     const {account_id:accountId}=await access(client, auth, context, 'REPRODUCTION_MANAGE');
     await requireRulesAdministrator(client,auth,context);
@@ -145,13 +146,11 @@ async function femalePolicy(client: PoolClient, cowId: string, eventOn: string,
     `SELECT 1 FROM reproduction_pregnancy WHERE cow_id = $1 AND status = 'CONFIRMED' LIMIT 1`, [cowId]);
   if (action === 'HEAT' && activePregnancy.rowCount && !isFalse)
     throw conflict('PREGNANCY_CONFIRMED', 'La vaca tiene una preñez confirmada; marca falso el celo aparente.');
-  if (action === 'HEAT' && isFalse && activePregnancy.rowCount && !config.allowFalseHeatInPregnancy)
-    throw conflict('FALSE_HEAT_DISABLED', 'Esta propiedad no permite registrar celos falsos.');
   if (action === 'PREGNANCY' && activePregnancy.rowCount)
     throw conflict('PREGNANCY_CONFIRMED', 'La vaca ya tiene una preñez confirmada.');
   const birth = lastBirth.rows[0]?.occurred_on;
   const loss = lastLoss.rows[0]?.occurred_on;
-  if (action === 'HEAT' && !config.allowSecondHeat) {
+  if (action === 'HEAT' && !config.allowSecondHeat && !activePregnancy.rowCount) {
     const boundary = birth && loss ? (birth > loss ? birth : loss) : birth ?? loss ?? '0001-01-01';
     const recentHeat = await client.query(
       `SELECT 1 FROM reproduction_heat WHERE cow_id = $1 AND cancelled_at IS NULL
@@ -323,6 +322,8 @@ export async function createHeat(auth: AuthState, context: PropertyContext,
         config.minimumCowMonths);
       if (input.bullId) await eligibleAnimal(client, context, input.bullId, 'MALE', accountId,
         input.startsOn, false, config.minimumBullMonths);
+      const confirmed=await client.query(`SELECT 1 FROM reproduction_pregnancy WHERE cow_id=$1 AND status='CONFIRMED' LIMIT 1`,[input.cowId]);
+      if(confirmed.rowCount){input={...input,isFalse:true};delete input.trueHeatId;}
       await femalePolicy(client, input.cowId, input.startsOn, 'HEAT', config, input.isFalse);
       const previous=await cycleTrueHeats(client,input.cowId,input.startsOn);
       let isFalse=input.isFalse;

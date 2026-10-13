@@ -1,3 +1,5 @@
+import {createLocation} from '../groups/groups.service.js';
+import {createGroup} from '../groups/groups.service.js';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import {env} from '../../config.js';
@@ -55,11 +57,13 @@ test('la reproducción conserva propiedad, parentesco, espera y auditoría', asy
       DO UPDATE SET enabled=true`,[property.id,auth.userId]);
 
     const owner = await createOwner(auth, context, { kind: 'USER', userId: auth.userId }, metadata);
+    const groupPlace=await createLocation(auth,context,{kind:'PASTURE',name:'Grupo de prueba'},metadata);
+    const group=await createGroup(auth,context,{name:'Grupo de prueba',locationId:groupPlace.id},metadata);
     const mother = await createAnimal(auth, context, { name: 'Madre de prueba', sex: 'FEMALE',
-      speciesCode: 'BOVINE', birthDate: '2019-01-01', entryDate: '2022-01-01',
+      groupId:group.id,speciesCode: 'BOVINE', birthDate: '2019-01-01', entryDate: '2022-01-01',
       owners: [{ partyId: owner.id, percent: 100, isPrimary: true }] }, metadata);
     const father = await createAnimal(auth, context, { name: 'Padre de prueba', sex: 'MALE',
-      speciesCode: 'BOVINE', birthDate: '2018-01-01', entryDate: '2022-01-01',
+      groupId:group.id,speciesCode: 'BOVINE', birthDate: '2018-01-01', entryDate: '2022-01-01',
       owners: [{ partyId: owner.id, percent: 100, isPrimary: true }] }, metadata);
 
     await assert.rejects(() => createHeat(auth, context, {
@@ -98,19 +102,16 @@ test('la reproducción conserva propiedad, parentesco, espera y auditoría', asy
       cowId: mother.id, conceptionMethod: 'NATURAL', confirmationMethod: 'PALPATION',
       confirmedOn: '2023-02-02' }, metadata),
     (error: { code?: string }) => error.code === 'PREGNANCY_CONFIRMED');
-    await assert.rejects(() => createHeat(auth, context,
-      { cowId: mother.id, startsOn: '2023-04-01', isFalse: false }, metadata),
-    (error: { code?: string }) => error.code === 'PREGNANCY_CONFIRMED');
+    const apparent=await createHeat(auth,context,{cowId:mother.id,startsOn:'2023-04-01',isFalse:false,trueHeatId:'NEW'},metadata);
+    assert.equal(apparent.isFalse,true);assert.equal((await listReproduction(context)).heats.find(row=>row.id===heat.id)?.isFalse,false);
     await updateReproductionSettings(auth, context,
       { ...defaults, allowFalseHeatInPregnancy: false }, metadata);
-    await assert.rejects(() => createHeat(auth, context,
-      { cowId: mother.id, startsOn: '2023-04-01', isFalse: true }, metadata),
-    (error: { code?: string }) => error.code === 'FALSE_HEAT_DISABLED');
+    assert.equal((await createHeat(auth,context,{cowId:mother.id,startsOn:'2023-04-02',isFalse:true},metadata)).isFalse,true);
     await updateReproductionSettings(auth, context, defaults, metadata);
 
     const birth = await recordBirth(auth, context, { pregnancyId: pregnancy.id,
       occurredOn: '2023-10-20', stillbornCount: 1,
-      calves: [{ name: 'Cría de prueba', sex: 'FEMALE' },{name:'Segunda cría',sex:'MALE'}] }, metadata);
+      calves: [{ name: 'Cría de prueba', groupId:group.id,sex: 'FEMALE' },{name:'Segunda cría',groupId:group.id,sex:'MALE'}] }, metadata);
     assert.equal(birth.liveCount, 2);
     assert.equal((await getAnimal(context,birth.calves[1]!.id)).mother?.animalId,mother.id);
     const calf = await getAnimal(context, birth.calves[0]!.id);
