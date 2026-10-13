@@ -1,3 +1,4 @@
+import {createLocation} from '../groups/groups.service.js';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import test from 'node:test';
@@ -8,7 +9,8 @@ import {createAnimal,getAnimal} from '../animals/animals.service.js';
 import {createOwner} from '../animals/owners.service.js';
 import {updateAnimalParents} from '../animals/parents.service.js';
 import {getClassificationPolicy,updateClassificationPolicy} from '../animals/classification.service.js';
-import {createGroup} from '../groups/groups.service.js';
+import {createGroup,setGroupState} from '../groups/groups.service.js';
+import {createBirthSchema} from './reproduction.schemas.js';
 import {cancelPregnancy,createHeat,createService,createPregnancy,getReproductionSettings,recordBirth,recordLoss,updateReproductionSettings} from './reproduction.service.js';
 
 const metadata={ipAddress:'127.0.0.1',userAgent:'account-reproduction-rules-test'};
@@ -58,15 +60,25 @@ test('reglas compartidas por dueño, administradores, edad de padres y ficha com
   await assert.rejects(()=>updateClassificationPolicy(other.auth,customContext,classification,metadata),(e:{code?:string})=>e.code==='RULES_ADMINISTRATOR_REQUIRED');
   const party=await createOwner(auth,context,{kind:'USER',userId:auth.userId},metadata);
   const ownership=[{partyId:party.id,percent:100,isPrimary:true}];
-  const youngCow=await createAnimal(auth,context,{name:'Hembra joven',sex:'FEMALE',speciesCode:'BOVINE',birthDate:'2023-01-31',owners:ownership},metadata);
-  const youngBull=await createAnimal(auth,context,{name:'Macho joven',sex:'MALE',speciesCode:'BOVINE',birthDate:'2023-01-31',owners:ownership},metadata);
+  const groupPlace=await createLocation(auth,context,{kind:'PASTURE',name:'Crías'},metadata);
+    const group=await createGroup(auth,context,{name:'Crías',locationId:groupPlace.id},metadata);
+    const secondGroupPlace=await createLocation(auth,secondContext,{kind:'PASTURE',name:'Machos'},metadata);
+    const secondGroup=await createGroup(auth,secondContext,{name:'Machos',locationId:secondGroupPlace.id},metadata);
+    const alienGroupPlace=await createLocation(other.auth,other.context,{kind:'PASTURE',name:'Otra cuenta'},metadata);
+    const alienGroup=await createGroup(other.auth,other.context,{name:'Otra cuenta',locationId:alienGroupPlace.id},metadata);
+  await assert.rejects(()=>createAnimal(auth,context,{name:'Sin grupo',sex:'FEMALE',speciesCode:'BOVINE'},metadata),(e:{code?:string})=>e.code==='GROUP_REQUIRED');
+  const archivedGroup=await setGroupState(other.auth,other.context,alienGroup.id,{active:false,expectedVersion:alienGroup.version},metadata);
+  await assert.rejects(()=>setGroupState(other.auth,other.context,alienGroup.id,{active:true,expectedVersion:archivedGroup.version},metadata),(e:{code?:string})=>e.code==='GROUP_LOCATION_REQUIRED');
+  assert.equal((await setGroupState(other.auth,other.context,alienGroup.id,{active:true,expectedVersion:archivedGroup.version,locationId:alienGroupPlace.id},metadata)).location?.id,alienGroupPlace.id);
+  const youngCow=await createAnimal(auth,context,{name:'Hembra joven',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id,birthDate:'2023-01-31',owners:ownership},metadata);
+  const youngBull=await createAnimal(auth,context,{name:'Macho joven',sex:'MALE',speciesCode:'BOVINE',groupId:group.id,birthDate:'2023-01-31',owners:ownership},metadata);
   async function classify(id:string,on:string){return (await pool.query('SELECT classify_animal($1,$2::date) AS code',[id,on])).rows[0].code;}
   assert.equal(await classify(youngCow.id,'2024-09-29'),'TERNERA');
   assert.equal(await classify(youngCow.id,'2024-09-30'),'VACONA');
   assert.equal(await classify(youngBull.id,'2025-07-30'),'TERNERO');
   assert.equal(await classify(youngBull.id,'2025-07-31'),'TORETE');
-  const unknownCow=await createAnimal(auth,context,{name:'Hembra sin nacimiento',sex:'FEMALE',speciesCode:'BOVINE',owners:ownership},metadata);
-  const unknownBull=await createAnimal(auth,secondContext,{name:'Macho sin nacimiento',sex:'MALE',speciesCode:'BOVINE',owners:ownership},metadata);
+  const unknownCow=await createAnimal(auth,context,{name:'Hembra sin nacimiento',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id,owners:ownership},metadata);
+  const unknownBull=await createAnimal(auth,secondContext,{name:'Macho sin nacimiento',sex:'MALE',speciesCode:'BOVINE',groupId:secondGroup.id,owners:ownership},metadata);
   assert.equal((await getAnimal(context,unknownCow.id)).classification?.code,'VACONA');
   assert.equal((await getAnimal(secondContext,unknownBull.id)).classification?.code,'TORETE');
   await createHeat(auth,context,{cowId:unknownCow.id,bullId:unknownBull.id,startsOn:'2024-01-01',endsOn:'2024-01-02',isFalse:false},metadata);
@@ -79,26 +91,29 @@ test('reglas compartidas por dueño, administradores, edad de padres y ficha com
   const stillbornPregnancy=await createPregnancy(auth,context,{cowId:unknownCow.id,fatherId:unknownBull.id,conceptionMethod:'NATURAL',confirmationMethod:'PALPATION',confirmedOn:'2025-01-01'},metadata);
   await recordBirth(auth,context,{pregnancyId:stillbornPregnancy.id,occurredOn:'2025-10-01',calves:[],stillbornCount:1},metadata);
   assert.equal((await getAnimal(context,unknownCow.id)).classification?.code,'VACA');
-  const cancelledBull=await createAnimal(auth,context,{name:'Padre de preñez anulada',sex:'MALE',speciesCode:'BOVINE'},metadata);
-  const cancelledCow=await createAnimal(auth,context,{name:'Hembra de preñez anulada',sex:'FEMALE',speciesCode:'BOVINE'},metadata);
+  const cancelledBull=await createAnimal(auth,context,{name:'Padre de preñez anulada',sex:'MALE',speciesCode:'BOVINE',groupId:group.id},metadata);
+  const cancelledCow=await createAnimal(auth,context,{name:'Hembra de preñez anulada',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id},metadata);
   const cancelled=await createPregnancy(auth,context,{cowId:cancelledCow.id,fatherId:cancelledBull.id,conceptionMethod:'NATURAL',confirmationMethod:'PALPATION',confirmedOn:'2024-01-01'},metadata);
   await cancelPregnancy(auth,context,cancelled.id,metadata);
   assert.equal((await getAnimal(context,cancelledBull.id)).classification?.code,'TORETE');
-  const unknownChild=await createAnimal(auth,context,{name:'Cría de padres sin fecha',sex:'FEMALE',speciesCode:'BOVINE',birthDate:'2024-01-01',mother:{animalId:unknownCow.id},father:{animalId:cancelledBull.id}},metadata);
+  const unknownChild=await createAnimal(auth,context,{name:'Cría de padres sin fecha',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id,birthDate:'2024-01-01',mother:{animalId:unknownCow.id},father:{animalId:cancelledBull.id}},metadata);
   assert.equal((await getAnimal(context,unknownChild.id)).father?.animalId,cancelledBull.id);
   const corrected=await updateAnimalParents(auth,context,unknownChild.id,{mother:{animalId:cancelledCow.id},father:{animalId:cancelledBull.id},expectedVersion:unknownChild.version},metadata);
   assert.equal(corrected.mother?.animalId,cancelledCow.id);
   await assert.rejects(()=>createHeat(auth,context,{cowId:youngCow.id,startsOn:'2024-07-30',isFalse:false},metadata),(e:{code?:string})=>e.code==='REPRODUCTION_MINIMUM_AGE');
   await createHeat(auth,context,{cowId:youngCow.id,startsOn:'2024-07-31',isFalse:false},metadata);
   await assert.rejects(()=>createHeat(auth,context,{cowId:youngCow.id,bullId:youngBull.id,startsOn:'2024-08-01',isFalse:false},metadata),(e:{code?:string})=>e.code==='REPRODUCTION_MINIMUM_AGE');
-  await assert.rejects(()=>createAnimal(auth,context,{name:'Cría imposible',sex:'FEMALE',speciesCode:'BOVINE',birthDate:'2024-01-31',father:{animalId:youngBull.id}},metadata),(e:{code?:string})=>e.code==='REPRODUCTION_MINIMUM_AGE');
-  const unrelated=await createAnimal(auth,context,{name:'Cría sin padre',sex:'FEMALE',speciesCode:'BOVINE',birthDate:'2024-01-31'},metadata);
+  await assert.rejects(()=>createAnimal(auth,context,{name:'Cría imposible',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id,birthDate:'2024-01-31',father:{animalId:youngBull.id}},metadata),(e:{code?:string})=>e.code==='REPRODUCTION_MINIMUM_AGE');
+  const unrelated=await createAnimal(auth,context,{name:'Cría sin padre',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id,birthDate:'2024-01-31'},metadata);
   await assert.rejects(()=>updateAnimalParents(auth,context,unrelated.id,{mother:null,father:{animalId:youngBull.id},expectedVersion:unrelated.version},metadata),(e:{code?:string})=>e.code==='REPRODUCTION_MINIMUM_AGE');
-  const mother=await createAnimal(auth,context,{name:'Madre',sex:'FEMALE',speciesCode:'BOVINE',birthDate:'2018-01-01',owners:ownership},metadata);
-  const father=await createAnimal(auth,secondContext,{name:'Padre',sex:'MALE',speciesCode:'BOVINE',birthDate:'2018-01-01',owners:ownership},metadata);
+  const mother=await createAnimal(auth,context,{name:'Madre',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id,birthDate:'2018-01-01',owners:ownership},metadata);
+  const father=await createAnimal(auth,secondContext,{name:'Padre',sex:'MALE',speciesCode:'BOVINE',groupId:secondGroup.id,birthDate:'2018-01-01',owners:ownership},metadata);
   const pregnancy=await createPregnancy(auth,context,{cowId:mother.id,fatherId:father.id,conceptionMethod:'NATURAL',confirmationMethod:'PALPATION',confirmedOn:'2024-01-01'},metadata);
-  const group=await createGroup(auth,context,{name:'Crías'},metadata);
-  const alienGroup=await createGroup(other.auth,other.context,{name:'Otra cuenta'},metadata);
+  const noCalfGroup={pregnancyId:pregnancy.id,occurredOn:'2024-07-31',stillbornCount:0,calves:[{name:'Cría sin grupo',sex:'FEMALE'}]};
+  assert.equal(createBirthSchema.safeParse(noCalfGroup).success,false);
+  await assert.rejects(()=>recordBirth(auth,context,noCalfGroup as Parameters<typeof recordBirth>[2],metadata),(e:{code?:string})=>e.code==='GROUP_REQUIRED');
+  
+  
   await assert.rejects(()=>recordBirth(auth,context,{pregnancyId:pregnancy.id,occurredOn:'2024-07-31',stillbornCount:0,calves:[{name:'Cría',sex:'FEMALE',groupId:alienGroup.id}]},metadata),(e:{code?:string})=>e.code==='GROUP_UNAVAILABLE');
   assert.equal((await pool.query('SELECT 1 FROM reproduction_birth WHERE pregnancy_id=$1',[pregnancy.id])).rowCount,0);
   const birth=await recordBirth(auth,context,{pregnancyId:pregnancy.id,occurredOn:'2024-07-31',kind:'ASSISTED',stillbornCount:0,
@@ -106,13 +121,13 @@ test('reglas compartidas por dueño, administradores, edad de padres y ficha com
       description:'Pequeña mancha blanca',birthCondition:'WEAK',groupId:group.id}]},metadata);
   const calf=await getAnimal(context,birth.calves[0]!.id);
   assert.equal(calf.description,'Pequeña mancha blanca');assert.equal(calf.initialWeight,32.125);
-  assert.equal(calf.group?.id,group.id);assert.equal(calf.mother?.animalId,mother.id);assert.equal(calf.father?.animalId,father.id);
+  assert.equal(calf.group?.id,group.id);assert.equal(calf.location?.id,groupPlace.id);assert.equal(calf.mother?.animalId,mother.id);assert.equal(calf.father?.animalId,father.id);
   assert.equal(calf.owners[0]?.id,party.id);
   assert.equal((await pool.query('SELECT kind FROM reproduction_birth WHERE id=$1',[birth.id])).rows[0].kind,'ASSISTED');
   assert.equal((await pool.query('SELECT birth_condition FROM reproduction_birth_calf WHERE animal_id=$1',[calf.id])).rows[0].birth_condition,'WEAK');
   await updateReproductionSettings(auth,context,{...config,minimumCowMonths:18,minimumBullMonths:24,
     allowSecondHeat:true,allowFalseHeatInPregnancy:false,daysAfterLossHeat:21,daysAfterLossPregnancy:30,daysAfterBirthHeat:30,useLastValidHeat:true},metadata);
-  const cycleCow=await createAnimal(auth,context,{name:'Ciclos sin fecha de nacimiento',sex:'FEMALE',speciesCode:'BOVINE'},metadata);
+  const cycleCow=await createAnimal(auth,context,{name:'Ciclos sin fecha de nacimiento',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id},metadata);
   const firstHeat=await createHeat(auth,context,{cowId:cycleCow.id,startsOn:'2024-01-01',isFalse:false},metadata);
   await createHeat(auth,context,{cowId:cycleCow.id,startsOn:'2024-01-02',isFalse:true},metadata);
   const nextHeat={cowId:cycleCow.id,startsOn:'2024-01-03',isFalse:false};
@@ -125,7 +140,10 @@ test('reglas compartidas por dueño, administradores, edad de padres y ficha com
   assert.equal((await pool.query('SELECT is_false FROM reproduction_heat WHERE id=$1',[firstHeat.id])).rows[0].is_false,true);
   const autoPregnancy=await createPregnancy(auth,context,{cowId:cycleCow.id,conceptionMethod:'NATURAL',confirmationMethod:'PALPATION',confirmedOn:'2024-01-05'},metadata);
   assert.equal(autoPregnancy.heatId,replacement.id);
-  await assert.rejects(()=>createHeat(auth,context,{cowId:cycleCow.id,startsOn:'2024-01-06',isFalse:true},metadata),(e:{code?:string})=>e.code==='FALSE_HEAT_DISABLED');
+  await updateReproductionSettings(auth,context,{...config,minimumCowMonths:18,minimumBullMonths:24,allowSecondHeat:false,allowFalseHeatInPregnancy:false},metadata);
+  assert.equal((await createHeat(auth,context,{cowId:cycleCow.id,startsOn:'2024-01-06',isFalse:false,trueHeatId:'NEW'},metadata)).isFalse,true);
+  assert.equal((await pool.query('SELECT is_false FROM reproduction_heat WHERE id=$1',[replacement.id])).rows[0].is_false,false);
+  await updateReproductionSettings(auth,context,{...config,minimumCowMonths:18,minimumBullMonths:24,allowSecondHeat:true},metadata);
   await recordLoss(auth,context,{pregnancyId:autoPregnancy.id,occurredOn:'2024-02-01',notes:'Aborto confirmado'},metadata);
   await assert.rejects(()=>createHeat(auth,context,{cowId:cycleCow.id,startsOn:'2024-02-21',isFalse:false},metadata),(e:{code?:string})=>e.code==='REPRODUCTION_WAITING_PERIOD');
   const afterLoss=await createHeat(auth,context,{cowId:cycleCow.id,startsOn:'2024-02-22',isFalse:false},metadata);
@@ -138,7 +156,7 @@ test('reglas compartidas por dueño, administradores, edad de padres y ficha com
   const afterBirth=await createHeat(auth,context,{cowId:cycleCow.id,startsOn:'2024-10-01',isFalse:false},metadata);
   assert.equal(afterBirth.isFalse,false,'Un parto permite comenzar otro ciclo sin convertir celos históricos en falsos');
   assert.equal((await pool.query('SELECT is_false FROM reproduction_heat WHERE id=$1',[afterLoss.id])).rows[0].is_false,false);
-  const concurrentCow=await createAnimal(auth,context,{name:'Celo concurrente',sex:'FEMALE',speciesCode:'BOVINE'},metadata);
+  const concurrentCow=await createAnimal(auth,context,{name:'Celo concurrente',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id},metadata);
   const concurrent=await Promise.allSettled([1,2].map(day=>createHeat(auth,context,{cowId:concurrentCow.id,startsOn:`2024-01-0${day}`,isFalse:false},metadata)));
   assert.equal(concurrent.filter(row=>row.status==='fulfilled').length,1);
   assert.equal(concurrent.filter(row=>row.status==='rejected'&&row.reason.code==='TRUE_HEAT_SELECTION_REQUIRED').length,1);

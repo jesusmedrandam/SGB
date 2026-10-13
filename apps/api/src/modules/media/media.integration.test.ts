@@ -1,3 +1,4 @@
+import {createLocation} from '../groups/groups.service.js';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import test from 'node:test';
@@ -33,8 +34,10 @@ test('multimedia respeta propiedad, tipo de registro y permisos antes de cargar'
     const context={propertyId:property.id,propertyName:property.name,roleId:role.id,
       roleCode:role.code,roleName:role.name,permissions:new Set(role.permissions),
       enabledModules:new Set(property.enabledModules),enabledSpecies:new Set(property.enabledSpecies)};
-    const group=await createGroup(auth,context,{name:'Grupo multimedia'},metadata);
+    
     assert.equal(createAnimalSchema.safeParse({name:'Sin grupo',sex:'FEMALE',speciesCode:'BOVINE'}).success,false);
+    const groupPlace=await createLocation(auth,context,{kind:'PASTURE',name:'Grupo multimedia'},metadata);
+    const group=await createGroup(auth,context,{name:'Grupo multimedia',locationId:groupPlace.id},metadata);
     const animal=await createAnimal(auth,context,{name:'Vaca multimedia',sex:'FEMALE',
       speciesCode:'BOVINE',groupId:group.id},metadata);
     const father=await createAnimal(auth,context,{name:'Padre multimedia',sex:'MALE',

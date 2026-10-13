@@ -127,8 +127,10 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       () => createBrand(ownerAuth, ownerContext, `m7l-${suffix}`, metadata),
       (error: { code?: string }) => error.code === 'BRAND_NAME_TAKEN',
     );
+    const initialGroupPlace=await createLocation(ownerAuth,ownerContext,{kind:'PASTURE',name:'Ingreso'},metadata);
+    const initialGroup=await createGroup(ownerAuth,ownerContext,{name:'Ingreso',locationId:initialGroupPlace.id},metadata);
     const animal = await createAnimal(ownerAuth, ownerContext, {
-      name: 'Primera vaca', sex: 'FEMALE', speciesCode: 'BOVINE',
+      name: 'Primera vaca', sex: 'FEMALE', groupId: initialGroup.id, speciesCode: 'BOVINE',
       description: 'Vaca mansa del ordeño',
       earTagCode: `TAG-${suffix}`, birthDate: '2020-01-02', entryDate: '2021-01-03',
       initialWeight: 150.5, initialWeightUnitCode: 'KILOGRAM',
@@ -155,13 +157,13 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     assert.equal((await getAnimal(ownerContext, animal.id)).brands.length, 2);
     await assert.rejects(
       () => createAnimal(ownerAuth, ownerContext, {
-        name: 'Otra vaca', sex: 'FEMALE', speciesCode: 'BOVINE', brandIds: [brand.id],
+        name: 'Otra vaca', sex: 'FEMALE', groupId: initialGroup.id, speciesCode: 'BOVINE', brandIds: [brand.id],
       }, metadata),
       (error: { code?: string }) => error.code === 'INVALID_ANIMAL_BRANDS',
     );
     await assert.rejects(
       () => createAnimal(ownerAuth, ownerContext, {
-        name: 'Marquilla inexistente', sex: 'FEMALE', speciesCode: 'BOVINE', brandIds: [randomUUID()],
+        name: 'Marquilla inexistente', sex: 'FEMALE', groupId: initialGroup.id, speciesCode: 'BOVINE', brandIds: [randomUUID()],
       }, metadata),
       (error: { code?: string }) => error.code === 'INVALID_ANIMAL_BRANDS',
     );
@@ -175,20 +177,20 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     assert.ok(brandHistory.rows[0]?.ended_at);
     await assert.rejects(
       () => createAnimal(ownerAuth, ownerContext, {
-        name: 'Duplicada', sex: 'FEMALE', speciesCode: 'BOVINE', earTagCode: `tag-${suffix}`,
+        name: 'Duplicada', sex: 'FEMALE', groupId: initialGroup.id, speciesCode: 'BOVINE', earTagCode: `tag-${suffix}`,
       }, metadata),
       (error: { code?: string }) => error.code === 'ANIMAL_TAG_TAKEN',
     );
     await assert.rejects(
       () => createAnimal(ownerAuth, ownerContext, {
-        name: 'Fecha inválida', sex: 'MALE', speciesCode: 'BOVINE',
+        name: 'Fecha inválida', sex: 'MALE', groupId: initialGroup.id, speciesCode: 'BOVINE',
         birthDate: '2024-01-02', entryDate: '2023-01-01',
       }, metadata),
       (error: { code?: string }) => error.code === 'INVALID_ANIMAL_DATES',
     );
     await assert.rejects(
       () => createAnimal(ownerAuth, ownerContext, {
-        name: 'Peso inválido', sex: 'MALE', speciesCode: 'BOVINE',
+        name: 'Peso inválido', sex: 'MALE', groupId: initialGroup.id, speciesCode: 'BOVINE',
         initialWeight: 10, initialWeightUnitCode: 'HECTARE',
       }, metadata),
       (error: { code?: string }) => error.code === 'INVALID_WEIGHT_UNIT',
@@ -200,7 +202,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     await assert.rejects(
       () => createAnimal({ ...ownerAuth, activeRoleId: viewer.rows[0]!.id },
         { ...ownerContext, roleId: viewer.rows[0]!.id },
-        { name: 'Sin permiso', sex: 'MALE', speciesCode: 'BOVINE' }, metadata),
+        { name: 'Sin permiso', sex: 'MALE', groupId: initialGroup.id, speciesCode: 'BOVINE' }, metadata),
       (error: { code?: string }) => error.code === 'ANIMAL_CREATE_DENIED',
     );
 
@@ -210,7 +212,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     assert.ok(reference.units.every((unit) => unit.contextCode !== 'ANIMAL_WEIGHT' || !['HECTARE', 'GRAM'].includes(unit.code)));
     assert.ok((await listCatalogItems(ownerContext, 'COLORS')).some((item) => item.name === 'Blanco' && item.systemDefined));
     await assert.rejects(() => createAnimal(ownerAuth, ownerContext, {
-      name: 'Peso en gramos', sex: 'MALE', speciesCode: 'BOVINE',
+      name: 'Peso en gramos', sex: 'MALE', groupId: initialGroup.id, speciesCode: 'BOVINE',
       initialWeight: 100, initialWeightUnitCode: 'GRAM',
     }, metadata), (error: { code?: string }) => error.code === 'INVALID_WEIGHT_UNIT');
     const breed = await createCatalogItem(ownerAuth, ownerContext, 'BREEDS',
@@ -223,7 +225,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       (error: { code?: string }) => error.code === 'CATALOG_NAME_TAKEN',
     );
     const decorated = await createAnimal(ownerAuth, ownerContext, {
-      name: 'Vaca con colores', sex: 'FEMALE', speciesCode: 'BOVINE',
+      name: 'Vaca con colores', sex: 'FEMALE', groupId: initialGroup.id, speciesCode: 'BOVINE',
       breedId: breed.id, colorIds: [color.id],
     }, metadata);
     assert.equal(decorated.breed?.id, breed.id);
@@ -231,7 +233,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     assert.deepEqual(decorated.colors.map((entry) => entry.id), [color.id]);
     await assert.rejects(
       () => createAnimal(ownerAuth, ownerContext, {
-        name: 'Color como raza', sex: 'FEMALE', speciesCode: 'BOVINE', breedId: color.id,
+        name: 'Color como raza', sex: 'FEMALE', groupId: initialGroup.id, speciesCode: 'BOVINE', breedId: color.id,
       }, metadata),
       (error: { code?: string }) => error.code === 'INVALID_ANIMAL_CATALOG_SELECTION',
     );
@@ -325,7 +327,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       (error: { code?: string }) => error.code === 'GROUP_LOCATION_CONFLICT',
     );
     const secondGroup = await createGroup(ownerAuth, ownerContext,
-      { name: `Solteras ${suffix}` }, metadata);
+      { name: `Solteras ${suffix}`,locationId:corral.id }, metadata);
     const renamed = await updateGroup(ownerAuth, ownerContext, secondGroup.id,
       { name: `Solteras ${suffix}`, description: 'Grupo sin ubicación',
         expectedVersion: secondGroup.version }, metadata);
@@ -351,7 +353,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     const regrouped = await assignAnimalToGroup(ownerAuth, ownerContext, renamed.id,
       { animalId: animal.id, expectedAnimalVersion: afterMove.version }, metadata);
     assert.equal(regrouped.group?.id, renamed.id);
-    assert.equal(regrouped.location, null);
+    assert.equal(regrouped.location?.id,corral.id);
     const archived = await setGroupState(ownerAuth, ownerContext, moved.id,
       { active: false, expectedVersion: moved.version }, metadata);
     assert.equal(archived.active, false);
@@ -370,9 +372,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         { locationId: pastureB.id, expectedVersion: placed.version }, metadata),
       (error: { code?: string }) => error.code === 'LOCATION_MODULES_DISABLED',
     );
-    const withoutLocation = await createGroup(ownerAuth, ownerContext,
-      { name: `Sin potrero ${suffix}` }, metadata);
-    assert.equal(withoutLocation.location, null);
+    await assert.rejects(()=>createGroup(ownerAuth,ownerContext,{name:`Sin potrero ${suffix}`},metadata),(error:{code?:string})=>error.code==='GROUP_LOCATION_REQUIRED');
     await updatePropertyModule(ownerAuth, ownerContext, 'MOVEMENTS', true, metadata);
     const locationHistory = await pool.query<{ ended_at: Date | null }>(
       `SELECT ended_at FROM group_location_assignment WHERE group_id = $1 AND location_id = $2`,
@@ -577,7 +577,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     await updateAccountQuota(platformAuth, accountId, 'MANAGED_ANIMALS', 1, metadata);
     await assert.rejects(
       () => createAnimal(ownerAuth, ownerContext,
-        { name: 'Fuera de cupo', sex: 'MALE', speciesCode: 'BOVINE' }, metadata),
+        { name: 'Fuera de cupo', sex: 'MALE', groupId: initialGroup.id, speciesCode: 'BOVINE' }, metadata),
       (error: { code?: string }) => error.code === 'ANIMAL_LIMIT_REACHED',
     );
     await updateAccountQuota(platformAuth, accountId, 'MANAGED_ANIMALS', 150, metadata);
@@ -601,8 +601,10 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         { name: `Grupo ajeno ${suffix}`, locationId: pastureA.id }, metadata),
       (error: { code?: string }) => error.code === 'LOCATION_UNAVAILABLE',
     );
+    const secondInitialGroupPlace=await createLocation(ownerAuth,secondContext,{kind:'PASTURE',name:'Ingreso segunda'},metadata);
+    const secondInitialGroup=await createGroup(ownerAuth,secondContext,{name:'Ingreso segunda',locationId:secondInitialGroupPlace.id},metadata);
     const sharedCatalogAnimal = await createAnimal(ownerAuth, secondContext, {
-      name: 'Color compartido', sex: 'MALE', speciesCode: 'BOVINE', colorIds: [color.id],
+      name: 'Color compartido', sex: 'MALE', groupId: secondInitialGroup.id, speciesCode: 'BOVINE', colorIds: [color.id],
       breedIds: [breed.id, (await listCatalogItems(secondContext, 'BREEDS'))
         .find((entry) => entry.name === 'Brahman')!.id],
       brandIds: [anotherBrand.id],
@@ -615,7 +617,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       (error: { code?: string }) => error.code === 'ANIMAL_NOT_FOUND',
     );
     const secondAnimal = await createAnimal(ownerAuth, secondContext,
-      { name: 'Vaca de la segunda finca', sex: 'FEMALE', speciesCode: 'BOVINE' }, metadata);
+      { name: 'Vaca de la segunda finca', sex: 'FEMALE', groupId: secondInitialGroup.id, speciesCode: 'BOVINE' }, metadata);
     const localToday = await pool.query<{ today: string }>(
       `SELECT to_char((now() AT TIME ZONE timezone)::date, 'YYYY-MM-DD') AS today
        FROM property WHERE id = $1`, [nextProperty.propertyId],
@@ -630,7 +632,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
       metadata, [ownerOne.id, ownerTwo.id]);
     assert.equal((await listBrands(ownerContext)).find((row) => row.id === newlyOwnedBrand.id)?.owner_ids?.length, 2);
     const newlyOwnedAnimal = await createAnimal(ownerAuth, secondContext, {
-      name: 'Animal de varios propietarios', sex: 'FEMALE', speciesCode: 'BOVINE',
+      name: 'Animal de varios propietarios', sex: 'FEMALE', groupId: secondInitialGroup.id, speciesCode: 'BOVINE',
       owners: [{ partyId: ownerOne.id, percent: 50, isPrimary: true },
         { partyId: ownerTwo.id, percent: 50, isPrimary: false }],
       brandIds: [newlyOwnedBrand.id],
@@ -705,6 +707,8 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         'EMAIL_VERIFIED',
         'AUTH_LOGIN',
         'LIVESTOCK_BRAND_CREATED',
+        'LOCATION_CREATED',
+        'GROUP_CREATED',
         'ANIMAL_CREATED',
         'LIVESTOCK_BRAND_CREATED',
         'ANIMAL_BRANDS_UPDATED',
@@ -729,15 +733,15 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
         'GROUP_LOCATION_CHANGED',
         'ANIMAL_GROUP_CHANGED',
         'GROUP_STATE_CHANGED',
-        'GROUP_LOCATION_CHANGED',
         'PROPERTY_MODULE_UPDATED',
-        'GROUP_CREATED',
         'PROPERTY_MODULE_UPDATED',
         'PROPERTY_INVITATION_CREATED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
         'PROPERTY_MEMBERSHIP_STATUS_CHANGED',
         'PROPERTY_CREATED',
         'CATALOG_ITEM_STATE_CHANGED',
+        'LOCATION_CREATED',
+        'GROUP_CREATED',
         'ANIMAL_CREATED',
         'ANIMAL_CREATED',
         'OWNER_CREATED',

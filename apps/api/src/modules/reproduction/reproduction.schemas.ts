@@ -49,7 +49,7 @@ export const createBirthSchema = z.object({
   kind:z.enum(['NORMAL','ASSISTED','CAESAREAN','UNKNOWN']).optional(),
   calves:z.array(z.object({name:createAnimalSchema.shape.name,sex:createAnimalSchema.shape.sex,
     earTagCode:createAnimalSchema.shape.earTagCode,description:createAnimalSchema.shape.description,
-    groupId:createAnimalSchema.shape.groupId,initialWeight:createAnimalSchema.shape.initialWeight,
+    groupId:z.uuid(),initialWeight:createAnimalSchema.shape.initialWeight,
     initialWeightUnitCode:createAnimalSchema.shape.initialWeightUnitCode,breedIds:createAnimalSchema.shape.breedIds,
     colorIds:createAnimalSchema.shape.colorIds,owners:createAnimalSchema.shape.owners,
     birthCondition:z.enum(['ALIVE','WEAK','UNKNOWN']).optional()})

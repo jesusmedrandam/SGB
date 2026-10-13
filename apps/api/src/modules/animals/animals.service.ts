@@ -393,6 +393,7 @@ export async function updateAnimalCatalogs(auth: AuthState, context: PropertyCon
 
 export async function insertAnimalInTransaction(client:PoolClient,auth:AuthState,context:PropertyContext,
   input:CreateAnimalInput,metadata:RequestMetadata,accountId:string,today:string,allowAccountParents=false){
+      if(!input.groupId)throw invalidRequest('GROUP_REQUIRED','Selecciona un grupo para el animal.');
       const entryDate = input.entryDate ?? today;
       if (entryDate > today || (input.birthDate && (input.birthDate > today || input.birthDate > entryDate))) {
         throw invalidRequest('INVALID_ANIMAL_DATES', 'Nacimiento e ingreso deben ser fechas válidas hasta hoy en la zona de la finca.');
@@ -419,18 +420,16 @@ export async function insertAnimalInTransaction(client:PoolClient,auth:AuthState
       if(input.groupId){
         const destination=await client.query<{location_id:string|null}>(`
           SELECT gla.location_id FROM livestock_group g
-          LEFT JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
-          WHERE g.id=$1 AND g.property_id=$2 AND g.active FOR SHARE OF g`,
+          JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
+          JOIN physical_location pl ON pl.id=gla.location_id AND pl.active AND pl.property_id=g.property_id
+          WHERE g.id=$1 AND g.property_id=$2 AND g.active FOR SHARE OF g,pl`,
           [input.groupId,context.propertyId]);
-        if(!destination.rows[0])throw invalidRequest('GROUP_UNAVAILABLE','Selecciona un grupo activo de esta propiedad.');
+        if(!destination.rows[0])throw invalidRequest('GROUP_UNAVAILABLE','Selecciona un grupo activo de esta propiedad con potrero o corral.');
         await client.query(`INSERT INTO animal_group_assignment(property_id,animal_id,group_id,
           started_at,start_reason,created_by) VALUES($1,$2,$3,now(),'Registro del animal',$4)`,
           [context.propertyId,result.rows[0]!.id,input.groupId,auth.userId]);
         if(destination.rows[0].location_id){
-          const enabled=await client.query(`SELECT module_code FROM effective_property_module
-            WHERE property_id=$1 AND module_code IN ('PASTURES','CORRALS','MOVEMENTS') AND enabled`,
-            [context.propertyId]);
-          if(enabled.rowCount===3)await client.query(`INSERT INTO animal_location_assignment(
+          await client.query(`INSERT INTO animal_location_assignment(
             property_id,animal_id,location_id,started_at,start_reason,created_by)
             VALUES($1,$2,$3,now(),'Ubicación del grupo',$4)`,
             [context.propertyId,result.rows[0]!.id,destination.rows[0].location_id,auth.userId]);

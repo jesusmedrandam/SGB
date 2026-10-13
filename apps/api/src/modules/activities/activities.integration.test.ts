@@ -1,3 +1,5 @@
+import {createLocation} from '../groups/groups.service.js';
+import {createGroup} from '../groups/groups.service.js';
 import {inTransaction} from '../../database/transaction.js';
 import {expireDrafts} from '../../core/drafts.js';
 import assert from 'node:assert/strict';
@@ -38,10 +40,12 @@ test('actividades aplican herraje una vez, conservan historial y respetan la pro
     await pool.query(`INSERT INTO property_module(property_id,module_code,enabled,configured_by)
       VALUES($1,'TASKS',true,$2) ON CONFLICT(property_id,module_code)
       DO UPDATE SET enabled=true`,[property.id,auth.userId]);
+    const groupPlace=await createLocation(auth,context,{kind:'PASTURE',name:'Grupo de prueba'},metadata);
+    const group=await createGroup(auth,context,{name:'Grupo de prueba',locationId:groupPlace.id},metadata);
     const first=await createAnimal(auth,context,{name:'Vaca herraje',sex:'FEMALE',
-      speciesCode:'BOVINE'},metadata);
+      speciesCode:'BOVINE',groupId:group.id},metadata);
     const other=await createAnimal(auth,context,{name:'Becerro descorne',sex:'MALE',
-      speciesCode:'BOVINE'},metadata);
+      speciesCode:'BOVINE',groupId:group.id},metadata);
     const brand=await createBrand(auth,context,`Fierro ${suffix}`,metadata);
     assert.equal((await listActivityOptions(context)).brands.length,1);
     const today=(await pool.query<{today:string}>(`SELECT (now() AT TIME ZONE timezone)::date::text
