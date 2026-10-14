@@ -122,14 +122,65 @@ export async function listMedia(context:PropertyContext,type?:string,id?:string,
   const rows=await pool.query<{id:string;storage_object_id:string;entity_type:string;entity_id:string;
     relation_code:string;description:string|null;captured_on:string|null;
     entity_name:string|null;tags:Array<{id:string;name:string}>;
+    recordDetails:{title:string;date:string;notes:string|null;lines:string[]}|null;recordType:string|null;
     kind:string;byte_size:string;created_at:string;provider_asset_id:string}>(`
     SELECT ma.id,ma.storage_object_id,ma.entity_type,ma.entity_id,ma.relation_code,
-      ma.description,ma.captured_on::text,animal.name AS entity_name,
+      ma.description,ma.captured_on::text,animal.name AS entity_name,source_record.entity_type AS "recordType",
+      CASE source_record.entity_type
+        WHEN 'REPRODUCTION_BIRTH' THEN (SELECT jsonb_build_object('title','Parto','date',b.occurred_on,'notes',b.notes,
+          'lines',ARRAY[concat('Madre: ',a.name),concat(b.live_count,CASE WHEN b.live_count=1 THEN ' cría viva' ELSE ' crías vivas' END,
+            CASE WHEN b.stillborn_count>0 THEN concat(' · ',b.stillborn_count,' nacidas sin vida') ELSE '' END),
+            CASE b.kind WHEN 'NORMAL' THEN 'Parto normal' WHEN 'ASSISTED' THEN 'Parto asistido' WHEN 'CAESAREAN' THEN 'Cesárea' ELSE 'Tipo no registrado' END]
+            ||ARRAY(SELECT concat(c.name,' · ',CASE WHEN c.sex='FEMALE' THEN 'Hembra' ELSE 'Macho' END,
+              CASE WHEN c.initial_weight IS NOT NULL THEN concat(' · ',c.initial_weight,CASE WHEN c.initial_weight_unit_code='POUND' THEN ' lb' ELSE ' kg' END) ELSE '' END)
+              FROM reproduction_birth_calf bc JOIN animal c ON c.id=bc.animal_id WHERE bc.birth_id=b.id ORDER BY c.name,c.id))
+          FROM reproduction_birth b JOIN animal a ON a.id=b.mother_id WHERE b.id=source_record.entity_id AND b.property_id=ma.property_id)
+        WHEN 'REPRODUCTION_HEAT' THEN (SELECT jsonb_build_object('title',CASE WHEN h.is_false THEN 'Celo falso' ELSE 'Celo' END,
+          'date',h.starts_on,'notes',h.notes,'lines',ARRAY[a.name,CASE WHEN h.ends_on IS NULL THEN 'Sin finalizar' ELSE concat('Fin: ',h.ends_on) END])
+          FROM reproduction_heat h JOIN animal a ON a.id=h.cow_id WHERE h.id=source_record.entity_id AND h.property_id=ma.property_id)
+        WHEN 'REPRODUCTION_SERVICE' THEN (SELECT jsonb_build_object('title',CASE WHEN s.kind='INSEMINATION' THEN 'Inseminación artificial' ELSE 'Implantación de embrión' END,
+          'date',s.occurred_on,'notes',s.notes,'lines',array_remove(ARRAY[a.name,s.technician],NULL))
+          FROM reproduction_service s JOIN animal a ON a.id=s.cow_id WHERE s.id=source_record.entity_id AND s.property_id=ma.property_id)
+        WHEN 'REPRODUCTION_PREGNANCY' THEN (SELECT jsonb_build_object('title','Preñez','date',p.confirmed_on,'notes',p.notes,
+          'lines',array_remove(ARRAY[a.name,CASE WHEN p.gestation_days IS NOT NULL THEN concat(p.gestation_days,' días de gestación') END],NULL))
+          FROM reproduction_pregnancy p JOIN animal a ON a.id=p.cow_id WHERE p.id=source_record.entity_id AND p.property_id=ma.property_id)
+        WHEN 'REPRODUCTION_LOSS' THEN (SELECT jsonb_build_object('title','Aborto','date',l.occurred_on,'notes',l.notes,'lines',ARRAY[a.name])
+          FROM reproduction_loss l JOIN animal a ON a.id=l.cow_id WHERE l.id=source_record.entity_id AND l.property_id=ma.property_id)
+        WHEN 'LIVESTOCK_MOVEMENT' THEN (SELECT jsonb_build_object('title','Movimiento','date',m.movement_on,'notes',m.notes,
+          'lines',array_remove(ARRAY[m.reason,concat(sg.name,' → ',dg.name),pl.name,
+            concat((SELECT count(*) FROM livestock_movement_animal x WHERE x.movement_id=m.id),' animales')],NULL))
+          FROM livestock_movement m LEFT JOIN livestock_group sg ON sg.id=m.source_group_id
+          LEFT JOIN livestock_group dg ON dg.id=m.destination_group_id LEFT JOIN physical_location pl ON pl.id=m.destination_location_id
+          WHERE m.id=source_record.entity_id AND m.source_property_id=ma.property_id)
+        WHEN 'CLEANING' THEN (SELECT jsonb_build_object('title','Limpieza de potrero','date',c.started_on,'notes',c.notes,
+          'lines',ARRAY[pl.name]||ARRAY(SELECT concat(p.name,' · ',x.total_quantity,' ',u.symbol)
+            FROM pasture_cleaning_product x JOIN pasture_agrochemical p ON p.id=x.product_id JOIN measurement_unit u ON u.code=x.unit_code
+            WHERE x.cleaning_id=c.id ORDER BY p.name)) FROM pasture_cleaning c JOIN physical_location pl ON pl.id=c.location_id
+          WHERE c.id=source_record.entity_id AND c.property_id=ma.property_id)
+        WHEN 'LIVESTOCK_ACTIVITY' THEN (SELECT jsonb_build_object('title',l.title,'date',l.occurred_on,'notes',l.description,
+          'lines',ARRAY(SELECT a.name FROM livestock_activity_animal x JOIN animal a ON a.id=x.animal_id WHERE x.activity_id=l.id ORDER BY a.name))
+          FROM livestock_activity l WHERE l.id=source_record.entity_id AND l.property_id=ma.property_id)
+        WHEN 'HEALTH_CAMPAIGN' THEN (SELECT jsonb_build_object('title','Tratamiento','date',h.applied_on,'notes',h.notes,
+          'lines',array_remove(ARRAY[COALESCE(h.medicine_snapshot->>'name',m.name),h.responsible],NULL))
+          FROM health_campaign h JOIN health_medicine m ON m.id=h.medicine_id WHERE h.id=source_record.entity_id AND h.property_id=ma.property_id)
+        WHEN 'MILK_PRODUCTION' THEN (SELECT jsonb_build_object('title','Producción de leche','date',m.produced_on,'notes',m.notes,
+          'lines',ARRAY[a.name,concat(m.liters,' litros')]) FROM milk_production m JOIN animal a ON a.id=m.cow_id
+          WHERE m.id=source_record.entity_id AND m.property_id=ma.property_id)
+        WHEN 'MILK_TANK_PRODUCTION' THEN (SELECT jsonb_build_object('title','Tanque de leche','date',m.produced_on,'notes',m.notes,
+          'lines',ARRAY[concat(m.liters,' litros')]) FROM milk_tank_production m WHERE m.id=source_record.entity_id AND m.property_id=ma.property_id)
+        WHEN 'MILK_LACTATION' THEN (SELECT jsonb_build_object('title','Lactancia','date',l.started_on,'notes',l.notes,'lines',ARRAY[a.name])
+          FROM milk_lactation l JOIN animal a ON a.id=l.cow_id WHERE l.id=source_record.entity_id AND l.property_id=ma.property_id)
+        ELSE NULL END AS "recordDetails",
       COALESCE((SELECT json_agg(json_build_object('id',tag.id,'name',tag.name) ORDER BY tag.name)
         FROM media_attachment_tag mat JOIN governed_catalog_item tag ON tag.id=mat.tag_id
         WHERE mat.attachment_id=ma.id),'[]'::json) AS tags,
       so.kind,so.byte_size,so.created_at,so.provider_asset_id FROM media_attachment ma
     JOIN storage_object so ON so.id=ma.storage_object_id AND so.status='AVAILABLE'
+    LEFT JOIN LATERAL (SELECT source.entity_type,source.entity_id FROM media_attachment source
+      WHERE source.property_id=ma.property_id AND source.storage_object_id=ma.storage_object_id
+        AND source.deleted_at IS NULL AND source.entity_type=ANY($4::varchar[])
+        AND source.entity_type NOT IN ('ANIMAL','PROPERTY')
+      ORDER BY (source.id=ma.id) DESC,source.id LIMIT 1) source_record ON true
     LEFT JOIN animal ON animal.id=ma.entity_id AND ma.entity_type='ANIMAL'
     WHERE ma.property_id=$1 AND ma.deleted_at IS NULL AND ma.entity_type=ANY($4::varchar[])
       AND ($2::varchar IS NULL OR ma.entity_type=$2) AND ($3::uuid IS NULL OR ma.entity_id=$3)
