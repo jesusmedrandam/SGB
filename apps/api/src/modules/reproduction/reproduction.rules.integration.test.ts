@@ -8,6 +8,7 @@ import {createAccountProperty,getPropertySettings} from '../properties/propertie
 import {createAnimal,getAnimal} from '../animals/animals.service.js';
 import {createOwner} from '../animals/owners.service.js';
 import {updateAnimalParents} from '../animals/parents.service.js';
+import {updateAnimalDetails} from '../animals/description.service.js';
 import {getClassificationPolicy,updateClassificationPolicy} from '../animals/classification.service.js';
 import {createGroup,setGroupState} from '../groups/groups.service.js';
 import {createBirthSchema} from './reproduction.schemas.js';
@@ -77,6 +78,16 @@ test('reglas compartidas por dueño, administradores, edad de padres y ficha com
   assert.equal(await classify(youngCow.id,'2024-09-30'),'VACONA');
   assert.equal(await classify(youngBull.id,'2025-07-30'),'TERNERO');
   assert.equal(await classify(youngBull.id,'2025-07-31'),'TORETE');
+  const editable=await createAnimal(auth,context,{name:'Nombre original',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id,
+    birthDate:'2020-01-01',entryDate:'2021-01-01',earTagCode:'EDIT-A',initialWeight:25,initialWeightUnitCode:'POUND'},metadata);
+  const editInput={name:'Nombre corregido',description:'Datos corregidos',sex:'FEMALE' as const,groupId:group.id,
+    birthDate:null,entryDate:'2022-01-01',earTagCode:null,initialWeight:null,initialWeightUnitCode:null,expectedVersion:editable.version};
+  const edited=await updateAnimalDetails(auth,context,editable.id,editInput,metadata);
+  assert.equal(edited.name,'Nombre corregido');assert.equal(edited.birthDate,null);assert.equal(edited.earTagCode,null);
+  assert.equal(edited.initialWeight,null);assert.equal(edited.entryDate,'2022-01-01');assert.equal(edited.group?.id,group.id);
+  await assert.rejects(()=>updateAnimalDetails(auth,context,editable.id,editInput,metadata),(e:{code?:string})=>e.code==='ANIMAL_VERSION_CONFLICT');
+  await assert.rejects(()=>updateAnimalDetails(auth,context,editable.id,{...editInput,expectedVersion:edited.version,entryDate:'2099-01-01'},metadata),(e:{code?:string})=>e.code==='ANIMAL_DATES_INVALID');
+  assert.equal((await getAnimal(context,editable.id)).version,edited.version,'Invalid dates do not change the animal');
   const unknownCow=await createAnimal(auth,context,{name:'Hembra sin nacimiento',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id,owners:ownership},metadata);
   const unknownBull=await createAnimal(auth,secondContext,{name:'Macho sin nacimiento',sex:'MALE',speciesCode:'BOVINE',groupId:secondGroup.id,owners:ownership},metadata);
   assert.equal((await getAnimal(context,unknownCow.id)).classification?.code,'VACONA');
@@ -91,6 +102,10 @@ test('reglas compartidas por dueño, administradores, edad de padres y ficha com
   const stillbornPregnancy=await createPregnancy(auth,context,{cowId:unknownCow.id,fatherId:unknownBull.id,conceptionMethod:'NATURAL',confirmationMethod:'PALPATION',confirmedOn:'2025-01-01'},metadata);
   await recordBirth(auth,context,{pregnancyId:stillbornPregnancy.id,occurredOn:'2025-10-01',calves:[],stillbornCount:1},metadata);
   assert.equal((await getAnimal(context,unknownCow.id)).classification?.code,'VACA');
+  await assert.rejects(()=>createPregnancy(auth,context,{cowId:unknownCow.id,serviceId:service.id,conceptionMethod:'EMBRYO_TRANSFER',confirmationMethod:'PALPATION',confirmedOn:'2024-02-01'},metadata),(e:{code?:string})=>e.code==='SERVICE_UNAVAILABLE');
+  const motherDetails=await getAnimal(context,unknownCow.id);
+  await assert.rejects(()=>updateAnimalDetails(auth,context,unknownCow.id,{...editInput,name:motherDetails.name,groupId:group.id,
+    expectedVersion:motherDetails.version,sex:'MALE'},metadata),(e:{code?:string})=>e.code==='ANIMAL_SEX_HAS_HISTORY');
   const cancelledBull=await createAnimal(auth,context,{name:'Padre de preñez anulada',sex:'MALE',speciesCode:'BOVINE',groupId:group.id},metadata);
   const cancelledCow=await createAnimal(auth,context,{name:'Hembra de preñez anulada',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id},metadata);
   const cancelled=await createPregnancy(auth,context,{cowId:cancelledCow.id,fatherId:cancelledBull.id,conceptionMethod:'NATURAL',confirmationMethod:'PALPATION',confirmedOn:'2024-01-01'},metadata);
@@ -159,6 +174,7 @@ test('reglas compartidas por dueño, administradores, edad de padres y ficha com
   assert.equal(nextPregnancy.heatId,afterLoss.id);
   await recordBirth(auth,context,{pregnancyId:nextPregnancy.id,occurredOn:'2024-09-01',calves:[],stillbornCount:1},metadata);
   await assert.rejects(()=>createHeat(auth,context,{cowId:cycleCow.id,startsOn:'2024-09-30',isFalse:false},metadata),(e:{code?:string})=>e.code==='REPRODUCTION_WAITING_PERIOD');
+  await assert.rejects(()=>createPregnancy(auth,context,{cowId:cycleCow.id,heatId:afterLoss.id,conceptionMethod:'NATURAL',confirmationMethod:'PALPATION',confirmedOn:'2024-03-02'},metadata),(e:{code?:string})=>e.code==='HEAT_UNAVAILABLE');
   const afterBirth=await createHeat(auth,context,{cowId:cycleCow.id,startsOn:'2024-10-01',isFalse:false},metadata);
   assert.equal(afterBirth.isFalse,false,'Un parto permite comenzar otro ciclo sin convertir celos históricos en falsos');
   assert.equal((await pool.query('SELECT is_false FROM reproduction_heat WHERE id=$1',[afterLoss.id])).rows[0].is_false,false);
