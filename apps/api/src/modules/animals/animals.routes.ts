@@ -5,7 +5,8 @@ import type { RequestMetadata } from '../auth/auth.types.js';
 import { animalIdSchema, animalListSchema, createAnimalSchema, updateAnimalBrandsSchema, updateAnimalCatalogSchema, updateAnimalDescriptionSchema, updateAnimalParentsSchema } from './animals.schemas.js';
 import { createAnimal, getAnimal, listAnimals, updateAnimalBrands, updateAnimalCatalogs } from './animals.service.js';
 import { updateAnimalParents } from './parents.service.js';
-import { updateAnimalDescription } from './description.service.js';
+import { updateAnimalDescription, updateAnimalDetails } from './description.service.js';
+import {updateAnimalDetailsSchema} from './animals.schemas.js';
 import { setAnimalOwners } from './owners.service.js';
 import { z } from 'zod';
 import {getReproductionSettings} from '../reproduction/reproduction.service.js';
@@ -79,6 +80,12 @@ animalsRouter.patch('/:id/description', requirePermission('ANIMAL_UPDATE'), asyn
   response.json({ ok: true, data: await updateAnimalDescription(
     request.auth!, request.propertyContext!, id, input, metadata(request),
   ) });
+}));
+
+animalsRouter.patch('/:id/details', requirePermission('ANIMAL_UPDATE'), asyncHandler(async (request, response) => {
+  const {id}=animalIdSchema.parse(request.params);
+  response.json({ok:true,data:await updateAnimalDetails(request.auth!,request.propertyContext!,id,
+    updateAnimalDetailsSchema.parse(request.body),metadata(request))});
 }));
 
 animalsRouter.put('/:id/owners', requirePermission('ANIMAL_UPDATE'), asyncHandler(async (request, response) => {

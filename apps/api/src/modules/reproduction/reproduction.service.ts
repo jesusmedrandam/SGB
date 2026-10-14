@@ -198,7 +198,8 @@ export async function listReproduction(context: PropertyContext) {
   const [heats, pregnancies, births, losses, services] = await Promise.all([
     pool.query(`SELECT h.id, h.cow_id AS "cowId", a.name AS "cowName",
       h.bull_id AS "bullId", h.starts_on::text AS "startsOn", h.ends_on::text AS "endsOn",
-      h.is_false AS "isFalse", h.notes, h.cancelled_at IS NOT NULL AS cancelled
+      h.is_false AS "isFalse", h.notes, h.cancelled_at IS NOT NULL AS cancelled,
+      EXISTS(SELECT 1 FROM reproduction_pregnancy p WHERE p.heat_id=h.id AND p.status<>'CANCELLED') AS "hasPregnancy"
       FROM reproduction_heat h JOIN animal a ON a.id = h.cow_id
       WHERE h.property_id = $1 ORDER BY h.starts_on DESC, h.created_at DESC LIMIT 300`, [context.propertyId]),
     pool.query(`SELECT p.id, p.cow_id AS "cowId", a.name AS "cowName", p.heat_id AS "heatId",
@@ -303,7 +304,9 @@ export async function cancelService(auth: AuthState, context: PropertyContext,
 
 export async function listReproductionCandidates(context: PropertyContext) {
   const result = await pool.query<{ id: string; name: string; sex: CowRow['sex'] }>(
-    `SELECT id, name, sex,birth_date::text AS "birthDate" FROM animal WHERE property_id = $1 AND species_code = 'BOVINE'
+    `SELECT id, name, sex,birth_date::text AS "birthDate",
+      (SELECT id FROM reproduction_pregnancy WHERE cow_id=animal.id AND status='CONFIRMED' LIMIT 1) AS "activePregnancyId"
+      FROM animal WHERE property_id = $1 AND species_code = 'BOVINE'
       AND record_status = 'CURRENT' AND availability_status_code = 'ACTIVE'
       ORDER BY lower(name), id LIMIT 2000`, [context.propertyId]);
   return result.rows;
@@ -379,6 +382,9 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
           `SELECT occurred_on::text,heat_id,father_id,external_father,kind
            FROM reproduction_service WHERE id=$1 AND property_id=$2 AND cow_id=$3
              AND account_id=$4 AND cancelled_at IS NULL
+             AND NOT EXISTS(SELECT 1 FROM reproduction_pregnancy p WHERE p.service_id=reproduction_service.id AND p.status<>'CANCELLED')
+             AND NOT EXISTS(SELECT 1 FROM reproduction_birth WHERE mother_id=$3 AND occurred_on>reproduction_service.occurred_on)
+             AND NOT EXISTS(SELECT 1 FROM reproduction_loss WHERE cow_id=$3 AND occurred_on>reproduction_service.occurred_on)
              AND occurred_on>=GREATEST(
                COALESCE((SELECT max(occurred_on) FROM reproduction_birth WHERE mother_id=$3 AND occurred_on<=$5::date),'-infinity'::date),
                COALESCE((SELECT max(occurred_on) FROM reproduction_loss WHERE cow_id=$3 AND occurred_on<=$5::date),'-infinity'::date)) FOR SHARE`,
@@ -390,6 +396,8 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
           || (externalFather && externalFather !== selected.external_father))
           throw invalidRequest('SERVICE_UNAVAILABLE', 'El servicio no corresponde a esta preñez.');
         heatId = selected.heat_id;
+        if(heatId&&(await client.query(`SELECT 1 FROM reproduction_pregnancy WHERE heat_id=$1 AND status<>'CANCELLED' LIMIT 1`,[heatId])).rowCount)
+          throw invalidRequest('HEAT_UNAVAILABLE','Este celo ya se utilizó para confirmar una preñez.');
         if(heatId&&!(await cycleTrueHeats(client,input.cowId,input.confirmedOn)).some(heat=>heat.id===heatId))
           throw invalidRequest('SERVICE_UNAVAILABLE','El servicio está relacionado con un celo falso o de un ciclo anterior.');
         fatherId = selected.father_id;
@@ -404,6 +412,9 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
         const latest = await client.query<{ id: string }>(
           `SELECT id FROM reproduction_heat WHERE cow_id = $1 AND property_id = $2
            AND cancelled_at IS NULL AND NOT is_false AND starts_on <= $3::date
+           AND NOT EXISTS(SELECT 1 FROM reproduction_pregnancy p WHERE p.heat_id=reproduction_heat.id AND p.status<>'CANCELLED')
+           AND NOT EXISTS(SELECT 1 FROM reproduction_birth WHERE mother_id=$1 AND occurred_on>reproduction_heat.starts_on)
+           AND NOT EXISTS(SELECT 1 FROM reproduction_loss WHERE cow_id=$1 AND occurred_on>reproduction_heat.starts_on)
            AND starts_on >= GREATEST(
              COALESCE((SELECT max(occurred_on) FROM reproduction_birth
                WHERE mother_id = $1 AND occurred_on <= $3::date), '-infinity'::date),
@@ -418,7 +429,10 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
           throw invalidRequest('HEAT_UNAVAILABLE','Selecciona un celo verdadero del ciclo actual.');
         const heat = await client.query<{ starts_on: string; ends_on: string | null; bull_id: string | null }>(
           `SELECT starts_on::text, ends_on::text, bull_id FROM reproduction_heat WHERE id = $1 AND cow_id = $2
-           AND property_id = $3 AND cancelled_at IS NULL AND NOT is_false FOR SHARE`,
+           AND property_id = $3 AND cancelled_at IS NULL AND NOT is_false
+             AND NOT EXISTS(SELECT 1 FROM reproduction_pregnancy p WHERE p.heat_id=reproduction_heat.id AND p.status<>'CANCELLED')
+             AND NOT EXISTS(SELECT 1 FROM reproduction_birth WHERE mother_id=$2 AND occurred_on>reproduction_heat.starts_on)
+             AND NOT EXISTS(SELECT 1 FROM reproduction_loss WHERE cow_id=$2 AND occurred_on>reproduction_heat.starts_on) FOR SHARE`,
           [heatId, input.cowId, context.propertyId]);
         if (!heat.rows[0] || heat.rows[0].starts_on > input.confirmedOn)
           throw invalidRequest('HEAT_UNAVAILABLE', 'El celo no corresponde a esta vaca o fecha.');

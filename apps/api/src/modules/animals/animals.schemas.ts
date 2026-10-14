@@ -83,3 +83,19 @@ export const createAnimalSchema = z.object({
   }
 });
 export type CreateAnimalInput = z.infer<typeof createAnimalSchema>;
+
+export const updateAnimalDetailsSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  description: z.string().trim().max(5000).nullable(),
+  sex: z.enum(['FEMALE', 'MALE']),
+  earTagCode: z.string().trim().min(1).max(80).nullable(),
+  birthDate: z.iso.date().nullable(),
+  entryDate: z.iso.date(),
+  initialWeight: z.number().positive().max(999999999).refine(
+    value => /^\d+(\.\d{1,3})?$/.test(String(value))).nullable(),
+  initialWeightUnitCode: z.string().regex(/^[A-Z_]{2,30}$/).nullable(),
+  groupId: z.uuid(),
+  expectedVersion: z.number().int().positive(),
+}).refine(value => (value.initialWeight === null) === (value.initialWeightUnitCode === null),
+  {message: 'Indica juntos el peso y su unidad.', path: ['initialWeight']});
+export type UpdateAnimalDetailsInput = z.infer<typeof updateAnimalDetailsSchema>;
