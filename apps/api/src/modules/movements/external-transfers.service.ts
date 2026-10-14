@@ -5,7 +5,7 @@ import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
 import type {AuthState,PropertyContext,RequestMetadata} from '../auth/auth.types.js';
 import {insertAnimalInTransaction} from '../animals/animals.service.js';
 import {captureAnimal,visibleAnimalSnapshot,type AnimalTransferSnapshot} from './external-transfers.history.js';
-import type {ExternalTransferInput,ExternalDecisionInput} from './external-transfers.schemas.js';
+import type {ExternalTransferInput,ExternalDecisionInput,ExternalVisibilityInput} from './external-transfers.schemas.js';
 
 async function administrator(client:PoolClient,context:PropertyContext,userId:string,roleId=context.roleId){
   const result=await client.query(`SELECT 1 FROM property_membership pm
@@ -18,8 +18,11 @@ async function administrator(client:PoolClient,context:PropertyContext,userId:st
   if(!result.rowCount)throw forbidden('EXTERNAL_TRANSFER_ADMIN_REQUIRED','Esta operación requiere un administrador de la propiedad con permiso para gestionar movimientos.');
 }
 async function property(client:PoolClient,id:string){
-  const result=await client.query<{id:string;account_id:string;name:string;owner_user_id:string;external_transfers_enabled:boolean;animal_receive_code:string;today:string}>(`
+  const result=await client.query<{id:string;account_id:string;name:string;owner_user_id:string;external_transfers_enabled:boolean;animal_receive_code:string;today:string;
+    external_transfer_visibility:'HIDDEN'|'COLLABORATORS'|'PUBLIC';external_transfer_visible_until:Date|null;effective_visibility:'HIDDEN'|'COLLABORATORS'|'PUBLIC'}>(`
     SELECT p.id,p.account_id,p.name,a.owner_user_id,a.external_transfers_enabled,p.animal_receive_code,
+      p.external_transfer_visibility,p.external_transfer_visible_until,
+      CASE WHEN p.external_transfer_visible_until<=now() THEN 'HIDDEN' ELSE p.external_transfer_visibility END AS effective_visibility,
       (now() AT TIME ZONE p.timezone)::date::text AS today FROM property p
     JOIN administrative_account a ON a.id=p.account_id AND a.status='ACTIVE'
     WHERE p.id=$1 AND p.status='ACTIVE' AND p.deleted_at IS NULL`,[id]);
@@ -56,7 +59,8 @@ export async function getExternalTransferSettings(auth:AuthState,context:Propert
     try{await administrator(client,context,auth.userId);canRequest=context.enabledModules.has('MOVEMENTS');}
     catch(error){if((error as {code?:string}).code!=='EXTERNAL_TRANSFER_ADMIN_REQUIRED')throw error;}
     return {enabled:p.external_transfers_enabled,canManage:p.owner_user_id===auth.userId,canRequest,
-      receiveCode:canRequest&&p.external_transfers_enabled?p.animal_receive_code:null};
+      canManageVisibility:canRequest,visibility:p.external_transfer_visibility,visibleUntil:p.external_transfer_visible_until,
+      effectiveVisibility:p.effective_visibility,receiveCode:canRequest&&p.external_transfers_enabled?p.animal_receive_code:null};
   });
 }
 export async function setExternalTransferSettings(auth:AuthState,context:PropertyContext,enabled:boolean,metadata:RequestMetadata){
@@ -83,6 +87,43 @@ export async function lookupExternalDestination(auth:AuthState,context:PropertyC
     return result.rows[0] as {id:string;name:string;ownerName:string};
   });
 }
+export async function setExternalTransferVisibility(auth:AuthState,context:PropertyContext,input:ExternalVisibilityInput,metadata:RequestMetadata){
+  await inTransaction(async client=>{
+    await administrator(client,context,auth.userId);await lockAccounts(client,[context.propertyId]);
+    const p=await property(client,context.propertyId);
+    await client.query(`UPDATE property SET external_transfer_visibility=$2,
+      external_transfer_visible_until=CASE WHEN $3::int IS NULL THEN NULL ELSE now()+$3::int*interval '1 day' END WHERE id=$1`,
+      [context.propertyId,input.visibility,input.durationDays??null]);
+    await audit(client,auth,context,metadata,'EXTERNAL_TRANSFER_VISIBILITY_UPDATED',context.propertyId,
+      {name:p.name,visibility:input.visibility,durationDays:input.durationDays??null});
+  });
+  return getExternalTransferSettings(auth,context);
+}
+async function visibleExternalDestinations(client:PoolClient,auth:AuthState,context:PropertyContext,email:string|null,id:string|null){
+  const source=await property(client,context.propertyId);
+  const result=await client.query<{id:string;name:string;ownerName:string}>(`SELECT p.id,p.name,u.display_name AS "ownerName" FROM property p
+    JOIN administrative_account a ON a.id=p.account_id AND a.status='ACTIVE'
+    JOIN app_user u ON u.id=a.owner_user_id AND u.deleted_at IS NULL
+    WHERE (u.email=$1::citext OR p.id=$2::uuid) AND p.account_id<>$3 AND p.status='ACTIVE' AND p.deleted_at IS NULL
+    AND EXISTS(SELECT 1 FROM effective_property_module WHERE property_id=p.id AND module_code='MOVEMENTS' AND enabled)
+    AND EXISTS(SELECT 1 FROM effective_property_species WHERE property_id=p.id AND species_code='BOVINE' AND enabled)
+    AND (p.external_transfer_visibility='PUBLIC' AND (p.external_transfer_visible_until IS NULL OR p.external_transfer_visible_until>now())
+      OR p.external_transfer_visibility='COLLABORATORS' AND EXISTS(
+        SELECT 1 FROM property_membership pm JOIN property_membership owner_membership ON owner_membership.property_id=pm.property_id
+        JOIN property cp ON cp.id=pm.property_id AND cp.status='ACTIVE' AND cp.deleted_at IS NULL
+        JOIN administrative_account ca ON ca.id=cp.account_id AND ca.status='ACTIVE'
+        WHERE pm.status='ACTIVE' AND pm.user_id=$4 AND owner_membership.status='ACTIVE' AND owner_membership.user_id=a.owner_user_id
+        AND EXISTS(SELECT 1 FROM membership_role mr JOIN property_role pr ON pr.id=mr.role_id AND pr.active WHERE mr.membership_id=pm.id)
+        AND EXISTS(SELECT 1 FROM membership_role mr JOIN property_role pr ON pr.id=mr.role_id AND pr.active WHERE mr.membership_id=owner_membership.id)))
+    ORDER BY lower(p.name),p.id`,[email,id,source.account_id,auth.userId]);
+  return result.rows;
+}
+export async function searchExternalDestinations(auth:AuthState,context:PropertyContext,email:string){
+  return inTransaction(async client=>{
+    await administrator(client,context,auth.userId);
+    return visibleExternalDestinations(client,auth,context,email.trim().toLowerCase(),null);
+  });
+}
 const fields=`t.*,t.movement_on::text AS movement_date,t.source_name AS "sourcePropertyName",t.destination_name AS "destinationPropertyName"`;
 async function read(client:PoolClient,context:PropertyContext,id:string){
   const request=(await client.query(`SELECT ${fields} FROM external_animal_transfer t
@@ -105,18 +146,21 @@ export async function listExternalTransfers(context:PropertyContext){
   });
 }
 export async function createExternalTransfer(auth:AuthState,context:PropertyContext,input:ExternalTransferInput,metadata:RequestMetadata){
-  const destination=await lookupExternalDestination(auth,context,input.receiveCode);
+  const destination=input.destinationPropertyId?{id:input.destinationPropertyId}:
+    await lookupExternalDestination(auth,context,input.receiveCode!);
   try{return await inTransaction(async client=>{
     await administrator(client,context,auth.userId);await lockAccounts(client,[context.propertyId,destination.id]);const source=await property(client,context.propertyId);
     const dest=await property(client,destination.id);
-    if(!source.external_transfers_enabled||!dest.external_transfers_enabled)
+    if(input.destinationPropertyId&&!(await visibleExternalDestinations(client,auth,context,null,destination.id)).length)
+      throw invalidRequest('EXTERNAL_DESTINATION_UNAVAILABLE','La propiedad ya no está visible para recibir solicitudes. Busca de nuevo el correo del dueño.');
+    if(!input.destinationPropertyId&&(!source.external_transfers_enabled||!dest.external_transfers_enabled))
       throw forbidden('EXTERNAL_TRANSFERS_DISABLED','Ambos dueños deben permitir los traslados externos.');
     if(input.movementOn>source.today||input.movementOn>dest.today)throw invalidRequest('EXTERNAL_TRANSFER_DATE','La fecha del traslado no puede ser futura.');
     const animals=(await client.query(`SELECT id FROM animal WHERE id=ANY($1::uuid[]) AND property_id=$2 AND record_status='CURRENT'
       AND availability_status_code='ACTIVE' AND transferred_out_at IS NULL ORDER BY id FOR UPDATE`,[input.animalIds,context.propertyId])).rows;
     if(animals.length!==input.animalIds.length)throw conflict('EXTERNAL_TRANSFER_ANIMALS_CHANGED','Selecciona animales activos de esta propiedad.');
-    const request=(await client.query(`INSERT INTO external_animal_transfer(source_property_id,destination_property_id,requested_by,source_role_id,movement_on,reason,notes,source_name,destination_name)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,[context.propertyId,destination.id,auth.userId,context.roleId,input.movementOn,input.reason,input.notes??null,source.name,dest.name])).rows[0];
+    const request=(await client.query(`INSERT INTO external_animal_transfer(source_property_id,destination_property_id,requested_by,source_role_id,movement_on,reason,notes,source_name,destination_name,uses_property_visibility)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,[context.propertyId,destination.id,auth.userId,context.roleId,input.movementOn,input.reason,input.notes??null,source.name,dest.name,Boolean(input.destinationPropertyId)])).rows[0];
     for(const animal of animals){
       const snapshot=await captureAnimal(client,context,animal.id);
       if(snapshot.profile.entryDate>input.movementOn||snapshot.history.some(event=>event.date>input.movementOn))throw invalidRequest('EXTERNAL_TRANSFER_DATE','El traslado no puede preceder al ingreso del animal en origen.');
@@ -134,7 +178,7 @@ export async function refreshExternalTransfer(auth:AuthState,context:PropertyCon
     await administrator(client,context,auth.userId);const request=await lockedRequest(client,context,id,version);
     if(request.source_property_id!==context.propertyId)throw forbidden('EXTERNAL_TRANSFER_WRONG_SIDE','Solo el origen puede actualizar la información enviada.');
     await lockAccounts(client,[request.source_property_id,request.destination_property_id]);
-    if(!(await property(client,context.propertyId)).external_transfers_enabled)
+    if(!request.uses_property_visibility&&!(await property(client,context.propertyId)).external_transfers_enabled)
       throw forbidden('EXTERNAL_TRANSFERS_DISABLED','El dueño debe permitir los traslados externos.');
     const items=(await client.query('SELECT source_animal_id FROM external_animal_transfer_item WHERE transfer_id=$1 ORDER BY source_animal_id',[id])).rows;
     for(const item of items){
@@ -214,7 +258,7 @@ export async function acceptExternalTransfer(auth:AuthState,context:PropertyCont
     await lockAccounts(client,[request.source_property_id,request.destination_property_id]);
     if(!context.enabledSpecies.has('BOVINE'))throw forbidden('EXTERNAL_SPECIES_DISABLED','Habilita bovinos para recibir estos animales.');
     const source=await property(client,request.source_property_id),dest=await property(client,request.destination_property_id);
-    if(source.account_id===dest.account_id||!source.external_transfers_enabled||!dest.external_transfers_enabled)
+    if(source.account_id===dest.account_id||!request.uses_property_visibility&&(!source.external_transfers_enabled||!dest.external_transfers_enabled))
       throw forbidden('EXTERNAL_TRANSFERS_DISABLED','Ambos dueños deben permitir el traslado externo.');
     const role=(await client.query('SELECT code,name FROM property_role WHERE id=$1 AND property_id=$2',[request.source_role_id,source.id])).rows[0];
     const permissions=(await client.query('SELECT permission_code FROM role_permission WHERE role_id=$1',[request.source_role_id])).rows.map(row=>row.permission_code as string);
