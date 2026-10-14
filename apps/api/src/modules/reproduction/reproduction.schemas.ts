@@ -15,6 +15,7 @@ export const createHeatSchema = z.object({
 export const createPregnancySchema = z.object({
   cowId: z.uuid(), heatId: z.uuid().nullable().optional(),
   serviceId: z.uuid().nullable().optional(),
+  useLastHeat:z.boolean().optional(),
   fatherId: z.uuid().nullable().optional(), externalFather: z.string().trim().min(1).max(240).nullable().optional(),
   conceptionMethod: z.enum(['NATURAL','INSEMINATION','EMBRYO_TRANSFER','UNKNOWN']),
   confirmationMethod: z.enum(['PALPATION','ULTRASOUND','BLOOD_TEST','OBSERVATION','OTHER']),

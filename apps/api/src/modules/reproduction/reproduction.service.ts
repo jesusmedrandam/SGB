@@ -400,7 +400,7 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
         if (gestationDays > 400) throw invalidRequest('PREGNANCY_DATES_CONFLICT',
           'La confirmación supera los 400 días desde el servicio.');
       }
-      if (!input.serviceId && !heatId && config.useLastValidHeat) {
+      if (!input.serviceId && !heatId && config.useLastValidHeat && input.useLastHeat!==false) {
         const latest = await client.query<{ id: string }>(
           `SELECT id FROM reproduction_heat WHERE cow_id = $1 AND property_id = $2
            AND cancelled_at IS NULL AND NOT is_false AND starts_on <= $3::date

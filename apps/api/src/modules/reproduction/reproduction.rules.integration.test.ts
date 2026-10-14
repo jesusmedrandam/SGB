@@ -140,6 +140,12 @@ test('reglas compartidas por dueño, administradores, edad de padres y ficha com
   assert.equal((await pool.query('SELECT is_false FROM reproduction_heat WHERE id=$1',[firstHeat.id])).rows[0].is_false,true);
   const autoPregnancy=await createPregnancy(auth,context,{cowId:cycleCow.id,conceptionMethod:'NATURAL',confirmationMethod:'PALPATION',confirmedOn:'2024-01-05'},metadata);
   assert.equal(autoPregnancy.heatId,replacement.id);
+  const unobservedCow=await createAnimal(auth,context,{name:'Preñez sin celo observado',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id},metadata);
+  const unobservedHeat=await createHeat(auth,context,{cowId:unobservedCow.id,startsOn:'2024-01-01',isFalse:false},metadata);
+  const manualPregnancy=await createPregnancy(auth,context,{cowId:unobservedCow.id,useLastHeat:false,conceptionMethod:'UNKNOWN',confirmationMethod:'PALPATION',confirmedOn:'2025-10-01',gestationDays:30},metadata);
+  assert.equal(manualPregnancy.heatId,null,'Ninguno no usa automáticamente un celo anterior aunque esté habilitada la regla');
+  assert.equal(manualPregnancy.gestationDays,30);
+  assert.equal((await pool.query('SELECT is_false FROM reproduction_heat WHERE id=$1',[unobservedHeat.id])).rows[0].is_false,false,'Ninguno conserva el historial anterior');
   await updateReproductionSettings(auth,context,{...config,minimumCowMonths:18,minimumBullMonths:24,allowSecondHeat:false,allowFalseHeatInPregnancy:false},metadata);
   assert.equal((await createHeat(auth,context,{cowId:cycleCow.id,startsOn:'2024-01-06',isFalse:false,trueHeatId:'NEW'},metadata)).isFalse,true);
   assert.equal((await pool.query('SELECT is_false FROM reproduction_heat WHERE id=$1',[replacement.id])).rows[0].is_false,false);

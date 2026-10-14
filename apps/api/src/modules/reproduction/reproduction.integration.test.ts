@@ -132,8 +132,13 @@ test('la reproducción conserva propiedad, parentesco, espera y auditoría', asy
     assert.equal(photo.attachmentIds.length,4,'One birth photo relates to the mother and both calves');
     for(const id of [mother.id,...birth.calves.map(row=>row.id)]){
       const gallery=await listMedia(context,'ANIMAL',id);assert.equal(gallery.length,1);assert.equal(gallery[0]!.storage_object_id,object);
+      assert.equal(gallery[0]!.recordType,'REPRODUCTION_BIRTH');
+      assert.equal(gallery[0]!.recordDetails?.title,'Parto');
+      assert.ok(gallery[0]!.recordDetails?.lines.some(line=>line.includes('Segunda cría')),'Animal photo queries retain the birth and both calves');
     }
     assert.equal((await listMedia(context,'REPRODUCTION_BIRTH',birth.id)).length,1);
+    const restrictedMedia=await listMedia({...context,permissions:new Set([...context.permissions].filter(permission=>permission!=='REPRODUCTION_VIEW'))},'ANIMAL',mother.id);
+    assert.equal(restrictedMedia[0]!.recordDetails,null,'Birth details remain private when reproduction permission is missing');
     await updateMediaDetails(auth,context,object,{capturedOn:'2023-10-20',description:'Parto gemelar',
       tagIds:[],animalIds:[],expectedAttachmentIds:photo.attachmentIds},metadata);
     assert.equal((await listMedia(context,undefined,undefined,object)).length,4,'Birth relatives survive metadata editing');
