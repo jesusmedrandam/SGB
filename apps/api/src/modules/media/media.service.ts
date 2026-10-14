@@ -40,6 +40,8 @@ const targets:Record<string,{table:string;property:string;module:string;permissi
   CLEANING:{table:'pasture_cleaning',property:'property_id',module:'PASTURE_CLEANING',permission:'CLEANING_VIEW'},
   LIVESTOCK_ACTIVITY:{table:'livestock_activity',property:'property_id',module:'TASKS',permission:'ACTIVITY_VIEW'},
 };
+export function visibleMediaTypes(context:PropertyContext){return Object.entries(targets).filter(([,target])=>context.permissions.has(target.permission)
+    && (target.module==='CORE'||context.enabledModules.has(target.module))).map(([code])=>code);}
 function configured(){
   if(!env.CLOUDINARY_CLOUD_NAME||!env.CLOUDINARY_API_KEY||!env.CLOUDINARY_API_SECRET)
     throw new ApiError(503,'CLOUDINARY_NOT_CONFIGURED','Configura Cloudinary en el servidor para cargar multimedia.');
@@ -114,10 +116,9 @@ function upload(data:Buffer,key:string,kind:'IMAGE'|'VIDEO'){
 }
 function url(publicId:string,kind:string){configured();return cloudinary.url(publicId,{secure:true,
   resource_type:kind==='VIDEO'?'video':'image',type:'upload'});}
-export async function listMedia(context:PropertyContext,type?:string,id?:string,objectId?:string,page=1){
+export async function listMedia(context:PropertyContext,type?:string,id?:string,objectId?:string,page=1,attachmentIds?:string[]){
   if(type&&id)await inTransaction(client=>validateTarget(client,context,type,id));
-  const visible=Object.entries(targets).filter(([,target])=>context.permissions.has(target.permission)
-    && (target.module==='CORE'||context.enabledModules.has(target.module))).map(([code])=>code);
+  const visible=visibleMediaTypes(context);
   if(!visible.length)return [];
   const rows=await pool.query<{id:string;storage_object_id:string;entity_type:string;entity_id:string;
     relation_code:string;description:string|null;captured_on:string|null;
@@ -125,8 +126,8 @@ export async function listMedia(context:PropertyContext,type?:string,id?:string,
     recordDetails:{title:string;date:string;notes:string|null;lines:string[]}|null;recordType:string|null;
     kind:string;byte_size:string;created_at:string;provider_asset_id:string}>(`
     SELECT ma.id,ma.storage_object_id,ma.entity_type,ma.entity_id,ma.relation_code,
-      ma.description,ma.captured_on::text,animal.name AS entity_name,source_record.entity_type AS "recordType",
-      CASE source_record.entity_type
+      ma.description,ma.captured_on::text,animal.name AS entity_name,COALESCE(source_record.entity_type,CASE WHEN ma.imported_record_type=ANY($4::varchar[]) THEN ma.imported_record_type END) AS "recordType",
+      COALESCE(CASE WHEN ma.imported_record_type=ANY($4::varchar[]) THEN ma.imported_record_details END,CASE source_record.entity_type
         WHEN 'REPRODUCTION_BIRTH' THEN (SELECT jsonb_build_object('title','Parto','date',b.occurred_on,'notes',b.notes,
           'lines',ARRAY[concat('Madre: ',a.name),concat(b.live_count,CASE WHEN b.live_count=1 THEN ' cría viva' ELSE ' crías vivas' END,
             CASE WHEN b.stillborn_count>0 THEN concat(' · ',b.stillborn_count,' nacidas sin vida') ELSE '' END),
@@ -170,7 +171,7 @@ export async function listMedia(context:PropertyContext,type?:string,id?:string,
           'lines',ARRAY[concat(m.liters,' litros')]) FROM milk_tank_production m WHERE m.id=source_record.entity_id AND m.property_id=ma.property_id)
         WHEN 'MILK_LACTATION' THEN (SELECT jsonb_build_object('title','Lactancia','date',l.started_on,'notes',l.notes,'lines',ARRAY[a.name])
           FROM milk_lactation l JOIN animal a ON a.id=l.cow_id WHERE l.id=source_record.entity_id AND l.property_id=ma.property_id)
-        ELSE NULL END AS "recordDetails",
+        ELSE NULL END) AS "recordDetails",
       COALESCE((SELECT json_agg(json_build_object('id',tag.id,'name',tag.name) ORDER BY tag.name)
         FROM media_attachment_tag mat JOIN governed_catalog_item tag ON tag.id=mat.tag_id
         WHERE mat.attachment_id=ma.id),'[]'::json) AS tags,
@@ -185,8 +186,9 @@ export async function listMedia(context:PropertyContext,type?:string,id?:string,
     WHERE ma.property_id=$1 AND ma.deleted_at IS NULL AND ma.entity_type=ANY($4::varchar[])
       AND ($2::varchar IS NULL OR ma.entity_type=$2) AND ($3::uuid IS NULL OR ma.entity_id=$3)
       AND ($5::uuid IS NULL OR ma.storage_object_id=$5)
+      AND ($7::uuid[] IS NULL OR ma.id=ANY($7::uuid[]))
     ORDER BY COALESCE(ma.captured_on,so.created_at::date) DESC,so.created_at DESC,ma.id DESC LIMIT 500 OFFSET $6`,
-    [context.propertyId,type??null,id??null,visible,objectId??null,(page-1)*500]);
+    [context.propertyId,type??null,id??null,visible,objectId??null,(page-1)*500,attachmentIds??null]);
   return rows.rows.map(({provider_asset_id,...row})=>({...row,byteSize:Number(row.byte_size),
     url:url(provider_asset_id,row.kind),
     thumbnailUrl:row.kind==='IMAGE'?cloudinary.url(provider_asset_id,{secure:true,
@@ -322,8 +324,9 @@ export async function updateMediaDetails(auth:AuthState,context:PropertyContext,
     await superadminPropertyAccess(client,auth,context);
     const accountId=await account(client,context.propertyId,Boolean(context.isSuperadmin));
     await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
-    const object=await client.query(`SELECT id FROM storage_object WHERE id=$1 AND account_id=$2
-      AND status='AVAILABLE' FOR UPDATE`,[objectId,accountId]);
+    const object=await client.query(`SELECT id FROM storage_object WHERE id=$1 AND (account_id=$2 OR EXISTS(
+      SELECT 1 FROM media_attachment m WHERE m.storage_object_id=storage_object.id AND m.account_id=$2 AND m.property_id=$3 AND m.deleted_at IS NULL))
+      AND status='AVAILABLE' FOR UPDATE`,[objectId,accountId,context.propertyId]);
     if(!object.rowCount)throw invalidRequest('MEDIA_NOT_FOUND','El archivo no está disponible.');
     const refs=await client.query<{id:string;entity_type:string;entity_id:string;relation_code:string}>(`
       SELECT id,entity_type,entity_id,relation_code,description,captured_on::text,
@@ -378,8 +381,9 @@ async function deleteReferences(context:PropertyContext,objectId:string,attachme
     if(auth)await superadminPropertyAccess(client,auth,context);
     const accountId=await account(client,context.propertyId,auth?.isSuperadmin??false);
     await client.query('SELECT id FROM administrative_account WHERE id=$1 FOR UPDATE',[accountId]);
-    const object=await client.query(`SELECT id FROM storage_object WHERE id=$1 AND account_id=$2
-      AND status='AVAILABLE' FOR UPDATE`,[objectId,accountId]);
+    const object=await client.query(`SELECT id FROM storage_object WHERE id=$1 AND (account_id=$2 OR EXISTS(
+      SELECT 1 FROM media_attachment m WHERE m.storage_object_id=storage_object.id AND m.account_id=$2 AND m.property_id=$3 AND m.deleted_at IS NULL))
+      AND status='AVAILABLE' FOR UPDATE`,[objectId,accountId,context.propertyId]);
     if(!object.rowCount)throw invalidRequest('MEDIA_NOT_FOUND','El archivo no está disponible.');
     const refs=await client.query<{id:string;entity_type:string;entity_id:string}>(`
       SELECT id,entity_type,entity_id FROM media_attachment WHERE storage_object_id=$1

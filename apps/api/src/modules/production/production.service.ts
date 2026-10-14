@@ -76,9 +76,7 @@ export async function listProduction(context: PropertyContext) {
       LEFT JOIN account_reproduction_setting rs ON rs.account_id=a.account_id
       WHERE a.property_id=$1 AND a.sex='FEMALE' AND a.record_status='CURRENT'
         AND a.availability_status_code='ACTIVE'
-        AND EXISTS(SELECT 1 FROM reproduction_birth b WHERE b.mother_id=a.id
-          AND b.occurred_on+COALESCE(rs.max_milking_days,305)
-            >= (now() AT TIME ZONE (SELECT timezone FROM property WHERE id=$1))::date)
+        AND animal_latest_birth_on(a.id)+COALESCE(rs.max_milking_days,305) >= (now() AT TIME ZONE (SELECT timezone FROM property WHERE id=$1))::date
       ORDER BY lower(a.name),a.id LIMIT 2000`,[context.propertyId]),
   ]);
   return { lactations:lactations.rows,milk:milk.rows,tanks:tanks.rows,births:births.rows,
@@ -95,8 +93,7 @@ async function upsertMilkingState(client:PoolClient,context:PropertyContext,acco
 
 async function ensureRecentBirth(client:PoolClient,context:PropertyContext,cowId:string,
   date:string,maxDays:number) {
-  const result=await client.query(`SELECT 1 FROM reproduction_birth WHERE mother_id=$1
-    AND property_id=$2 AND $3::date BETWEEN occurred_on AND occurred_on+$4::int LIMIT 1`,
+  const result=await client.query(`SELECT 1 FROM animal WHERE id=$1 AND property_id=$2 AND $3::date BETWEEN animal_latest_birth_on(id,$3::date) AND animal_latest_birth_on(id,$3::date)+$4::int`,
   [cowId,context.propertyId,date,maxDays]);
   if(!result.rowCount)throw invalidRequest('MILKING_PERIOD_EXPIRED',
     `La vaca requiere un parto dentro de los últimos ${maxDays} días.`);

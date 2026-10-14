@@ -59,6 +59,7 @@ async function lock(client:PoolClient,context:PropertyContext,id:string){
     `SELECT animal_id,status,version::int,detected_on::text,kind FROM health_condition
       WHERE id=$1 AND property_id=$2 FOR UPDATE`,[id,context.propertyId])).rows[0];
   if(!row)throw new ApiError(404,'HEALTH_CONDITION_NOT_FOUND','Condición no encontrada en esta propiedad.');
+  if((await client.query('SELECT transferred_out_at FROM animal WHERE id=$1',[row.animal_id])).rows[0]?.transferred_out_at)throw conflict('ANIMAL_TRANSFERRED','Esta condición continúa en la propiedad de destino.');
   if(row.status==='RESUELTA')throw conflict('HEALTH_CONDITION_RESOLVED','La condición ya está resuelta.');
   return row;
 }

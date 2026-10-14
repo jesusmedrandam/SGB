@@ -32,6 +32,7 @@ interface AnimalRow {
   active_pregnancy_id?:string|null;
   has_reproductive_history?:boolean;
   registered_birth_date?:string|null;
+  transferred_out_at?:string|null;last_birth_on?:string|null;last_loss_on?:string|null;
   profile_photo_asset:string|null;
   primary_owner_name?:string|null;
   total_count?:number;
@@ -40,14 +41,16 @@ interface AnimalRow {
 const animalFields = `id, name, description, ear_tag_code, sex, species_code,
   birth_date::text AS birth_date, entry_date::text AS entry_date,
   initial_weight::text AS initial_weight, initial_weight_unit_code,
-  availability_status_code, version::text AS version,
-  (SELECT id FROM reproduction_pregnancy WHERE cow_id=animal.id AND status='CONFIRMED' LIMIT 1) AS active_pregnancy_id,
+  availability_status_code, version::text AS version,transferred_out_at,
+  animal_latest_birth_on(animal.id)::text AS last_birth_on,animal_latest_loss_on(animal.id)::text AS last_loss_on,
+  (SELECT id FROM reproduction_pregnancy WHERE cow_id=animal.id AND status='CONFIRMED' AND animal.transferred_out_at IS NULL LIMIT 1) AS active_pregnancy_id,
   EXISTS(SELECT 1 FROM animal_parentage WHERE parent_animal_id=animal.id AND removed_at IS NULL)
     OR EXISTS(SELECT 1 FROM reproduction_heat WHERE cow_id=animal.id OR bull_id=animal.id)
     OR EXISTS(SELECT 1 FROM reproduction_service WHERE cow_id=animal.id OR father_id=animal.id OR donor_id=animal.id)
-    OR EXISTS(SELECT 1 FROM reproduction_pregnancy WHERE cow_id=animal.id OR father_id=animal.id) AS has_reproductive_history,
-  (SELECT birth.occurred_on::text FROM reproduction_birth_calf calf JOIN reproduction_birth birth ON birth.id=calf.birth_id
-    WHERE calf.animal_id=animal.id LIMIT 1) AS registered_birth_date,
+    OR EXISTS(SELECT 1 FROM reproduction_pregnancy WHERE cow_id=animal.id OR father_id=animal.id)
+    OR EXISTS(SELECT 1 FROM animal_received_history WHERE animal_id=animal.id AND (snapshot->'profile'->>'hasReproductiveHistory')::boolean) AS has_reproductive_history,
+  COALESCE((SELECT birth.occurred_on::text FROM reproduction_birth_calf calf JOIN reproduction_birth birth ON birth.id=calf.birth_id
+    WHERE calf.animal_id=animal.id LIMIT 1),(SELECT snapshot->'profile'->>'registeredBirthDate' FROM animal_received_history WHERE animal_id=animal.id)) AS registered_birth_date,
   (SELECT so.provider_asset_id FROM media_attachment ma
      JOIN storage_object so ON so.id=ma.storage_object_id AND so.status='AVAILABLE'
      WHERE ma.entity_type='ANIMAL' AND ma.entity_id=animal.id AND ma.deleted_at IS NULL
@@ -73,6 +76,7 @@ function animal(row: AnimalRow) {
     initialWeightUnitCode: row.initial_weight_unit_code,
     availabilityStatusCode: row.availability_status_code, version: Number(row.version),
     classification:row.classification, brands: row.brands, activePregnancyId:row.active_pregnancy_id??null,
+    transferredOutAt:row.transferred_out_at??null,lastBirthOn:row.last_birth_on??null,lastLossOn:row.last_loss_on??null,
     hasReproductiveHistory:row.has_reproductive_history??false,registeredBirthDate:row.registered_birth_date??null,
     profilePhotoUrl:row.profile_photo_asset&&env.CLOUDINARY_CLOUD_NAME
       ? cloudinary.url(row.profile_photo_asset,{secure:true,cloud_name:env.CLOUDINARY_CLOUD_NAME,

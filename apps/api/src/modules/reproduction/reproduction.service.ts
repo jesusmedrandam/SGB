@@ -137,11 +137,9 @@ async function eligibleAnimal(client: PoolClient, context: PropertyContext, id: 
 async function femalePolicy(client: PoolClient, cowId: string, eventOn: string,
   action: 'HEAT' | 'PREGNANCY', config: ReproductionSettingInput, isFalse = false) {
   const lastBirth = await client.query<{ occurred_on: string }>(
-    `SELECT occurred_on::text FROM reproduction_birth WHERE mother_id = $1
-     AND occurred_on <= $2::date ORDER BY occurred_on DESC LIMIT 1`, [cowId, eventOn]);
+    `SELECT animal_latest_birth_on($1,$2::date)::text AS occurred_on`, [cowId, eventOn]);
   const lastLoss = await client.query<{ occurred_on: string }>(
-    `SELECT occurred_on::text FROM reproduction_loss WHERE cow_id = $1
-     AND occurred_on <= $2::date ORDER BY occurred_on DESC LIMIT 1`, [cowId, eventOn]);
+    `SELECT animal_latest_loss_on($1,$2::date)::text AS occurred_on`, [cowId, eventOn]);
   const activePregnancy = await client.query(
     `SELECT 1 FROM reproduction_pregnancy WHERE cow_id = $1 AND status = 'CONFIRMED' LIMIT 1`, [cowId]);
   if (action === 'HEAT' && activePregnancy.rowCount && !isFalse)
@@ -195,7 +193,7 @@ function translate(error: unknown): never {
 }
 
 export async function listReproduction(context: PropertyContext) {
-  const [heats, pregnancies, births, losses, services] = await Promise.all([
+  const [heats, pregnancies, births, losses, services, boundaries] = await Promise.all([
     pool.query(`SELECT h.id, h.cow_id AS "cowId", a.name AS "cowName",
       h.bull_id AS "bullId", h.starts_on::text AS "startsOn", h.ends_on::text AS "endsOn",
       h.is_false AS "isFalse", h.notes, h.cancelled_at IS NOT NULL AS cancelled,
@@ -206,7 +204,8 @@ export async function listReproduction(context: PropertyContext) {
       p.father_id AS "fatherId", p.external_father AS "externalFather", p.service_id AS "serviceId",
       p.conception_method AS "conceptionMethod", p.confirmation_method AS "confirmationMethod",
       p.confirmed_on::text AS "confirmedOn", p.expected_birth_on::text AS "expectedBirthOn",
-      p.gestation_days AS "gestationDays", p.status, p.notes
+      p.gestation_days AS "gestationDays", CASE WHEN a.transferred_out_at IS NOT NULL AND p.status='CONFIRMED'
+        THEN 'TRANSFERRED' ELSE p.status END AS status, p.notes
       FROM reproduction_pregnancy p JOIN animal a ON a.id = p.cow_id
       WHERE p.property_id = $1 ORDER BY p.confirmed_on DESC, p.created_at DESC LIMIT 300`, [context.propertyId]),
     pool.query(`SELECT b.id, b.pregnancy_id AS "pregnancyId", b.mother_id AS "motherId",
@@ -232,9 +231,10 @@ export async function listReproduction(context: PropertyContext) {
         AND p.status<>'CANCELLED') AS "hasPregnancy"
       FROM reproduction_service s JOIN animal a ON a.id=s.cow_id
       WHERE s.property_id=$1 ORDER BY s.occurred_on DESC,s.created_at DESC LIMIT 300`, [context.propertyId]),
+    pool.query(`SELECT h.animal_id AS "cowId",h.last_birth_on::text AS "lastBirthOn",h.last_loss_on::text AS "lastLossOn"
+      FROM animal_received_history h JOIN animal a ON a.id=h.animal_id WHERE a.property_id=$1`,[context.propertyId]),
   ]);
-  return { heats: heats.rows, pregnancies: pregnancies.rows, births: births.rows,
-    losses: losses.rows, services: services.rows };
+  return {heats:heats.rows,pregnancies:pregnancies.rows,births:births.rows,losses:losses.rows,services:services.rows,cycleBoundaries:boundaries.rows};
 }
 
 export async function createService(auth: AuthState, context: PropertyContext,
@@ -386,8 +386,8 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
              AND NOT EXISTS(SELECT 1 FROM reproduction_birth WHERE mother_id=$3 AND occurred_on>reproduction_service.occurred_on)
              AND NOT EXISTS(SELECT 1 FROM reproduction_loss WHERE cow_id=$3 AND occurred_on>reproduction_service.occurred_on)
              AND occurred_on>=GREATEST(
-               COALESCE((SELECT max(occurred_on) FROM reproduction_birth WHERE mother_id=$3 AND occurred_on<=$5::date),'-infinity'::date),
-               COALESCE((SELECT max(occurred_on) FROM reproduction_loss WHERE cow_id=$3 AND occurred_on<=$5::date),'-infinity'::date)) FOR SHARE`,
+               COALESCE(animal_latest_birth_on($3,$5::date),'-infinity'::date),
+               COALESCE(animal_latest_loss_on($3,$5::date),'-infinity'::date)) FOR SHARE`,
           [input.serviceId, context.propertyId, input.cowId, accountId,input.confirmedOn]);
         const selected = service.rows[0];
         if (!selected || selected.kind !== input.conceptionMethod || selected.occurred_on > input.confirmedOn
@@ -416,10 +416,8 @@ export async function createPregnancy(auth: AuthState, context: PropertyContext,
            AND NOT EXISTS(SELECT 1 FROM reproduction_birth WHERE mother_id=$1 AND occurred_on>reproduction_heat.starts_on)
            AND NOT EXISTS(SELECT 1 FROM reproduction_loss WHERE cow_id=$1 AND occurred_on>reproduction_heat.starts_on)
            AND starts_on >= GREATEST(
-             COALESCE((SELECT max(occurred_on) FROM reproduction_birth
-               WHERE mother_id = $1 AND occurred_on <= $3::date), '-infinity'::date),
-             COALESCE((SELECT max(occurred_on) FROM reproduction_loss
-               WHERE cow_id = $1 AND occurred_on <= $3::date), '-infinity'::date))
+             COALESCE(animal_latest_birth_on($1,$3::date), '-infinity'::date),
+             COALESCE(animal_latest_loss_on($1,$3::date), '-infinity'::date))
            ORDER BY starts_on DESC, created_at DESC LIMIT 1`,
           [input.cowId, context.propertyId, input.confirmedOn]);
         heatId = latest.rows[0]?.id ?? null;
@@ -480,7 +478,8 @@ async function lockPregnancy(client: PoolClient, context: PropertyContext, id: s
     'La preñez no está disponible en esta propiedad.');
   // Every reproductive transition locks the cow before the pregnancy, matching
   // heat and pregnancy creation and avoiding opposite lock orders at birth.
-  await client.query(`SELECT id FROM animal WHERE id = $1 FOR UPDATE`, [target.rows[0].cow_id]);
+  const cow=await client.query(`SELECT transferred_out_at FROM animal WHERE id=$1 FOR UPDATE`,[target.rows[0].cow_id]);
+  if(cow.rows[0]?.transferred_out_at)throw conflict('ANIMAL_TRANSFERRED','Este animal fue trasladado. Continúa su preñez en la propiedad de destino.');
   const result = await client.query<{ id: string; account_id: string; cow_id: string;
     father_id: string | null; external_father: string | null; confirmed_on: string; status: string }>(
     `SELECT id, account_id, cow_id, father_id, external_father,
@@ -622,7 +621,8 @@ export async function finishHeat(auth:AuthState,context:PropertyContext,id:strin
     await requireSection(client,context,'REPRODUCTION_HEATS');
     const target=await client.query<{cow_id:string}>(`SELECT cow_id FROM reproduction_heat WHERE id=$1 AND property_id=$2`,[id,context.propertyId]);
     if(!target.rows[0])throw new ApiError(404,'HEAT_NOT_FOUND','El celo no está disponible en esta propiedad.');
-    await client.query('SELECT id FROM animal WHERE id=$1 FOR UPDATE',[target.rows[0].cow_id]);
+    const cow=await client.query('SELECT transferred_out_at FROM animal WHERE id=$1 FOR UPDATE',[target.rows[0].cow_id]);
+    if(cow.rows[0]?.transferred_out_at)throw conflict('ANIMAL_TRANSFERRED','Este celo continúa en la propiedad de destino.');
     const heat=(await client.query<{starts_on:string;ends_on:string|null;cancelled_at:string|null}>(`SELECT starts_on::text,ends_on::text,cancelled_at FROM reproduction_heat WHERE id=$1 AND property_id=$2 FOR UPDATE`,[id,context.propertyId])).rows[0]!;
     if(heat.cancelled_at||heat.ends_on)throw conflict('HEAT_FINISHED','Este celo ya fue finalizado o cancelado.');
     if(endsOn<heat.starts_on||endsOn>today)throw invalidRequest('HEAT_END_INVALID','La fecha de fin debe estar entre el inicio del celo y hoy.');
