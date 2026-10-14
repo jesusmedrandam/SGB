@@ -36,6 +36,7 @@ export async function updateAnimalDetails(auth: AuthState, context: PropertyCont
       throw conflict('ANIMAL_VERSION_CONFLICT', 'El animal cambió. Actualiza su ficha antes de guardar.');
     }
     const before = await readAnimal(client, context, id);
+    if(before.transferredOutAt)throw conflict('ANIMAL_TRANSFERRED','La ficha de origen queda conservada. Edita el animal en la propiedad donde está activo.');
     const description = input.description || null;
     if ('name' in input) {
       const today=(await client.query<{today:string}>(`SELECT (now() AT TIME ZONE timezone)::date::text AS today
@@ -43,6 +44,7 @@ export async function updateAnimalDetails(auth: AuthState, context: PropertyCont
       if(input.entryDate>today||input.birthDate&&(input.birthDate>today||input.birthDate>input.entryDate))
         throw invalidRequest('ANIMAL_DATES_INVALID','El nacimiento debe ser anterior al ingreso y las fechas no pueden ser futuras.');
       if(input.sex!==before.sex){
+        if(before.hasReproductiveHistory)throw invalidRequest('ANIMAL_SEX_HAS_HISTORY','El historial de reproducción recibido impide cambiar el sexo.');
         const related=await client.query(`SELECT 1 WHERE
           EXISTS(SELECT 1 FROM animal_parentage WHERE parent_animal_id=$1 AND removed_at IS NULL)
           OR EXISTS(SELECT 1 FROM reproduction_heat WHERE cow_id=$1 OR bull_id=$1)
@@ -51,6 +53,7 @@ export async function updateAnimalDetails(auth: AuthState, context: PropertyCont
         if(related.rowCount)throw invalidRequest('ANIMAL_SEX_HAS_HISTORY','No se puede cambiar el sexo mientras existan registros de reproducción o crías vinculadas.');
       }
       if(input.birthDate!==before.birthDate){
+        if(before.registeredBirthDate&&input.birthDate!==before.registeredBirthDate)throw invalidRequest('ANIMAL_BIRTH_HAS_HISTORY','La fecha de nacimiento debe coincidir con el parto en el que nació.');
         const birth=await client.query(`SELECT 1 FROM reproduction_birth_calf calf
           JOIN reproduction_birth birth ON birth.id=calf.birth_id
           WHERE calf.animal_id=$1 AND birth.occurred_on IS DISTINCT FROM $2::date`,[id,input.birthDate]);

@@ -26,7 +26,7 @@ export async function listStatusOptions(context:PropertyContext){
   return (await pool.query(`SELECT id,name,ear_tag_code AS "earTagCode",
     availability_status_code AS status,version::int FROM animal
     WHERE property_id=$1 AND record_status='CURRENT'
-      AND availability_status_code IN ('ACTIVE','MISSING','INACTIVE')
+      AND availability_status_code IN ('ACTIVE','MISSING','INACTIVE') AND transferred_out_at IS NULL
     ORDER BY lower(name),id LIMIT 5000`,[context.propertyId])).rows;
 }
 

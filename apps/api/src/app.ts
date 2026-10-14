@@ -18,6 +18,7 @@ import { superadminRouter } from './modules/superadmin/superadmin.routes.js';
 import { reproductionRouter } from './modules/reproduction/reproduction.routes.js';
 import { productionRouter } from './modules/production/production.routes.js';
 import { movementsRouter } from './modules/movements/movements.routes.js';
+import {externalTransfersRouter} from './modules/movements/external-transfers.routes.js';
 import { healthRouter } from './modules/health/health.routes.js';
 import { cleaningsRouter } from './modules/cleanings/cleanings.routes.js';
 import { activitiesRouter } from './modules/activities/activities.routes.js';
@@ -76,8 +77,8 @@ app.get('/health/ready', asyncHandler(async (_request, response) => {
     EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='property' AND column_name='owner_name') AS properties,
     to_regclass('public.account_reproduction_setting') IS NOT NULL AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='reproduction_birth_calf' AND column_name='birth_condition') AS reproduction,
     EXISTS(SELECT 1 FROM module_catalog WHERE code='REPRODUCTION_HEATS') AS reproduction_sections,
-    EXISTS(SELECT 1 FROM schema_migration WHERE filename='0042_animal_classification_history.sql') AS classification_rules`);
-  response.json({ animalDetailsReady:true,reproductiveSourceIntegrityReady:true,mediaRecordDetailsReady:true,manualPregnancySourceReady:true,animalActionsReady:true,reproductionCycleReady:true,animalClassificationRulesReady:features.rows[0].classification_rules,reproductionFlowReady:features.rows[0].reproduction_sections,accountReproductionRulesReady:features.rows[0].reproduction,draftExpiryReady:features.rows[0].drafts,propertyInformationReady:features.rows[0].properties,ok: true, database: 'ready',accountCatalogReady:catalogs.rows[0]?.ready===true,supportReady:result.rows[0]?.support_ready===true,
+    EXISTS(SELECT 1 FROM schema_migration WHERE filename='0042_animal_classification_history.sql') AS classification_rules,EXISTS(SELECT 1 FROM schema_migration WHERE filename='0043_external_animal_transfers.sql') AS external_transfers`);
+  response.json({externalAnimalTransfersReady:features.rows[0].external_transfers, animalDetailsReady:true,reproductiveSourceIntegrityReady:true,mediaRecordDetailsReady:true,manualPregnancySourceReady:true,animalActionsReady:true,reproductionCycleReady:true,animalClassificationRulesReady:features.rows[0].classification_rules,reproductionFlowReady:features.rows[0].reproduction_sections,accountReproductionRulesReady:features.rows[0].reproduction,draftExpiryReady:features.rows[0].drafts,propertyInformationReady:features.rows[0].properties,ok: true, database: 'ready',accountCatalogReady:catalogs.rows[0]?.ready===true,supportReady:result.rows[0]?.support_ready===true,
     supportModesReady:result.rows[0]?.support_modes_ready===true,medicineDosesReady:result.rows[0]?.medicine_doses_ready===true,
     medicineClassificationDosesReady:result.rows[0]?.medicine_classification_doses_ready===true,
     userProfileReady:result.rows[0]?.user_profile_ready===true,
@@ -101,6 +102,7 @@ app.use('/superadmin', superadminRouter);
 app.use('/reproduction', reproductionRouter);
 app.use('/production', productionRouter);
 app.use('/movements', movementsRouter);
+app.use('/external-transfers',externalTransfersRouter);
 app.use('/health-records', healthRouter);
 app.use('/cleanings', cleaningsRouter);
 app.use('/activities', activitiesRouter);

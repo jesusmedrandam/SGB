@@ -7,6 +7,7 @@ import { createAnimal, getAnimal, listAnimals, updateAnimalBrands, updateAnimalC
 import { updateAnimalParents } from './parents.service.js';
 import { updateAnimalDescription, updateAnimalDetails } from './description.service.js';
 import {updateAnimalDetailsSchema} from './animals.schemas.js';
+import {listReceivedAnimalHistories,getReceivedAnimalHistory} from '../movements/external-transfers.service.js';
 import { setAnimalOwners } from './owners.service.js';
 import { z } from 'zod';
 import {getReproductionSettings} from '../reproduction/reproduction.service.js';
@@ -43,9 +44,15 @@ animalsRouter.get('/', requirePermission('ANIMAL_VIEW'), asyncHandler(async (req
   const filters = animalListSchema.parse(request.query);
   response.json({ ok: true, data: await listAnimals(request.propertyContext!, filters) });
 }));
+animalsRouter.get('/received-histories',requirePermission('ANIMAL_VIEW'),asyncHandler(async(req,res)=>{
+  res.json({ok:true,data:await listReceivedAnimalHistories(req.propertyContext!,animalListSchema.parse(req.query).page)});
+}));
 animalsRouter.get('/:id', requirePermission('ANIMAL_VIEW'), asyncHandler(async (request, response) => {
   const { id } = animalIdSchema.parse(request.params);
   response.json({ ok: true, data: await getAnimal(request.propertyContext!, id) });
+}));
+animalsRouter.get('/:id/received-history',requirePermission('ANIMAL_VIEW'),asyncHandler(async(req,res)=>{
+  res.json({ok:true,data:await getReceivedAnimalHistory(req.propertyContext!,animalIdSchema.parse(req.params).id)});
 }));
 animalsRouter.post('/', requirePermission('ANIMAL_CREATE'), asyncHandler(async (request, response) => {
   const input = createAnimalSchema.parse(request.body);
