@@ -82,6 +82,12 @@ export async function getAnimalSummary(context:PropertyContext){
     WHERE g.property_id=$1 AND g.active GROUP BY g.id,g.name ORDER BY lower(g.name)`,[context.propertyId]);
   const sex=await pool.query<{sex:string;count:number}>(`SELECT sex,count(*)::int AS count FROM animal
     WHERE property_id=$1 AND record_status='CURRENT' GROUP BY sex`,[context.propertyId]);
-  return {classifications:rows.rows,groups:groups.rows,sex:sex.rows,
+  const stays=await pool.query<{inside:number;outside:number}>(`SELECT
+    count(*) FILTER(WHERE g.kind IS DISTINCT FROM 'EXTERNAL')::int AS inside,
+    count(*) FILTER(WHERE g.kind='EXTERNAL')::int AS outside FROM animal a
+    LEFT JOIN animal_group_assignment aga ON aga.animal_id=a.id AND aga.ended_at IS NULL
+    LEFT JOIN livestock_group g ON g.id=aga.group_id
+    WHERE a.property_id=$1 AND a.record_status='CURRENT' AND a.availability_status_code='ACTIVE'`,[context.propertyId]);
+  return {activeInside:stays.rows[0]!.inside,activeOutside:stays.rows[0]!.outside,classifications:rows.rows,groups:groups.rows,sex:sex.rows,
     total:sex.rows.reduce((sum,item)=>sum+item.count,0)};
 }

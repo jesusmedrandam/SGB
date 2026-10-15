@@ -62,10 +62,10 @@ export async function updateAnimalDetails(auth: AuthState, context: PropertyCont
           if(parent?.animalId)await validateParentAge(client,context.propertyId,parent.animalId,role,input.birthDate);
       }
       if(input.groupId!==before.group?.id){
-        const group=(await client.query<{location_id:string}>(`SELECT gla.location_id FROM livestock_group g
-          JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
-          JOIN physical_location pl ON pl.id=gla.location_id AND pl.active
-          WHERE g.id=$1 AND g.property_id=$2 AND g.active FOR UPDATE OF g,gla,pl`,
+        const group=(await client.query<{location_id:string|null}>(`SELECT gla.location_id FROM livestock_group g
+          LEFT JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
+          LEFT JOIN physical_location pl ON pl.id=gla.location_id AND pl.active
+          WHERE g.id=$1 AND g.property_id=$2 AND g.active AND (g.kind='EXTERNAL' OR pl.id IS NOT NULL) FOR UPDATE OF g`,
           [input.groupId,context.propertyId])).rows[0];
         if(!group)throw invalidRequest('GROUP_UNAVAILABLE','Selecciona un grupo activo con potrero o corral de esta propiedad.');
         // Preserve the assignments when correcting the animal's current group.
@@ -74,7 +74,7 @@ export async function updateAnimalDetails(auth: AuthState, context: PropertyCont
             WHERE animal_id=$1 AND ended_at IS NULL`,[id]);
         await client.query(`INSERT INTO animal_group_assignment(property_id,animal_id,group_id,started_at,start_reason,created_by)
           VALUES($1,$2,$3,now(),'Corrección de ficha',$4)`,[context.propertyId,id,input.groupId,auth.userId]);
-        await client.query(`INSERT INTO animal_location_assignment(property_id,animal_id,location_id,started_at,start_reason,created_by)
+        if(group.location_id)await client.query(`INSERT INTO animal_location_assignment(property_id,animal_id,location_id,started_at,start_reason,created_by)
           VALUES($1,$2,$3,now(),'Corrección de ficha',$4)`,[context.propertyId,id,group.location_id,auth.userId]);
       }
       await client.query(`UPDATE animal SET name=$2,description=$3,sex=$4,ear_tag_code=$5,

@@ -12,6 +12,7 @@ import type { z } from 'zod';
 import {insertInitialParents} from './parents.service.js';
 
 interface AnimalRow {
+  external_stay?:{place:string;contact:string|null}|null;
   id: string;
   name: string;
   description: string | null;
@@ -42,6 +43,9 @@ const animalFields = `id, name, description, ear_tag_code, sex, species_code,
   birth_date::text AS birth_date, entry_date::text AS entry_date,
   initial_weight::text AS initial_weight, initial_weight_unit_code,
   availability_status_code, version::text AS version,transferred_out_at,
+  (SELECT json_build_object('place',g.external_place,'contact',g.external_contact)
+    FROM animal_group_assignment aga JOIN livestock_group g ON g.id=aga.group_id
+    WHERE aga.animal_id=animal.id AND aga.ended_at IS NULL AND g.kind='EXTERNAL') AS external_stay,
   animal_latest_birth_on(animal.id)::text AS last_birth_on,animal_latest_loss_on(animal.id)::text AS last_loss_on,
   (SELECT id FROM reproduction_pregnancy WHERE cow_id=animal.id AND status='CONFIRMED' AND animal.transferred_out_at IS NULL LIMIT 1) AS active_pregnancy_id,
   EXISTS(SELECT 1 FROM animal_parentage WHERE parent_animal_id=animal.id AND removed_at IS NULL)
@@ -76,7 +80,7 @@ function animal(row: AnimalRow) {
     initialWeightUnitCode: row.initial_weight_unit_code,
     availabilityStatusCode: row.availability_status_code, version: Number(row.version),
     classification:row.classification, brands: row.brands, activePregnancyId:row.active_pregnancy_id??null,
-    transferredOutAt:row.transferred_out_at??null,lastBirthOn:row.last_birth_on??null,lastLossOn:row.last_loss_on??null,
+    externalStay:row.external_stay??null,transferredOutAt:row.transferred_out_at??null,lastBirthOn:row.last_birth_on??null,lastLossOn:row.last_loss_on??null,
     hasReproductiveHistory:row.has_reproductive_history??false,registeredBirthDate:row.registered_birth_date??null,
     profilePhotoUrl:row.profile_photo_asset&&env.CLOUDINARY_CLOUD_NAME
       ? cloudinary.url(row.profile_photo_asset,{secure:true,cloud_name:env.CLOUDINARY_CLOUD_NAME,
@@ -435,9 +439,9 @@ export async function insertAnimalInTransaction(client:PoolClient,auth:AuthState
       if(input.groupId){
         const destination=await client.query<{location_id:string|null}>(`
           SELECT gla.location_id FROM livestock_group g
-          JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
-          JOIN physical_location pl ON pl.id=gla.location_id AND pl.active AND pl.property_id=g.property_id
-          WHERE g.id=$1 AND g.property_id=$2 AND g.active FOR SHARE OF g,pl`,
+          LEFT JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
+          LEFT JOIN physical_location pl ON pl.id=gla.location_id AND pl.active AND pl.property_id=g.property_id
+          WHERE g.id=$1 AND g.property_id=$2 AND g.active AND (g.kind='EXTERNAL' OR pl.id IS NOT NULL) FOR SHARE OF g`,
           [input.groupId,context.propertyId]);
         if(!destination.rows[0])throw invalidRequest('GROUP_UNAVAILABLE','Selecciona un grupo activo de esta propiedad con potrero o corral.');
         await client.query(`INSERT INTO animal_group_assignment(property_id,animal_id,group_id,

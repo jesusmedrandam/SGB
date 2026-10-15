@@ -265,11 +265,11 @@ export async function acceptExternalTransfer(auth:AuthState,context:PropertyCont
     const sourceContext:PropertyContext={propertyId:source.id,propertyName:request.source_name,roleId:request.source_role_id,
       roleCode:role?.code??'',roleName:role?.name??'',permissions:new Set(permissions),enabledModules:new Set(context.enabledModules),enabledSpecies:new Set(['BOVINE'])};
     await administrator(client,sourceContext,request.requested_by,request.source_role_id);
-    const group=(await client.query(`SELECT pl.kind,gla.location_id FROM livestock_group g
-      JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
-      JOIN physical_location pl ON pl.id=gla.location_id AND pl.active AND pl.property_id=g.property_id
-      WHERE g.id=$1 AND g.property_id=$2 AND g.active FOR UPDATE OF g,gla,pl`,[input.groupId,context.propertyId])).rows[0];
-    if(!group||!context.enabledModules.has(group.kind==='PASTURE'?'PASTURES':'CORRALS'))
+    const group=(await client.query(`SELECT pl.kind,g.kind AS group_kind,gla.location_id FROM livestock_group g
+      LEFT JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
+      LEFT JOIN physical_location pl ON pl.id=gla.location_id AND pl.active AND pl.property_id=g.property_id
+      WHERE g.id=$1 AND g.property_id=$2 AND g.active FOR UPDATE OF g`,[input.groupId,context.propertyId])).rows[0];
+    if(!group||group.group_kind!=='EXTERNAL'&&(!group.location_id||!context.enabledModules.has(group.kind==='PASTURE'?'PASTURES':'CORRALS')))
       throw invalidRequest('EXTERNAL_TRANSFER_GROUP_UNAVAILABLE','Elige un grupo activo con potrero o corral habilitado en esta propiedad.');
     const items=(await client.query(`SELECT source_animal_id,snapshot_digest,snapshot FROM external_animal_transfer_item WHERE transfer_id=$1 ORDER BY source_animal_id`,[id])).rows;
     const animalIds=items.map(row=>row.source_animal_id);

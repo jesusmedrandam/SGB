@@ -10,7 +10,7 @@ import type {MovementInput} from './movements.schemas.js';
 // The former system's draft -> validate -> apply flow, using SGB's immutable
 // group/location intervals and account-scoped properties.
 type QueryClient=Pick<PoolClient,'query'>;
-type Group={id:string;property_id:string;location_id:string|null;name:string};
+type Group={id:string;property_id:string;location_id:string|null;name:string;kind:'INTERNAL'|'EXTERNAL'};
 type Animal={id:string;name:string;group_id:string|null;location_id:string|null};
 type Draft={id:string;account_id:string;source_property_id:string;destination_property_id:string;
   kind:MovementInput['kind'];selection_mode:MovementInput['selectionMode'];
@@ -128,7 +128,7 @@ export async function listMovementOptions(auth:AuthState,context:PropertyContext
       JOIN effective_property_module epm ON epm.property_id=p.id AND epm.module_code='MOVEMENTS' AND epm.enabled
       WHERE p.account_id=$1 AND p.status='ACTIVE' AND p.deleted_at IS NULL
       ORDER BY p.name`,[account,auth.userId]),
-    pool.query(`SELECT g.id,g.name,g.property_id AS "propertyId",pl.id AS "locationId",
+    pool.query(`SELECT g.id,g.name,g.kind,g.external_place AS "externalPlace",g.external_contact AS "externalContact",g.property_id AS "propertyId",pl.id AS "locationId",
       pl.name AS "locationName" FROM livestock_group g
       LEFT JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
       LEFT JOIN physical_location pl ON pl.id=gla.location_id
@@ -154,7 +154,7 @@ export async function listMovementOptions(auth:AuthState,context:PropertyContext
 async function resolve(client:PoolClient,auth:AuthState,context:PropertyContext,
   input:MovementInput,accountId:string):Promise<Resolved>{
   await destinationAccess(client,auth,accountId,input.destinationPropertyId);
-  const groupRows=await client.query<Group>(`SELECT g.id,g.property_id,g.name,
+  const groupRows=await client.query<Group>(`SELECT g.id,g.property_id,g.name,g.kind,
     gla.location_id FROM livestock_group g
     LEFT JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
     WHERE g.id=ANY($1::uuid[]) AND g.account_id=$2 AND g.active
@@ -169,6 +169,8 @@ async function resolve(client:PoolClient,auth:AuthState,context:PropertyContext,
   if((input.kind==='PROPIEDAD' && !cross)
     || (input.kind==='GRUPO' || input.kind==='UBICACION') && cross)
     throw invalidRequest('MOVEMENT_PROPERTIES_INVALID','Elige propiedades diferentes para un traslado y la misma para un cambio interno.');
+  if(input.kind==='UBICACION'&&source.kind==='EXTERNAL')throw invalidRequest('GROUP_EXTERNAL_INVALID','Mueve los animales a otro grupo para regresar a un potrero o corral.');
+  if(destination.kind!=='EXTERNAL'&&!destination.location_id&&input.kind!=='UBICACION')throw invalidRequest('GROUP_LOCATION_REQUIRED','El grupo interno necesita un potrero o corral.');
   if(input.kind==='UBICACION' && (input.selectionMode!=='GRUPO' || source.id!==destination.id))
     throw invalidRequest('MOVEMENT_GROUP_REQUIRED','La rotación mueve el grupo completo, sin cambiarlo de grupo.');
   if(input.kind!=='UBICACION' && source.id===destination.id)
