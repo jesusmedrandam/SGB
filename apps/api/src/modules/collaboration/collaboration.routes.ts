@@ -15,6 +15,7 @@ import {
   invitationPreviewParamsSchema,
   membershipParamsSchema,
   membershipStatusSchema,
+  membershipRolesSchema,roleParamsSchema,updateRoleSchema,
 } from './collaboration.schemas.js';
 import {
   acceptPropertyInvitation,
@@ -23,6 +24,7 @@ import {
   getPropertyTeam,
   revokePropertyInvitation,
   updatePropertyMembershipStatus,
+  getPropertyRoles,updatePropertyRole,updatePropertyMembershipRoles,
 } from './collaboration.service.js';
 
 function metadata(request: Request): RequestMetadata {
@@ -56,6 +58,18 @@ propertyTeamRouter.use(authenticate, requirePropertyContext);
 
 propertyTeamRouter.get('/', requirePermission('MEMBERSHIP_VIEW'), asyncHandler(async (request, response) => {
   response.json({ ok: true, data: await getPropertyTeam(request.auth!, request.propertyContext!) });
+}));
+
+propertyTeamRouter.get('/roles',requirePermission('ROLE_VIEW'),asyncHandler(async(request,response)=>{
+  response.json({ok:true,data:await getPropertyRoles(request.propertyContext!)});
+}));
+propertyTeamRouter.patch('/roles/:roleId',requirePermission('ROLE_MANAGE'),asyncHandler(async(request,response)=>{
+  const {roleId}=roleParamsSchema.parse(request.params);
+  response.json({ok:true,data:await updatePropertyRole(request.auth!,request.propertyContext!,roleId,updateRoleSchema.parse(request.body),metadata(request))});
+}));
+propertyTeamRouter.patch('/members/:membershipId/roles',requirePermission('MEMBERSHIP_MANAGE'),asyncHandler(async(request,response)=>{
+  const {membershipId}=membershipParamsSchema.parse(request.params);
+  response.json({ok:true,data:await updatePropertyMembershipRoles(request.auth!,request.propertyContext!,membershipId,membershipRolesSchema.parse(request.body),metadata(request))});
 }));
 
 propertyTeamRouter.post('/invitations', requirePermission('MEMBERSHIP_MANAGE'), asyncHandler(async (request, response) => {

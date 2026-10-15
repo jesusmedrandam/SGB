@@ -67,7 +67,8 @@ async function initialContext(client: PoolClient, userId: string): Promise<Conte
        JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = pm.property_id AND pr.active
       WHERE pm.user_id = $1 AND pm.status = 'ACTIVE'
       ORDER BY
-        (p.owner_user_id = $1) DESC,
+        EXISTS(SELECT 1 FROM membership_role own_mr JOIN property_role own_pr ON own_pr.id=own_mr.role_id AND own_pr.active
+          WHERE own_mr.membership_id=pm.id AND own_pr.code='OWNER') DESC,
         CASE pr.code WHEN 'OWNER' THEN 1 WHEN 'ADMINISTRATOR' THEN 2 WHEN 'OPERATOR' THEN 3 WHEN 'VIEWER' THEN 4 ELSE 10 END,
         p.name,
         pr.name
@@ -780,13 +781,16 @@ export async function getSessionOverview(auth: AuthState) {
     property_name: string;
     timezone: string;
     is_owner: boolean;
+    is_account_owner:boolean;
     role_id: string;
     role_code: string;
     role_name: string;
     permissions: string[];
   }>(
     `SELECT p.id AS property_id, p.name AS property_name, p.timezone,
-            (p.owner_user_id = $1) AS is_owner,
+            EXISTS(SELECT 1 FROM membership_role own_mr JOIN property_role own_pr ON own_pr.id=own_mr.role_id AND own_pr.active
+              WHERE own_mr.membership_id=pm.id AND own_pr.code='OWNER') AS is_owner,
+            (p.owner_user_id=$1) AS is_account_owner,
             pr.id AS role_id, pr.code AS role_code, pr.name AS role_name,
             ARRAY(SELECT rp.permission_code FROM role_permission rp
                    WHERE rp.role_id = pr.id ORDER BY rp.permission_code) AS permissions
@@ -805,6 +809,7 @@ export async function getSessionOverview(auth: AuthState) {
     name: string;
     timezone: string;
     isOwner: boolean;
+    isAccountOwner:boolean;
     roles: Array<{ id: string; code: string; name: string; permissions: string[] }>;
     enabledModules: string[];
     enabledSpecies: string[];
@@ -817,6 +822,7 @@ export async function getSessionOverview(auth: AuthState) {
         name: row.property_name,
         timezone: row.timezone,
         isOwner: row.is_owner,
+        isAccountOwner:row.is_account_owner,
         roles: [],
         enabledModules: [],
         enabledSpecies: [],
@@ -874,7 +880,7 @@ export async function getSessionOverview(auth: AuthState) {
     supportOwner=support.owner;
     supportAccountId=support.accountId;
     properties.set(auth.activePropertyId,{id:auth.activePropertyId,name:support.context.propertyName,
-      timezone:support.timezone,isOwner:support.owner.id===auth.userId,
+      timezone:support.timezone,isOwner:support.owner.id===auth.userId,isAccountOwner:support.owner.id===auth.userId,
       roles:[{id:support.context.roleId,code:support.context.roleCode,name:support.context.roleName,permissions:[...support.context.permissions]}],
       enabledModules:[...support.context.enabledModules],enabledSpecies:[...support.context.enabledSpecies]});
   }
