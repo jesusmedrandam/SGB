@@ -104,7 +104,12 @@ async function visibleExternalDestinations(client:PoolClient,auth:AuthState,cont
   const result=await client.query<{id:string;name:string;ownerName:string}>(`SELECT p.id,p.name,u.display_name AS "ownerName" FROM property p
     JOIN administrative_account a ON a.id=p.account_id AND a.status='ACTIVE'
     JOIN app_user u ON u.id=a.owner_user_id AND u.deleted_at IS NULL
-    WHERE (u.email=$1::citext OR p.id=$2::uuid) AND p.account_id<>$3 AND p.status='ACTIVE' AND p.deleted_at IS NULL
+    WHERE (p.id=$2::uuid OR EXISTS(SELECT 1 FROM property_membership opm
+      JOIN membership_role omr ON omr.membership_id=opm.id AND omr.property_id=opm.property_id
+      JOIN property_role opr ON opr.id=omr.role_id AND opr.property_id=opm.property_id AND opr.active AND opr.code='OWNER'
+      JOIN app_user ou ON ou.id=opm.user_id AND ou.status='ACTIVE' AND ou.deleted_at IS NULL
+      WHERE opm.property_id=p.id AND opm.status='ACTIVE' AND ou.email=$1::citext))
+    AND p.account_id<>$3 AND p.status='ACTIVE' AND p.deleted_at IS NULL
     AND EXISTS(SELECT 1 FROM effective_property_module WHERE property_id=p.id AND module_code='MOVEMENTS' AND enabled)
     AND EXISTS(SELECT 1 FROM effective_property_species WHERE property_id=p.id AND species_code='BOVINE' AND enabled)
     AND (p.external_transfer_visibility='PUBLIC' AND (p.external_transfer_visible_until IS NULL OR p.external_transfer_visible_until>now())
@@ -112,7 +117,11 @@ async function visibleExternalDestinations(client:PoolClient,auth:AuthState,cont
         SELECT 1 FROM property_membership pm JOIN property_membership owner_membership ON owner_membership.property_id=pm.property_id
         JOIN property cp ON cp.id=pm.property_id AND cp.status='ACTIVE' AND cp.deleted_at IS NULL
         JOIN administrative_account ca ON ca.id=cp.account_id AND ca.status='ACTIVE'
-        WHERE pm.status='ACTIVE' AND pm.user_id=$4 AND owner_membership.status='ACTIVE' AND owner_membership.user_id=a.owner_user_id
+        WHERE pm.status='ACTIVE' AND pm.user_id=$4 AND owner_membership.status='ACTIVE'
+        AND EXISTS(SELECT 1 FROM property_membership opm
+          JOIN membership_role omr ON omr.membership_id=opm.id AND omr.property_id=opm.property_id
+          JOIN property_role opr ON opr.id=omr.role_id AND opr.property_id=opm.property_id AND opr.active AND opr.code='OWNER'
+          WHERE opm.property_id=p.id AND opm.status='ACTIVE' AND opm.user_id=owner_membership.user_id)
         AND EXISTS(SELECT 1 FROM membership_role mr JOIN property_role pr ON pr.id=mr.role_id AND pr.active WHERE mr.membership_id=pm.id)
         AND EXISTS(SELECT 1 FROM membership_role mr JOIN property_role pr ON pr.id=mr.role_id AND pr.active WHERE mr.membership_id=owner_membership.id)))
     ORDER BY lower(p.name),p.id`,[email,id,source.account_id,auth.userId]);

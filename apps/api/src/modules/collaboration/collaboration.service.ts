@@ -8,6 +8,8 @@ import { sendPropertyInvitationEmail } from '../../services/email.service.js';
 import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.types.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type { CreateInvitationInput } from './collaboration.schemas.js';
+import type {z} from 'zod';
+import type {membershipRolesSchema,updateRoleSchema} from './collaboration.schemas.js';
 
 interface InvitationRow extends QueryResultRow {
   id: string;
@@ -26,6 +28,19 @@ interface InvitationRow extends QueryResultRow {
 }
 
 const notFound = (message: string) => new ApiError(404, 'NOT_FOUND', message);
+
+async function ownerGrant(client:PoolClient,userId:string,propertyId:string,roleId:string|null=null){
+  return (await client.query(`SELECT 1 FROM property_membership pm
+    JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=pm.property_id
+    JOIN property_role pr ON pr.id=mr.role_id AND pr.property_id=pm.property_id
+    WHERE pm.user_id=$1 AND pm.property_id=$2 AND pm.status='ACTIVE' AND ($3::uuid IS NULL OR pr.id=$3) AND pr.active AND pr.code='OWNER'
+    FOR SHARE OF pm,pr`,[userId,propertyId,roleId])).rowCount;
+}
+async function requireOwner(client:PoolClient,auth:AuthState,context:PropertyContext){
+  if(await superadminPropertyAccess(client,auth,context))return;
+  if(!await ownerGrant(client,auth.userId,context.propertyId,context.roleId))
+    throw forbidden('PROPERTY_OWNER_REQUIRED','Esta operación requiere el rol de propietario de esta propiedad.');
+}
 
 async function audit(client: PoolClient, input: {
   auth: AuthState;
@@ -117,11 +132,12 @@ export async function getPropertyTeam(auth: AuthState, context: PropertyContext)
   const [members, invitations, roles, quota] = await Promise.all([
     pool.query<{
       id: string; user_id: string; display_name: string; email: string; status: string;
-      job_title: string | null; joined_at: Date | null; is_owner: boolean; roles: unknown;
+      job_title: string | null; joined_at: Date | null; is_owner: boolean; is_primary_owner:boolean; roles: unknown;
       pay_amount: string | null; pay_currency: string | null; pay_frequency: string | null;
     }>(
       `SELECT pm.id, u.id AS user_id, u.display_name, u.email::text, pm.status,
-              pm.job_title, pm.joined_at, (p.owner_user_id = u.id) AS is_owner,
+              pm.job_title, pm.joined_at, bool_or(pr.code='OWNER' AND pr.active) AS is_owner,
+              (p.owner_user_id=u.id) AS is_primary_owner,
               coalesce(jsonb_agg(jsonb_build_object('id', pr.id, 'code', pr.code, 'name', pr.name)
                 ORDER BY pr.name) FILTER (WHERE pr.id IS NOT NULL), '[]'::jsonb) AS roles,
               et.amount::text AS pay_amount, et.currency AS pay_currency, et.frequency AS pay_frequency
@@ -153,8 +169,8 @@ export async function getPropertyTeam(auth: AuthState, context: PropertyContext)
     pool.query<{ id: string; code: string; name: string; description: string | null }>(
       `SELECT id, code, name, description
          FROM property_role
-        WHERE property_id = $1 AND active AND code <> 'OWNER'
-          AND ($2::boolean OR code <> 'ADMINISTRATOR')
+        WHERE property_id = $1 AND active
+          AND ($2::boolean OR code NOT IN ('OWNER','ADMINISTRATOR'))
         ORDER BY name`,
       [context.propertyId, context.roleCode === 'OWNER' || Boolean(context.isSuperadmin)],
     ),
@@ -170,6 +186,7 @@ export async function getPropertyTeam(auth: AuthState, context: PropertyContext)
 
   return {
     canManage,
+    canManageOwners:canManage&&(context.roleCode==='OWNER'||Boolean(context.isSuperadmin)),
     members: members.rows.map((member) => ({
       id: member.id,
       userId: member.user_id,
@@ -179,6 +196,7 @@ export async function getPropertyTeam(auth: AuthState, context: PropertyContext)
       jobTitle: member.job_title,
       joinedAt: member.joined_at?.toISOString() ?? null,
       isOwner: member.is_owner,
+      isPrimaryOwner:member.is_primary_owner,
       isSelf: member.user_id === auth.userId,
       roles: member.roles,
       payment: !canManage || member.pay_amount === null ? null : {
@@ -231,12 +249,7 @@ export async function createPropertyInvitation(
     if (selectedRoles.rowCount !== input.roleIds.length) {
       throw new ApiError(400, 'INVALID_ROLES', 'Uno o más roles no pertenecen a la propiedad.');
     }
-    if (selectedRoles.rows.some((role) => role.code === 'OWNER')) {
-      throw forbidden('OWNER_ROLE_PROTECTED', 'El rol de propietario no puede asignarse mediante invitación.');
-    }
-    if (selectedRoles.rows.some((role) => role.code === 'ADMINISTRATOR') && property.owner_user_id !== auth.userId && !Boolean(context.isSuperadmin)) {
-      throw forbidden('ADMIN_ROLE_OWNER_ONLY', 'Solo el propietario puede nombrar administradores.');
-    }
+    if(selectedRoles.rows.some(role=>['OWNER','ADMINISTRATOR'].includes(role.code)))await requireOwner(client,auth,context);
 
     const currentMember = await client.query(
       `SELECT 1 FROM property_membership pm
@@ -344,6 +357,9 @@ export async function revokePropertyInvitation(
   metadata: RequestMetadata,
 ) {
   return inTransaction(async (client) => {
+    if((await client.query(`SELECT 1 FROM invitation_role ir JOIN property_role pr ON pr.id=ir.role_id
+      WHERE ir.invitation_id=$1 AND ir.property_id=$2 AND pr.code IN ('OWNER','ADMINISTRATOR')`,[invitationId,context.propertyId])).rowCount)
+      await requireOwner(client,auth,context);
     const result = await client.query<{ email: string }>(
       `UPDATE property_invitation SET status = 'REVOKED'
         WHERE id = $1 AND property_id = $2 AND status = 'PENDING'
@@ -369,9 +385,11 @@ export async function updatePropertyMembershipStatus(
 ) {
   return inTransaction(async (client) => {
     const result = await client.query<{
-      user_id: string; status: string; is_owner: boolean; is_administrator: boolean;
+      user_id: string; status: string; is_owner: boolean; is_primary_owner:boolean; is_administrator: boolean;
     }>(
-      `SELECT pm.user_id, pm.status, (p.owner_user_id = pm.user_id) AS is_owner,
+      `SELECT pm.user_id, pm.status, (p.owner_user_id = pm.user_id) AS is_primary_owner,
+              EXISTS(SELECT 1 FROM membership_role mr JOIN property_role pr ON pr.id=mr.role_id
+                WHERE mr.membership_id=pm.id AND pr.code='OWNER') AS is_owner,
               EXISTS(SELECT 1 FROM membership_role mr JOIN property_role pr ON pr.id = mr.role_id
                 WHERE mr.membership_id = pm.id AND pr.code = 'ADMINISTRATOR') AS is_administrator
          FROM property_membership pm
@@ -382,13 +400,11 @@ export async function updatePropertyMembershipStatus(
     );
     const member = result.rows[0];
     if (!member) throw notFound('El colaborador no existe.');
-    if (member.is_owner) throw forbidden('OWNER_MEMBERSHIP_PROTECTED', 'El acceso del propietario no puede modificarse aquí.');
+    if (member.is_primary_owner) throw forbidden('OWNER_MEMBERSHIP_PROTECTED', 'El acceso del propietario principal no puede modificarse aquí.');
     if (member.user_id === auth.userId) {
       throw forbidden('SELF_MEMBERSHIP_PROTECTED', 'No puedes suspender ni finalizar tu propio acceso.');
     }
-    if (member.is_administrator && context.roleCode !== 'OWNER' && !Boolean(context.isSuperadmin)) {
-      throw forbidden('ADMIN_MEMBERSHIP_OWNER_ONLY', 'Solo el propietario puede modificar a un administrador.');
-    }
+    if(member.is_owner||member.is_administrator)await requireOwner(client,auth,context);
     if (member.status === 'ENDED' && status !== 'ENDED') {
       throw conflict('MEMBERSHIP_ENDED', 'Una membresía finalizada debe crearse nuevamente mediante invitación.');
     }
@@ -423,6 +439,64 @@ export async function updatePropertyMembershipStatus(
   });
 }
 
+export async function getPropertyRoles(context:PropertyContext){
+  const [roles,permissions]=await Promise.all([
+    pool.query(`SELECT pr.id,pr.code,pr.name,pr.description,pr.version,
+      ARRAY(SELECT permission_code FROM role_permission WHERE role_id=pr.id ORDER BY permission_code) AS permissions
+      FROM property_role pr WHERE pr.property_id=$1 AND pr.active ORDER BY pr.code='OWNER' DESC,pr.name`,[context.propertyId]),
+    pool.query('SELECT code,name,module_code AS "moduleCode" FROM permission_catalog ORDER BY module_code,name'),
+  ]);
+  return {roles:roles.rows,permissions:permissions.rows,canManage:context.roleCode==='OWNER'||Boolean(context.isSuperadmin)};
+}
+
+export async function updatePropertyRole(auth:AuthState,context:PropertyContext,roleId:string,
+  input:z.infer<typeof updateRoleSchema>,metadata:RequestMetadata){
+  return inTransaction(async client=>{
+    await requireOwner(client,auth,context);
+    const before=(await client.query('SELECT * FROM property_role WHERE id=$1 AND property_id=$2 AND active FOR UPDATE',
+      [roleId,context.propertyId])).rows[0];
+    if(!before)throw notFound('El rol no pertenece a esta propiedad.');
+    if(before.code==='OWNER')throw forbidden('OWNER_ROLE_PROTECTED','El rol de propietario conserva todos sus permisos.');
+    if(before.version!==input.expectedVersion)throw conflict('ROLE_CHANGED','El rol cambió. Recarga sus permisos antes de guardar.');
+    const valid=await client.query('SELECT code FROM permission_catalog WHERE code=ANY($1::varchar[])',[input.permissions]);
+    if(valid.rowCount!==input.permissions.length)throw new ApiError(400,'INVALID_PERMISSIONS','Uno o más permisos no existen.');
+    const previous=(await client.query('SELECT permission_code FROM role_permission WHERE role_id=$1 ORDER BY permission_code',[roleId])).rows.map(row=>row.permission_code);
+    await client.query('UPDATE property_role SET name=$2,description=$3,version=version+1 WHERE id=$1',[roleId,input.name,input.description]);
+    await client.query('DELETE FROM role_permission WHERE role_id=$1',[roleId]);
+    await client.query('INSERT INTO role_permission(role_id,permission_code) SELECT $1,unnest($2::varchar[])',[roleId,input.permissions]);
+    await audit(client,{auth,context,metadata,action:'PROPERTY_ROLE_UPDATED',entityType:'PROPERTY_ROLE',entityId:roleId,
+      beforeData:{name:before.name,description:before.description,permissions:previous},afterData:input});
+    return {id:roleId,version:before.version+1};
+  });
+}
+
+export async function updatePropertyMembershipRoles(auth:AuthState,context:PropertyContext,membershipId:string,
+  input:z.infer<typeof membershipRolesSchema>,metadata:RequestMetadata){
+  return inTransaction(async client=>{
+    await requireOwner(client,auth,context);
+    const member=(await client.query(`SELECT pm.user_id,pm.status,p.owner_user_id=pm.user_id AS primary_owner
+      FROM property_membership pm JOIN property p ON p.id=pm.property_id
+      WHERE pm.id=$1 AND pm.property_id=$2 FOR UPDATE OF pm`,[membershipId,context.propertyId])).rows[0];
+    if(!member||member.status==='ENDED')throw notFound('La persona ya no tiene acceso a esta propiedad.');
+    if(member.user_id===auth.userId)throw forbidden('SELF_MEMBERSHIP_PROTECTED','Pide a otro propietario que cambie tus roles.');
+    const previous=(await client.query('SELECT role_id FROM membership_role WHERE membership_id=$1 ORDER BY role_id',[membershipId])).rows.map(row=>row.role_id as string);
+    if(previous.join(',')!==[...input.expectedRoleIds].sort().join(','))throw conflict('MEMBERSHIP_ROLES_CHANGED','Los roles cambiaron. Recarga la lista antes de guardar.');
+    const roles=(await client.query('SELECT id,code FROM property_role WHERE property_id=$1 AND id=ANY($2::uuid[]) AND active FOR SHARE',
+      [context.propertyId,input.roleIds])).rows;
+    if(roles.length!==input.roleIds.length)throw new ApiError(400,'INVALID_ROLES','Uno o más roles no pertenecen a la propiedad.');
+    if(member.primary_owner&&!roles.some(role=>role.code==='OWNER'))throw forbidden('OWNER_MEMBERSHIP_PROTECTED','El propietario principal debe conservar su rol de dueño.');
+    await client.query(`UPDATE user_session SET active_property_id=NULL,active_role_id=NULL
+      WHERE user_id=$1 AND active_property_id=$2 AND NOT(active_role_id=ANY($3::uuid[])) AND revoked_at IS NULL`,
+      [member.user_id,context.propertyId,input.roleIds]);
+    await client.query('DELETE FROM membership_role WHERE membership_id=$1 AND NOT(role_id=ANY($2::uuid[]))',[membershipId,input.roleIds]);
+    await client.query(`INSERT INTO membership_role(membership_id,property_id,role_id,assigned_by)
+      SELECT $1,$2,unnest($3::uuid[]),$4 ON CONFLICT DO NOTHING`,[membershipId,context.propertyId,input.roleIds,auth.userId]);
+    await audit(client,{auth,context,metadata,action:'PROPERTY_MEMBER_ROLES_UPDATED',entityType:'PROPERTY_MEMBERSHIP',entityId:membershipId,
+      beforeData:{roleIds:previous},afterData:{roleIds:input.roleIds}});
+    return {roleIds:input.roleIds};
+  });
+}
+
 export async function acceptPropertyInvitation(
   auth: AuthState,
   token: string,
@@ -452,6 +526,12 @@ export async function acceptPropertyInvitation(
     }
     const roles = await invitationRoles(client, invitation.id);
     if (!roles.length) throw conflict('INVITATION_WITHOUT_ROLES', 'La invitación no tiene roles disponibles.');
+    if(roles.some(role=>['OWNER','ADMINISTRATOR'].includes(role.code))){
+      const inviter=(await client.query(`SELECT u.id,u.is_superadmin FROM property_invitation pi JOIN app_user u ON u.id=pi.invited_by
+        WHERE pi.id=$1 AND u.status='ACTIVE' AND u.deleted_at IS NULL FOR SHARE OF u`,[invitation.id])).rows[0];
+      if(!inviter||!inviter.is_superadmin&&!await ownerGrant(client,inviter.id,invitation.property_id))
+        throw forbidden('INVITATION_AUTHORITY_REVOKED','Quien te invitó ya no tiene permiso para conceder este rol. Solicita una nueva invitación.');
+    }
 
     const existing = await client.query<{ id: string; status: string }>(
       `SELECT id, status FROM property_membership

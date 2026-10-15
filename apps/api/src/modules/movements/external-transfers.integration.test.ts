@@ -44,7 +44,7 @@ test('traslado externo: consentimiento, privacidad, revisión, archivo, fotos y 
   const settings=await setExternalTransferSettings(b.auth,b.context,true,metadata);assert.ok(settings.receiveCode);
   assert.equal((await lookupExternalDestination(a.auth,a.context,settings.receiveCode!)).id,b.context.propertyId);
   await assert.rejects(()=>lookupExternalDestination(a.auth,a.context,randomUUID()),fails('EXTERNAL_DESTINATION_UNAVAILABLE'));
-  const mother=await createAnimal(a.auth,a.context,{name:'Madre compartida',sex:'FEMALE',speciesCode:'BOVINE',groupId:a.group.id,owners:a.owners},metadata);
+  const mother=await createAnimal(a.auth,a.context,{name:'Madre compartida',earTagCode:'RETORNO-1',sex:'FEMALE',speciesCode:'BOVINE',groupId:a.group.id,owners:a.owners},metadata);
   const pregnant=await createAnimal(a.auth,a.context,{name:'Preñada compartida',sex:'FEMALE',speciesCode:'BOVINE',groupId:a.group.id,owners:a.owners},metadata);
   assert.equal((await pool.query('SELECT valid_from::text FROM animal_ownership WHERE animal_id=$1',[mother.id])).rows[0].valid_from,today(),'Initial ownership follows the property calendar, not the database calendar');
   await setAnimalOwners(a.auth,a.context,pregnant.id,a.owners,pregnant.version,metadata);
@@ -150,6 +150,9 @@ test('traslado externo: consentimiento, privacidad, revisión, archivo, fotos y 
   const back=await createExternalTransfer(b.auth,b.context,{receiveCode:originCode,animalIds:[receivedId],movementOn:today(),reason:'Regreso aprobado'},metadata);
   const returned=await acceptExternalTransfer(a.auth,a.context,back.id,{expectedVersion:back.version,groupId:a.group.id},metadata);
   const returnedId=returned.animals[0]!.destinationAnimalId!;
+  assert.equal((await getAnimal(a.context,returnedId)).earTagCode,'RETORNO-1','Returning to the original property preserves the ear tag');
+  assert.equal((await getAnimal(a.context,mother.id)).earTagCode,'RETORNO-1','The previous stay remains an immutable archive');
+  await assert.rejects(()=>createAnimal(a.auth,a.context,{name:'Arete ocupado',earTagCode:'retorno-1',sex:'FEMALE',speciesCode:'BOVINE',groupId:a.group.id,owners:a.owners},metadata),fails('ANIMAL_TAG_TAKEN'));
   assert.equal((await getAnimal(a.context,returnedId)).classification?.code,'VACA');
   assert.equal((await getAnimal(b.context,receivedId)).availabilityStatusCode,'INACTIVE');
   const previous=await getReceivedAnimalHistory(a.context,returnedId);
@@ -158,5 +161,12 @@ test('traslado externo: consentimiento, privacidad, revisión, archivo, fotos y 
   assert.equal(previous!.history.filter(event=>event.id.startsWith('MILK_PRODUCTION:')).length,3,'A second transfer carries both old milk records and the new one');
   assert.equal(previous!.history.filter(event=>event.id.startsWith('HEALTH_CAMPAIGN:')).length,2,'Old and new treatments both survive a repeated transfer');
   assert.ok((await listMedia(a.context)).some(photo=>photo.entity_id===returnedId));
+  const again=await createExternalTransfer(a.auth,a.context,{...input,animalIds:[returnedId]},metadata);
+  const receivedAgain=await acceptExternalTransfer(b.auth,b.context,again.id,{expectedVersion:again.version,groupId:b.group.id},metadata);
+  const againId=receivedAgain.animals[0]!.destinationAnimalId!;
+  assert.equal((await getAnimal(b.context,againId)).earTagCode,'RETORNO-1');
+  const currentIdentity=(await pool.query('SELECT identity_id FROM animal WHERE id=$1',[againId])).rows[0].identity_id;
+  assert.equal((await pool.query('SELECT count(*)::int AS n FROM animal WHERE identity_id=$1 AND transferred_out_at IS NULL',[currentIdentity])).rows[0].n,1);
+  assert.equal((await getReceivedAnimalHistory(b.context,againId))!.history.filter(event=>event.id.startsWith('MILK_PRODUCTION:')).length,3);
  }finally{await pool.end();}
 });

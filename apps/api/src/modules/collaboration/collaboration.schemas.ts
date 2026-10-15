@@ -28,5 +28,11 @@ export const createInvitationSchema = z.object({
 export const invitationParamsSchema = z.object({ invitationId: z.uuid() });
 export const membershipParamsSchema = z.object({ membershipId: z.uuid() });
 export const membershipStatusSchema = z.object({ status: z.enum(['ACTIVE', 'SUSPENDED', 'ENDED']) });
+const roleIds=z.array(z.uuid()).min(1).max(4).transform(values=>[...new Set(values)]);
+export const membershipRolesSchema=z.object({roleIds,expectedRoleIds:roleIds});
+export const roleParamsSchema=z.object({roleId:z.uuid()});
+export const updateRoleSchema=z.object({name:z.string().trim().min(2).max(120),
+  description:z.string().trim().max(2000).nullable(),permissions:z.array(z.string().trim().min(1).max(100)).max(150)
+    .transform(values=>[...new Set(values)]),expectedVersion:z.number().int().positive()});
 
 export type CreateInvitationInput = z.infer<typeof createInvitationSchema>;
