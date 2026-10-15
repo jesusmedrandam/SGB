@@ -119,12 +119,13 @@ export async function setAnimalOwners(auth: AuthState, context: PropertyContext,
        AND active AND deleted_at IS NULL FOR SHARE`, [owners.map((owner) => owner.partyId), accountId]);
     if (parties.rows.length !== owners.length) throw invalidRequest('OWNER_UNAVAILABLE', 'Selecciona propietarios activos de esta cuenta.');
     const before = await readAnimal(client, context, animalId);
-    await client.query(`UPDATE animal_ownership SET valid_until = current_date
-      WHERE animal_id = $1 AND valid_until IS NULL`, [animalId]);
+    const today=(await client.query<{today:string}>(`SELECT (now() AT TIME ZONE timezone)::date::text AS today FROM property WHERE id=$1`,[context.propertyId])).rows[0]!.today;
+    await client.query(`UPDATE animal_ownership SET valid_until = GREATEST(valid_from,$2::date)
+      WHERE animal_id = $1 AND valid_until IS NULL`, [animalId,today]);
     for (const owner of owners) await client.query(
       `INSERT INTO animal_ownership(property_id, account_id, animal_id, party_id,
-         ownership_percent, is_primary, created_by) VALUES($1,$2,$3,$4,$5,$6,$7)`,
-      [context.propertyId, accountId, animalId, owner.partyId, owner.percent, owner.isPrimary, auth.userId]);
+         ownership_percent, is_primary, created_by, valid_from) VALUES($1,$2,$3,$4,$5,$6,$7,$8::date)`,
+      [context.propertyId, accountId, animalId, owner.partyId, owner.percent, owner.isPrimary, auth.userId,today]);
     await client.query('UPDATE animal SET updated_by = $2 WHERE id = $1', [animalId, auth.userId]);
     const after = await readAnimal(client, context, animalId);
     await audit(client, auth, context, metadata, 'ANIMAL_OWNERS_UPDATED', 'ANIMAL', animalId, before, after);

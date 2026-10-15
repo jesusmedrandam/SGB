@@ -368,8 +368,10 @@ export async function getReceivedAnimalHistory(context:PropertyContext,id:string
       JOIN animal a ON a.id=h.animal_id JOIN external_animal_transfer t ON t.id=h.transfer_id
       JOIN property p ON p.id=t.source_property_id WHERE h.animal_id=$1 AND a.property_id=$2 AND a.record_status='CURRENT'`,[id,context.propertyId])).rows[0];
     if(!row)return null;
-    return {sourcePropertyName:row.sourcePropertyName,receivedAt:row.received_at,sourceProfile:visibleAnimalSnapshot(row.snapshot as AnimalTransferSnapshot,context).profile,
-      history:visibleAnimalSnapshot(row.snapshot as AnimalTransferSnapshot,context).history};
+    const snapshot=row.snapshot as AnimalTransferSnapshot;const visible=visibleAnimalSnapshot(snapshot,context);
+    const visibleIds=new Set(visible.history.map(event=>event.id));
+    return {sourcePropertyName:row.sourcePropertyName,receivedAt:row.received_at,sourceProfile:visible.profile,history:visible.history,
+      copies:Object.fromEntries(Object.entries(snapshot.copies??{}).filter(([,sourceId])=>visibleIds.has(sourceId)))};
   });
 }
 async function lockedRequest(client:PoolClient,context:PropertyContext,id:string,version:number){
