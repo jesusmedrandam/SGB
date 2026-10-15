@@ -466,9 +466,9 @@ export async function insertAnimalInTransaction(client:PoolClient,auth:AuthState
           throw invalidRequest('OWNER_UNAVAILABLE', 'Selecciona propietarios activos de esta cuenta.');
         for (const owner of input.owners) await client.query(
           `INSERT INTO animal_ownership(property_id, account_id, animal_id, party_id,
-            ownership_percent, is_primary, created_by) VALUES($1,$2,$3,$4,$5,$6,$7)`,
+            ownership_percent, is_primary, created_by, valid_from) VALUES($1,$2,$3,$4,$5,$6,$7,$8::date)`,
           [context.propertyId, accountId, result.rows[0]!.id, owner.partyId,
-            owner.percent, owner.isPrimary, auth.userId]);
+            owner.percent, owner.isPrimary, auth.userId,today]);
       }
       const created = await readAnimal(client, context, result.rows[0]!.id);
       await client.query(

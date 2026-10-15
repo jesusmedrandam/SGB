@@ -67,7 +67,8 @@ export async function captureAnimal(client:PoolClient,context:PropertyContext,id
     WHERE a.animal_id=$1 AND (m.source_property_id=$2 OR m.destination_property_id=$2) AND m.status='COMPLETADO' ORDER BY m.id`,[id,context.propertyId])).rows;
   for(const row of movements)add('MOVEMENTS','LIVESTOCK_MOVEMENT',row,'Movimiento',row.movement_on,row.notes,
     [row.reason,`${row.source_name} → ${row.destination_name}`,`${row.source_group} → ${row.destination_group}`]);
-  const events=(await client.query('SELECT *,occurred_at::text FROM animal_status_event WHERE property_id=$1 AND animal_id=$2 ORDER BY id',[context.propertyId,id])).rows;
+  const events=(await client.query(`SELECT e.*,(e.occurred_at AT TIME ZONE p.timezone)::date::text AS occurred_at
+    FROM animal_status_event e JOIN property p ON p.id=e.property_id WHERE e.property_id=$1 AND e.animal_id=$2 ORDER BY e.id`,[context.propertyId,id])).rows;
   for(const row of events)add('CORE','ANIMAL_STATUS',row,({REPORT_MISSING:'Desaparición',MARK_FOUND:'Recuperación',RECORD_DEATH:'Fallecimiento',RECORD_EXIT:'Salida',EXTERNAL_TRANSFER:'Traslado externo'} as Record<string,string>)[row.action_code]??'Cambio de estado',row.occurred_at,row.reason,[]);
   const ownership=(await client.query(`SELECT o.id,o.valid_from::text,o.valid_until::text,o.ownership_percent,p.display_name
     FROM animal_ownership o JOIN property_party p ON p.id=o.party_id WHERE o.animal_id=$1 ORDER BY o.id`,[id])).rows;

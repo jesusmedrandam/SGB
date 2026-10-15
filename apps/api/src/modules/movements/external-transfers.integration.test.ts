@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import test from 'node:test';
 import {pool} from '../../database/pool.js';
+import {inTransaction} from '../../database/transaction.js';
+import {captureAnimal} from './external-transfers.history.js';
 import {register,login,getSessionOverview,resendEmailVerification,verifyEmail} from '../auth/auth.service.js';
 import {createAnimal,getAnimal} from '../animals/animals.service.js';
-import {createOwner} from '../animals/owners.service.js';
+import {createOwner,setAnimalOwners} from '../animals/owners.service.js';
 import {createGroup,createLocation} from '../groups/groups.service.js';
 import {createHeat,createPregnancy,recordBirth,listReproduction} from '../reproduction/reproduction.service.js';
 import {createLactation,listProduction,recordMilk} from '../production/production.service.js';
@@ -44,6 +46,9 @@ test('traslado externo: consentimiento, privacidad, revisión, archivo, fotos y 
   await assert.rejects(()=>lookupExternalDestination(a.auth,a.context,randomUUID()),fails('EXTERNAL_DESTINATION_UNAVAILABLE'));
   const mother=await createAnimal(a.auth,a.context,{name:'Madre compartida',sex:'FEMALE',speciesCode:'BOVINE',groupId:a.group.id,owners:a.owners},metadata);
   const pregnant=await createAnimal(a.auth,a.context,{name:'Preñada compartida',sex:'FEMALE',speciesCode:'BOVINE',groupId:a.group.id,owners:a.owners},metadata);
+  assert.equal((await pool.query('SELECT valid_from::text FROM animal_ownership WHERE animal_id=$1',[mother.id])).rows[0].valid_from,today(),'Initial ownership follows the property calendar, not the database calendar');
+  await setAnimalOwners(a.auth,a.context,pregnant.id,a.owners,pregnant.version,metadata);
+  assert.ok((await pool.query('SELECT valid_from::text,valid_until::text FROM animal_ownership WHERE animal_id=$1',[pregnant.id])).rows.every(row=>row.valid_from===today()&&(!row.valid_until||row.valid_until===today())),'Ownership replacements use the same property calendar');
   const unrelated=await createAnimal(a.auth,a.context,{name:'Animal privado',sex:'MALE',speciesCode:'BOVINE',groupId:a.group.id},metadata);
   const oldPreg=await createPregnancy(a.auth,a.context,{cowId:mother.id,confirmedOn:'2026-08-01',conceptionMethod:'UNKNOWN',confirmationMethod:'OBSERVATION',useLastHeat:false},metadata);
   const birth=await recordBirth(a.auth,a.context,{pregnancyId:oldPreg.id,occurredOn:'2026-09-01',calves:[{name:'Cría',sex:'FEMALE',groupId:a.group.id}],stillbornCount:0,notes:'Parto compartido'},metadata);
@@ -93,6 +98,11 @@ test('traslado externo: consentimiento, privacidad, revisión, archivo, fotos y 
   const receivedId=accepted.animals.find(row=>row.sourceAnimalId===mother.id)!.destinationAnimalId!;
   const receivedPregId=accepted.animals.find(row=>row.sourceAnimalId===pregnant.id)!.destinationAnimalId!;
   assert.equal((await getAnimal(a.context,mother.id)).availabilityStatusCode,'INACTIVE');
+  for(const timezone of ['Pacific/Kiritimati','Pacific/Pago_Pago'])await inTransaction(async client=>{
+    await client.query("SELECT set_config('TimeZone',$1,true)",[timezone]);
+    const snapshot=await captureAnimal(client,a.context,mother.id);
+    assert.equal(snapshot.history.find(event=>event.id.startsWith('ANIMAL_STATUS:'))!.date,today(),'Status history uses the property date regardless of the database session timezone');
+  });
   const received=await getAnimal(b.context,receivedId);assert.equal(received.group?.id,b.group.id);assert.equal(received.classification?.code,'VACA');
   assert.equal(received.lastBirthOn,'2026-09-01');
   assert.equal(received.owners[0]?.percent,100);assert.equal(received.owners[0]?.name,mother.owners[0]?.name);
