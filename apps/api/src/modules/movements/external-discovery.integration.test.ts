@@ -4,7 +4,8 @@ import test from 'node:test';
 import {pool} from '../../database/pool.js';
 import {register,login,getSessionOverview,resendEmailVerification,verifyEmail} from '../auth/auth.service.js';
 import {createAccountProperty} from '../properties/properties.service.js';
-import {createAnimal,getAnimal} from '../animals/animals.service.js';
+import {createAnimal,getAnimal,listAnimals} from '../animals/animals.service.js';
+import {getAnimalSummary} from '../animals/classification.service.js';
 import {createGroup,createLocation} from '../groups/groups.service.js';
 import {applyMovement,createMovement,listMovementOptions} from './movements.service.js';
 import {getExternalTransferSettings,setExternalTransferSettings,setExternalTransferVisibility,searchExternalDestinations,
@@ -78,7 +79,12 @@ test('correo, visibilidad temporal, colaboradores compartidos y administradores 
   assert.equal(externalVisibilitySchema.safeParse({visibility:'HIDDEN',durationDays:2}).success,false);
   assert.equal(externalVisibilitySchema.safeParse({visibility:'PUBLIC',durationDays:0}).success,false);
   assert.equal(externalTransferSchema.safeParse({destinationPropertyId:b.context.propertyId,animalIds:[],movementOn:today(),reason:'Traslado'}).success,false);
-  const animal=await createAnimal(a.auth,a.context,{name:'Animal a recibir',sex:'FEMALE',speciesCode:'BOVINE',groupId:a.group.id},metadata);
+  const animal=await createAnimal(c.auth,sourceAdmin,{name:'Animal a recibir',sex:'FEMALE',speciesCode:'BOVINE',groupId:a.group.id},metadata);
+  for(let n=0;n<11;n++)await createAnimal(c.auth,sourceAdmin,{name:`Inventario ${n}`,sex:'FEMALE',speciesCode:'BOVINE',groupId:a.group.id},metadata);
+  for(const context of [sourceAdmin,a.context]){
+    const inventory=await listAnimals(context,{page:1,search:''});assert.equal(inventory.items.length,12);assert.equal(inventory.total,12);
+    assert.equal((await getAnimalSummary(context)).total,12,'Owner and administrator see every animal created by the administrator');
+  }
   const input={destinationPropertyId:b.context.propertyId,animalIds:[animal.id],movementOn:today(),reason:'Traslado por correo'};
   await setExternalTransferVisibility(b.auth,b.context,{visibility:'PUBLIC',durationDays:1},metadata);
   await pool.query("UPDATE property SET external_transfer_visible_until=now()-interval '1 minute' WHERE id=$1",[b.context.propertyId]);
@@ -96,6 +102,11 @@ test('correo, visibilidad temporal, colaboradores compartidos y administradores 
   const accepted=await acceptExternalTransfer(a.auth,receiverAdmin,pending.id,{expectedVersion:pending.version,groupId:b.group.id},metadata);
   assert.equal(accepted.status,'ACCEPTED','A receiver administrator can approve an existing request after hiding discovery');
   assert.equal((await getAnimal(a.context,animal.id)).availabilityStatusCode,'INACTIVE');
+  for(const context of [sourceAdmin,a.context]){
+    const inventory=await listAnimals(context,{page:1,search:''});assert.equal(inventory.total,12);
+    assert.equal(inventory.items.find(row=>row.id===animal.id)!.availabilityStatusCode,'INACTIVE');
+    assert.equal((await listAnimals(context,{page:1,search:'',status:'ACTIVE'})).total,11);
+  }
   const internalProperty=await createAccountProperty(a.auth,a.context,'Destino del mismo dueño',metadata);
   const internalContext={...a.context,propertyId:internalProperty.propertyId,roleId:internalProperty.roleId};
   const internalTarget={...a,context:internalContext};

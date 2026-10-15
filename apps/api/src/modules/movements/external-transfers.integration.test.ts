@@ -9,6 +9,7 @@ import {createGroup,createLocation} from '../groups/groups.service.js';
 import {createHeat,createPregnancy,recordBirth,listReproduction} from '../reproduction/reproduction.service.js';
 import {createLactation,listProduction,recordMilk} from '../production/production.service.js';
 import {createCondition,listConditions} from '../health/conditions.service.js';
+import {applyCampaign,createCampaign,createMedicine} from '../health/health.service.js';
 import {listMedia,removeMediaObject} from '../media/media.service.js';
 import {env} from '../../config.js';
 import {getExternalTransferSettings,setExternalTransferSettings,lookupExternalDestination,createExternalTransfer,
@@ -47,6 +48,12 @@ test('traslado externo: consentimiento, privacidad, revisión, archivo, fotos y 
   const oldPreg=await createPregnancy(a.auth,a.context,{cowId:mother.id,confirmedOn:'2026-08-01',conceptionMethod:'UNKNOWN',confirmationMethod:'OBSERVATION',useLastHeat:false},metadata);
   const birth=await recordBirth(a.auth,a.context,{pregnancyId:oldPreg.id,occurredOn:'2026-09-01',calves:[{name:'Cría',sex:'FEMALE',groupId:a.group.id}],stillbornCount:0,notes:'Parto compartido'},metadata);
   await createLactation(a.auth,a.context,{birthId:birth.id,inMilking:true},metadata);
+  await recordMilk(a.auth,a.context,{cowId:mother.id,producedOn:'2026-09-02',shift:'MORNING',liters:8,source:'MANUAL'},metadata);
+  await recordMilk(a.auth,a.context,{cowId:mother.id,producedOn:'2026-09-02',shift:'AFTERNOON',liters:9,source:'MANUAL'},metadata);
+  const medicine=await createMedicine(a.auth,a.context,{name:'Vacuna anterior',kind:'VACUNA',defaultUnitCode:'MILLILITER',withdrawalMilkDays:0,withdrawalMeatDays:0},metadata);
+  const campaign=await createCampaign(a.auth,a.context,{medicineId:medicine.id as string,administrationRoute:'INTRAMUSCULAR',appliedOn:'2026-09-03',selectionMode:'MANUAL',
+    animals:[{animalId:mother.id,selected:true,dose:2,unitCode:'MILLILITER'}]},metadata);
+  await applyCampaign(a.auth,a.context,campaign.id,metadata);
   const heat=await createHeat(a.auth,a.context,{cowId:pregnant.id,startsOn:'2026-10-01',isFalse:false},metadata);
   const pregnancy=await createPregnancy(a.auth,a.context,{cowId:pregnant.id,heatId:heat.id,confirmedOn:'2026-10-02',conceptionMethod:'NATURAL',confirmationMethod:'OBSERVATION'},metadata);
   const conditionType=(await pool.query("SELECT name FROM governed_catalog_item WHERE catalog_code='HEALTH_CONDITION_TYPES' AND system_defined LIMIT 1")).rows[0].name;
@@ -96,8 +103,17 @@ test('traslado externo: consentimiento, privacidad, revisión, archivo, fotos y 
   assert.equal(identities[0].identity_id,identities[1].identity_id);
   await assert.rejects(()=>pool.query("UPDATE animal SET availability_status_code='ACTIVE' WHERE id=$1",[mother.id]));
   const history=await getReceivedAnimalHistory(b.context,receivedId);assert.ok(history?.history.some(row=>row.title==='Parto'));
+  assert.equal(history!.history.filter(row=>row.id.startsWith('MILK_PRODUCTION:')).length,2,'Both milk records are preserved separately, including same-day shifts');
+  assert.ok(history!.history.some(row=>row.id==='HEALTH_CAMPAIGN:'+campaign.id));
+  assert.ok(history!.history.some(row=>row.id==='REPRODUCTION_PREGNANCY:'+oldPreg.id),'Completed pregnancies survive the transfer');
+  const receivedBirth=history!.history.find(row=>row.id==='REPRODUCTION_BIRTH:'+birth.id)!;
+  assert.ok(receivedBirth.lines.includes('1 crías vivas'));assert.ok(!JSON.stringify(receivedBirth).includes(birth.calves[0]!.id),'Birth summary never grants foreign calf data');
+  const pregnantHistory=await getReceivedAnimalHistory(b.context,receivedPregId);
+  const copiedHeat=(await listReproduction(b.context)).heats.find(row=>row.cowId===receivedPregId)!;
+  assert.equal(pregnantHistory!.copies['REPRODUCTION_HEAT:'+copiedHeat.id],'REPRODUCTION_HEAT:'+heat.id,'Copied processes carry their original event ID for deduplication');
   const restricted=await getReceivedAnimalHistory({...b.context,permissions:new Set(['ANIMAL_VIEW'])},receivedId);
   assert.ok(restricted?.history.every(row=>row.module==='CORE'));
+  assert.deepEqual(restricted!.copies,{},'Hidden module copy identifiers remain private');
   const media=await listMedia(b.context);assert.ok(media.some(row=>row.entity_id===receivedId&&row.recordDetails?.notes==='Parto compartido'));
   const third=await createAnimal(c.auth,c.context,{name:'Ajeno',sex:'FEMALE',speciesCode:'BOVINE',groupId:c.group.id},metadata);
   await assert.rejects(()=>pool.query(`INSERT INTO media_attachment(account_id,storage_object_id,property_id,entity_type,entity_id,relation_code,created_by)
@@ -106,6 +122,11 @@ test('traslado externo: consentimiento, privacidad, revisión, archivo, fotos y 
   assert.ok((await listMedia(b.context)).length);
   assert.ok((await listProduction(b.context)).cows.some(row=>row.id===receivedId&&row.inMilking));
   await recordMilk(b.auth,b.context,{cowId:receivedId,producedOn:today(),shift:'SINGLE',liters:8,source:'MANUAL'},metadata);
+  const destinationMedicine=await createMedicine(b.auth,b.context,{name:'Vacuna nueva',kind:'VACUNA',defaultUnitCode:'MILLILITER',withdrawalMilkDays:0,withdrawalMeatDays:0},metadata);
+  const destinationTreatment=await createCampaign(b.auth,b.context,{medicineId:destinationMedicine.id as string,administrationRoute:'INTRAMUSCULAR',appliedOn:today(),selectionMode:'MANUAL',
+    animals:[{animalId:receivedId,selected:true,dose:2,unitCode:'MILLILITER'}]},metadata);
+  await applyCampaign(b.auth,b.context,destinationTreatment.id,metadata);
+  assert.deepEqual((await getReceivedAnimalHistory(b.context,receivedId))!.history,history!.history,'New destination events cannot overwrite received history');
   assert.ok((await listConditions(b.context)).some(row=>row.animalId===receivedId&&row.description==='Herida compartida'));
   await assert.rejects(()=>recordBirth(a.auth,a.context,{pregnancyId:pregnancy.id,occurredOn:today(),calves:[],stillbornCount:1},metadata),fails('ANIMAL_TRANSFERRED'));
   const continued=(await listReproduction(b.context)).pregnancies.find(row=>row.cowId===receivedPregId)!;
@@ -124,6 +145,8 @@ test('traslado externo: consentimiento, privacidad, revisión, archivo, fotos y 
   const previous=await getReceivedAnimalHistory(a.context,returnedId);
   assert.equal(previous!.history.filter(event=>event.title==='Parto').length,1,'Repeated transfers keep one copy of each historical event');
   assert.ok(previous!.history.some(event=>event.title==='Producción de leche'));
+  assert.equal(previous!.history.filter(event=>event.id.startsWith('MILK_PRODUCTION:')).length,3,'A second transfer carries both old milk records and the new one');
+  assert.equal(previous!.history.filter(event=>event.id.startsWith('HEALTH_CAMPAIGN:')).length,2,'Old and new treatments both survive a repeated transfer');
   assert.ok((await listMedia(a.context)).some(photo=>photo.entity_id===returnedId));
  }finally{await pool.end();}
 });
