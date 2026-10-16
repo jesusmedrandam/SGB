@@ -6,6 +6,8 @@ import type {RequestMetadata} from '../auth/auth.types.js';
 import {agendaAction,listAgendaItems,listAgendaOptions} from './agenda.service.js';
 import {agendaCalendar,calendarOptions,createSharedAgenda,calendarAction} from './calendar.service.js';
 import {moonPhases} from './moon.service.js';
+import {weatherForecast,weatherQuery} from './weather.service.js';
+import {offlineCalendar} from './offline-calendar.service.js';
 const meta=(req:Request):RequestMetadata=>({ipAddress:req.ip||null,
   userAgent:req.header('user-agent')?.slice(0,1000)??null});
 const body=z.object({kind:z.enum(['TASK','EVENT']),activityType:z.string().trim().min(2).max(60),
@@ -25,6 +27,12 @@ agendaRouter.get('/',asyncHandler(async(req,res)=>{
 }));
 agendaRouter.get('/calendar',asyncHandler(async(req,res)=>{
  res.json({ok:true,data:await agendaCalendar(req.auth!,req.propertyContext!,calendarQuery.parse(req.query))});
+}));
+agendaRouter.get('/offline',asyncHandler(async(req,res)=>{
+ res.json({ok:true,data:await offlineCalendar(req.auth!,req.propertyContext!)});
+}));
+agendaRouter.get('/weather',asyncHandler(async(req,res)=>{
+ res.json({ok:true,data:await weatherForecast(weatherQuery.parse(req.query))});
 }));
 agendaRouter.get('/calendar-options',asyncHandler(async(req,res)=>{
  res.json({ok:true,data:await calendarOptions(req.auth!,req.propertyContext!)});
