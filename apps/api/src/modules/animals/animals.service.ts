@@ -156,7 +156,7 @@ export async function listAnimals(context: PropertyContext, filters: z.infer<typ
          JOIN property_party pp ON pp.id=ao.party_id
          WHERE ao.animal_id=animal.id AND ao.valid_until IS NULL
          ORDER BY ao.is_primary DESC, lower(pp.display_name) LIMIT 1) AS primary_owner_name
-     FROM animal
+     FROM latest_property_animal animal
      LEFT JOIN animal_current_position pos ON pos.animal_id=animal.id AND pos.property_id=animal.property_id
      WHERE animal.property_id = $1 AND animal.record_status = 'CURRENT'
        AND ($4::varchar IS NULL OR classify_animal(animal.id,
@@ -194,7 +194,12 @@ export async function listAnimals(context: PropertyContext, filters: z.infer<typ
 }
 
 export async function getAnimal(context: PropertyContext, id: string) {
-  return inTransaction((client) => readAnimal(client, context, id));
+  return inTransaction(async client=>{
+    const latest=(await client.query(`SELECT latest.id FROM animal original JOIN latest_property_animal latest
+      ON latest.property_id=original.property_id AND latest.identity_id=original.identity_id
+      WHERE original.id=$1 AND original.property_id=$2 AND original.record_status='CURRENT'`,[id,context.propertyId])).rows[0];
+    return readAnimal(client,context,latest?.id??id);
+  });
 }
 
 async function validateSelections(client: PoolClient, context: PropertyContext, speciesCode: string,
@@ -270,7 +275,7 @@ async function accessForCreate(client: PoolClient, auth: AuthState, context: Pro
     `SELECT p.account_id, to_char((now() AT TIME ZONE p.timezone)::date, 'YYYY-MM-DD') AS today
      FROM property p
      JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
-     JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'
+     JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND membership_access_valid(pm)
      JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = p.id
      JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = p.id AND pr.active
      JOIN role_permission rp ON rp.role_id = pr.id AND rp.permission_code = 'ANIMAL_CREATE'
@@ -309,7 +314,7 @@ export async function updateAnimalBrands(auth: AuthState, context: PropertyConte
     const grant=supportGrant?{rows:[supportGrant],rowCount:1}:await client.query(
       `SELECT 1 FROM property p
        JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
-       JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'
+       JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND membership_access_valid(pm)
        JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = p.id
        JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = p.id AND pr.active
        JOIN role_permission rp ON rp.role_id = pr.id AND rp.permission_code = 'ANIMAL_UPDATE'
@@ -359,7 +364,7 @@ export async function updateAnimalCatalogs(auth: AuthState, context: PropertyCon
     const grant=supportGrant?{rows:[supportGrant],rowCount:1}:await client.query(
       `SELECT 1 FROM property p
        JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
-       JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'
+       JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND membership_access_valid(pm)
        JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = p.id
        JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = p.id AND pr.active
        JOIN role_permission rp ON rp.role_id = pr.id AND rp.permission_code = 'ANIMAL_UPDATE'

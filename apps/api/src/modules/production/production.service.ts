@@ -14,7 +14,7 @@ async function access(client: PoolClient, auth: AuthState, context: PropertyCont
     `SELECT p.account_id, to_char((now() AT TIME ZONE p.timezone)::date,'YYYY-MM-DD') AS today,
       COALESCE(rs.max_milking_days,305) AS max_days
      FROM property p JOIN administrative_account aa ON aa.id=p.account_id AND aa.status='ACTIVE'
-     JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND pm.status='ACTIVE'
+     JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND membership_access_valid(pm)
      JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=p.id
      JOIN property_role pr ON pr.id=mr.role_id AND pr.property_id=p.id AND pr.active
      JOIN role_permission rp ON rp.role_id=pr.id AND rp.permission_code=$4

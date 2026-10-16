@@ -15,7 +15,7 @@ import {
   invitationPreviewParamsSchema,
   membershipParamsSchema,
   membershipStatusSchema,
-  membershipRolesSchema,roleParamsSchema,updateRoleSchema,
+  membershipRolesSchema,roleParamsSchema,updateRoleSchema,createRoleSchema,
 } from './collaboration.schemas.js';
 import {
   acceptPropertyInvitation,
@@ -24,7 +24,7 @@ import {
   getPropertyTeam,
   revokePropertyInvitation,
   updatePropertyMembershipStatus,
-  getPropertyRoles,updatePropertyRole,updatePropertyMembershipRoles,
+  getPropertyRoles,createPropertyRole,updatePropertyRole,updatePropertyMembershipRoles,
 } from './collaboration.service.js';
 
 function metadata(request: Request): RequestMetadata {
@@ -62,6 +62,9 @@ propertyTeamRouter.get('/', requirePermission('MEMBERSHIP_VIEW'), asyncHandler(a
 
 propertyTeamRouter.get('/roles',requirePermission('ROLE_VIEW'),asyncHandler(async(request,response)=>{
   response.json({ok:true,data:await getPropertyRoles(request.propertyContext!)});
+}));
+propertyTeamRouter.post('/roles',requirePermission('ROLE_MANAGE'),asyncHandler(async(request,response)=>{
+  response.status(201).json({ok:true,data:await createPropertyRole(request.auth!,request.propertyContext!,createRoleSchema.parse(request.body),metadata(request))});
 }));
 propertyTeamRouter.patch('/roles/:roleId',requirePermission('ROLE_MANAGE'),asyncHandler(async(request,response)=>{
   const {roleId}=roleParamsSchema.parse(request.params);

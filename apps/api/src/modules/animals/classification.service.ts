@@ -31,7 +31,7 @@ export async function updateClassificationPolicy(auth:AuthState,context:Property
     const supportGrant=await superadminPropertyAccess(client,auth,context);
     const grant=supportGrant?{rows:[supportGrant],rowCount:1}:await client.query<{account_id:string}>(`SELECT p.account_id FROM property p
       JOIN administrative_account aa ON aa.id=p.account_id AND aa.status='ACTIVE'
-      JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND pm.status='ACTIVE'
+      JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND membership_access_valid(pm)
       JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=p.id
       JOIN property_role pr ON pr.id=mr.role_id AND pr.property_id=p.id AND pr.active
       JOIN role_permission rp ON rp.role_id=pr.id AND rp.permission_code='CATALOG_MANAGE'
@@ -67,7 +67,7 @@ export async function updateClassificationPolicy(auth:AuthState,context:Property
 export async function getAnimalSummary(context:PropertyContext){
   const rows=await pool.query<{code:string;label:string;count:number}>(`SELECT classified.code,
     COALESCE(custom.name,catalog.name) AS label,count(*)::int AS count
-    FROM animal a JOIN property p ON p.id=a.property_id
+    FROM latest_property_animal a JOIN property p ON p.id=a.property_id
     CROSS JOIN LATERAL (SELECT classify_animal(a.id,(now() AT TIME ZONE p.timezone)::date)
       AS code) classified
     JOIN animal_classification_catalog catalog ON catalog.code=classified.code
@@ -78,13 +78,13 @@ export async function getAnimalSummary(context:PropertyContext){
   const groups=await pool.query<{name:string;count:number}>(`SELECT g.name,count(a.id)::int AS count
     FROM livestock_group g LEFT JOIN animal_group_assignment aga
       ON aga.group_id=g.id AND aga.ended_at IS NULL
-    LEFT JOIN animal a ON a.id=aga.animal_id AND a.record_status='CURRENT'
+    LEFT JOIN latest_property_animal a ON a.id=aga.animal_id AND a.record_status='CURRENT'
     WHERE g.property_id=$1 AND g.active GROUP BY g.id,g.name ORDER BY lower(g.name)`,[context.propertyId]);
-  const sex=await pool.query<{sex:string;count:number}>(`SELECT sex,count(*)::int AS count FROM animal
+  const sex=await pool.query<{sex:string;count:number}>(`SELECT sex,count(*)::int AS count FROM latest_property_animal
     WHERE property_id=$1 AND record_status='CURRENT' GROUP BY sex`,[context.propertyId]);
   const stays=await pool.query<{inside:number;outside:number}>(`SELECT
     count(*) FILTER(WHERE g.kind IS DISTINCT FROM 'EXTERNAL')::int AS inside,
-    count(*) FILTER(WHERE g.kind='EXTERNAL')::int AS outside FROM animal a
+    count(*) FILTER(WHERE g.kind='EXTERNAL')::int AS outside FROM latest_property_animal a
     LEFT JOIN animal_group_assignment aga ON aga.animal_id=a.id AND aga.ended_at IS NULL
     LEFT JOIN livestock_group g ON g.id=aga.group_id
     WHERE a.property_id=$1 AND a.record_status='CURRENT' AND a.availability_status_code='ACTIVE'`,[context.propertyId]);

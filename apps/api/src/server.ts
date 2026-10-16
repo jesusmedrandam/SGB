@@ -8,10 +8,12 @@ const server = app.listen(env.PORT, () => {
   console.log(`SGB API escuchando en el puerto ${env.PORT}`);
 });
 const deletionTimer=setInterval(()=>{
+  void pool.query('SELECT expire_property_access(),notify_outside_returns()').catch(error=>console.error('Seguimiento de accesos y regresos:',error));
   void expireDrafts().catch(error=>console.error('Caducidad de borradores:',error));
   void processPendingDeletions().catch(error=>console.error('Reintento multimedia:',error));
 },10*60*1000);
 deletionTimer.unref();
+void pool.query('SELECT expire_property_access(),notify_outside_returns()').catch(error=>console.error('Seguimiento de accesos y regresos:',error));
 void expireDrafts().catch(error=>console.error('Caducidad de borradores:',error));
 void processPendingDeletions().catch(error=>console.error('Reintento multimedia:',error));
 

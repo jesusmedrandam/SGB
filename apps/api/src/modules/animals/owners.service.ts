@@ -11,7 +11,7 @@ async function account(client: PoolClient, auth: AuthState, context: PropertyCon
     const result=supportResult?{rows:[supportResult],rowCount:1}:await client.query<{ account_id: string }>(
     `SELECT p.account_id FROM property p
      JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
-     JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'
+     JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND membership_access_valid(pm)
      JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = p.id
      JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = p.id AND pr.active
      JOIN role_permission rp ON rp.role_id = pr.id AND rp.permission_code = $4
@@ -44,7 +44,7 @@ export async function listOwners(context: PropertyContext) {
 export async function listAccountUsers(context: PropertyContext) {
   const result = await pool.query<{ id: string; display_name: string }>(
     `SELECT DISTINCT u.id, u.display_name FROM app_user u
-     JOIN property_membership pm ON pm.user_id = u.id AND pm.status = 'ACTIVE'
+     JOIN property_membership pm ON pm.user_id = u.id AND membership_access_valid(pm)
      JOIN property p ON p.id = pm.property_id AND p.deleted_at IS NULL
      WHERE p.account_id = (SELECT account_id FROM property WHERE id = $1)
      ORDER BY u.display_name, u.id`, [context.propertyId]);
@@ -61,7 +61,7 @@ export async function createOwner(auth: AuthState, context: PropertyContext,
       const user = await client.query<{ display_name: string }>(
         `SELECT u.display_name FROM app_user u JOIN property_membership pm ON pm.user_id = u.id
          JOIN property p ON p.id = pm.property_id
-         WHERE u.id = $1 AND p.account_id = $2 AND pm.status = 'ACTIVE' LIMIT 1`,
+         WHERE u.id = $1 AND p.account_id = $2 AND membership_access_valid(pm) LIMIT 1`,
         [input.userId, accountId]);
       if (!user.rows[0]) throw invalidRequest('OWNER_USER_UNAVAILABLE', 'El usuario no pertenece a esta cuenta.');
       name = user.rows[0].display_name;

@@ -133,7 +133,7 @@ export async function getAccountDetails(
       }>(
         `SELECT p.id, p.name, p.status, p.timezone, p.created_at,
                 (SELECT count(*) FROM property_membership pm
-                  WHERE pm.property_id = p.id AND pm.status = 'ACTIVE') AS member_count,
+                  WHERE pm.property_id = p.id AND membership_access_valid(pm)) AS member_count,
                 (SELECT count(*) FROM animal a
                   WHERE a.property_id = p.id AND a.record_status = 'CURRENT') AS animal_count
            FROM property p

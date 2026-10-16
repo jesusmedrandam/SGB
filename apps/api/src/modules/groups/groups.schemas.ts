@@ -3,13 +3,15 @@ import { z } from 'zod';
 export const idSchema = z.object({ id: z.uuid() });
 const name = z.string().trim().min(1).max(160);
 const description = z.string().trim().max(5000).nullable().optional();
+const followup={externalPhone:z.string().trim().max(50).nullable().optional(),departedOn:z.iso.date().nullable().optional(),
+  expectedReturnOn:z.iso.date().nullable().optional(),externalNotes:z.string().trim().max(2000).nullable().optional()};
 export const createGroupSchema = z.strictObject({
-  name, description,kind:z.enum(['INTERNAL','EXTERNAL']).default('INTERNAL'),locationId:z.uuid().nullable().optional(),
+  ...followup,name, description,kind:z.enum(['INTERNAL','EXTERNAL']).default('INTERNAL'),locationId:z.uuid().nullable().optional(),
   externalPlace:name.nullable().optional(),externalContact:name.nullable().optional(),
 }).refine(value=>value.kind==='EXTERNAL'?Boolean(value.externalPlace)&&!value.locationId:Boolean(value.locationId)&&!value.externalPlace&&!value.externalContact,
   'Selecciona un potrero o corral para el grupo interno, o indica el lugar del grupo externo sin asignar potrero.');
 export const updateGroupSchema = z.object({
-  name, description,externalPlace:name.nullable().optional(),externalContact:name.nullable().optional(), expectedVersion: z.number().int().positive(),
+  ...followup,name, description,externalPlace:name.nullable().optional(),externalContact:name.nullable().optional(), expectedVersion: z.number().int().positive(),
 });
 export const groupStateSchema = z.object({
   active: z.boolean(), expectedVersion: z.number().int().positive(),locationId:z.uuid().optional(),

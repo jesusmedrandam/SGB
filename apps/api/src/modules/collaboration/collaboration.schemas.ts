@@ -9,6 +9,7 @@ export const acceptInvitationSchema = z.object({ token });
 export const createInvitationSchema = z.object({
   email: z.email().max(254).transform((value) => value.trim().toLowerCase()),
   roleIds: z.array(z.uuid()).min(1).max(4).transform((values) => [...new Set(values)]),
+  accessUntil: z.iso.date().nullable().optional(),
   jobTitle: z.string().trim().min(2).max(140).optional(),
   payAmount: z.number().min(0).max(999999999999.99).nullable().optional(),
   payFrequency: payFrequency.nullable().optional(),
@@ -29,10 +30,12 @@ export const invitationParamsSchema = z.object({ invitationId: z.uuid() });
 export const membershipParamsSchema = z.object({ membershipId: z.uuid() });
 export const membershipStatusSchema = z.object({ status: z.enum(['ACTIVE', 'SUSPENDED', 'ENDED']) });
 const roleIds=z.array(z.uuid()).min(1).max(4).transform(values=>[...new Set(values)]);
-export const membershipRolesSchema=z.object({roleIds,expectedRoleIds:roleIds});
+export const membershipRolesSchema=z.object({roleIds,expectedRoleIds:roleIds,accessUntil:z.iso.date().nullable().optional(),expectedAccessUntil:z.iso.date().nullable().optional()});
 export const roleParamsSchema=z.object({roleId:z.uuid()});
 export const updateRoleSchema=z.object({name:z.string().trim().min(2).max(120),
   description:z.string().trim().max(2000).nullable(),permissions:z.array(z.string().trim().min(1).max(100)).max(150)
     .transform(values=>[...new Set(values)]),expectedVersion:z.number().int().positive()});
 
 export type CreateInvitationInput = z.infer<typeof createInvitationSchema>;
+
+export const createRoleSchema=updateRoleSchema.omit({expectedVersion:true});

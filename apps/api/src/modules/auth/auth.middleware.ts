@@ -42,6 +42,10 @@ export const authenticate: RequestHandler = async (request, response, next) => {
     const row = result.rows[0];
     if (!row) throw unauthorized();
 
+    if (await pool.query('SELECT expire_property_access($1) AS changed',[row.user_id]).then(result=>result.rows[0]?.changed)) {
+      const current=await pool.query('SELECT active_property_id,active_role_id FROM user_session WHERE id=$1',[row.session_id]);
+      row.active_property_id=current.rows[0].active_property_id;row.active_role_id=current.rows[0].active_role_id;
+    }
     request.auth = {
       sessionId: row.session_id,
       userId: row.user_id,
@@ -97,7 +101,7 @@ export const requirePropertyContext: RequestHandler = async (request, _response,
          LEFT JOIN role_permission rp ON rp.role_id = pr.id
         WHERE pm.user_id = $1
           AND pm.property_id = $2
-          AND pm.status = 'ACTIVE'
+          AND membership_access_valid(pm)
           AND pr.id = $3`,
       [auth.userId, auth.activePropertyId, auth.activeRoleId],
     );

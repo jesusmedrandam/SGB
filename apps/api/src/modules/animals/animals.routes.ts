@@ -1,3 +1,5 @@
+import {inTransaction} from '../../database/transaction.js';
+import {captureAnimal,visibleAnimalSnapshot} from '../movements/external-transfers.history.js';
 import { Router, type Request } from 'express';
 import { asyncHandler } from '../../core/async-handler.js';
 import { authenticate, requirePermission, requirePropertyContext } from '../auth/auth.middleware.js';
@@ -50,6 +52,10 @@ animalsRouter.get('/received-histories',requirePermission('ANIMAL_VIEW'),asyncHa
 animalsRouter.get('/:id', requirePermission('ANIMAL_VIEW'), asyncHandler(async (request, response) => {
   const { id } = animalIdSchema.parse(request.params);
   response.json({ ok: true, data: await getAnimal(request.propertyContext!, id) });
+}));
+animalsRouter.get('/:id/timeline',requirePermission('ANIMAL_VIEW'),asyncHandler(async(req,res)=>{
+  const snapshot=await inTransaction(client=>captureAnimal(client,req.propertyContext!,animalIdSchema.parse(req.params).id,false));
+  res.json({ok:true,data:visibleAnimalSnapshot(snapshot,req.propertyContext!).history.sort((a,b)=>b.date.localeCompare(a.date)||a.id.localeCompare(b.id))});
 }));
 animalsRouter.get('/:id/received-history',requirePermission('ANIMAL_VIEW'),asyncHandler(async(req,res)=>{
   res.json({ok:true,data:await getReceivedAnimalHistory(req.propertyContext!,animalIdSchema.parse(req.params).id)});

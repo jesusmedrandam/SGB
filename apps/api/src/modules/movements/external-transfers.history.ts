@@ -9,7 +9,7 @@ export type AnimalTransferSnapshot={profile:Awaited<ReturnType<typeof readAnimal
   media:Awaited<ReturnType<typeof listMedia>>;identityId:string;hasGivenBirth:boolean;hasConfirmedOffspring:boolean;
   lastBirthOn:string|null;lastLossOn:string|null;processes:Record<string,any>;copies?:Record<string,string>};
 
-export async function captureAnimal(client:PoolClient,context:PropertyContext,id:string):Promise<AnimalTransferSnapshot>{
+export async function captureAnimal(client:PoolClient,context:PropertyContext,id:string,sharing=true):Promise<AnimalTransferSnapshot>{
   const profile=await readAnimal(client,context,id);
   const original=(await client.query('SELECT snapshot FROM animal_received_history WHERE animal_id=$1',[id])).rows[0]?.snapshot as AnimalTransferSnapshot|undefined;
   const history=new Map<string,PreviousAnimalEvent>((original?.history??[]).map(row=>[row.id,row]));
@@ -20,6 +20,12 @@ export async function captureAnimal(client:PoolClient,context:PropertyContext,id
     history.set(key,{id:key,module,title,date:date.slice(0,10),notes,lines:lines.filter((value):value is string=>typeof value==='string'&&value.length>0),
       sourcePropertyName:history.get(key)?.sourcePropertyName??context.propertyName});
   };
+  add('CORE','ANIMAL_ENTRY',{id},'Ingreso a la propiedad',profile.entryDate,null,[context.propertyName]);
+  const transfers=(await client.query(`SELECT t.id,t.movement_on::text,t.source_name,t.destination_name,t.reason,t.notes,
+    i.source_animal_id FROM external_animal_transfer_item i JOIN external_animal_transfer t ON t.id=i.transfer_id
+    WHERE t.status='ACCEPTED' AND (i.source_animal_id=$1 OR i.destination_animal_id=$1) ORDER BY t.created_at`,[id])).rows;
+  for(const row of transfers)add('CORE','EXTERNAL_TRANSFER',row,row.source_animal_id===id?'Salida a otra propiedad':'Ingreso desde otra propiedad',
+    row.movement_on,row.notes,[`${row.source_name} → ${row.destination_name}`,row.reason]);
   const heats=(await client.query(`SELECT h.*,h.starts_on::text,h.ends_on::text,b.name AS bull_name
     FROM reproduction_heat h LEFT JOIN animal b ON b.id=h.bull_id WHERE h.property_id=$1 AND (h.cow_id=$2 OR h.bull_id=$2) ORDER BY h.id`,[context.propertyId,id])).rows;
   for(const row of heats)add('REPRODUCTION','REPRODUCTION_HEAT',row,row.bull_id===id?'Participación como reproductor':row.is_false?'Celo falso':'Celo',row.starts_on,row.cow_id===id?row.notes:null,
@@ -78,13 +84,13 @@ export async function captureAnimal(client:PoolClient,context:PropertyContext,id
     JOIN livestock_activity_animal x ON x.activity_id=a.id WHERE a.property_id=$1 AND x.animal_id=$2 AND a.status='COMPLETADA' ORDER BY a.id`,[context.propertyId,id])).rows;
   for(const row of activities)add('TASKS','LIVESTOCK_ACTIVITY',row,row.title,row.occurred_on,row.description,[]);
   const identity=(await client.query('SELECT identity_id FROM animal WHERE id=$1',[id])).rows[0].identity_id as string;
-  for(const row of history.values())if(!context.permissions.has(modulePermissions[row.module]??'ANIMAL_VIEW'))
+  for(const row of history.values())if(sharing&&!context.permissions.has(modulePermissions[row.module]??'ANIMAL_VIEW'))
     throw forbidden('EXTERNAL_HISTORY_PERMISSION_REQUIRED','Tu rol necesita permiso para consultar todo el historial que se compartirá.');
   const last=(dates:Array<string|null|undefined>)=>dates.filter((date):date is string=>Boolean(date)).sort().at(-1)??null;
   const boundary=last([original?.lastBirthOn,original?.lastLossOn,...births.filter(row=>row.mother_id===id).map(row=>row.occurred_on),...losses.map(row=>row.occurred_on)])??'';
-  const attachments=(await client.query(`SELECT m.id,m.storage_object_id,m.entity_type,m.entity_id FROM media_attachment m WHERE m.property_id=$1 AND m.deleted_at IS NULL
+  const attachments=sharing?(await client.query(`SELECT m.id,m.storage_object_id,m.entity_type,m.entity_id FROM media_attachment m WHERE m.property_id=$1 AND m.deleted_at IS NULL
     AND EXISTS(SELECT 1 FROM jsonb_to_recordset($2::jsonb) AS x(type text,id uuid) WHERE x.type=m.entity_type AND x.id=m.entity_id) ORDER BY m.id`,
-    [context.propertyId,JSON.stringify(mediaTargets)])).rows;
+    [context.propertyId,JSON.stringify(mediaTargets)])).rows:[];
   const media:AnimalTransferSnapshot['media']=[];
   if(attachments.length&&!context.permissions.has('MEDIA_VIEW'))
     throw forbidden('EXTERNAL_MEDIA_PERMISSION_REQUIRED','Necesitas permiso para consultar las fotos que se compartirán.');

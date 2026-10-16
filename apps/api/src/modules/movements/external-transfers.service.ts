@@ -11,7 +11,7 @@ async function administrator(client:PoolClient,context:PropertyContext,userId:st
   const result=await client.query(`SELECT 1 FROM property_membership pm
     JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=pm.property_id
     JOIN property_role pr ON pr.id=mr.role_id AND pr.property_id=pm.property_id
-    WHERE pm.property_id=$1 AND pm.user_id=$2 AND pm.status='ACTIVE' AND pr.id=$3 AND pr.active
+    WHERE pm.property_id=$1 AND pm.user_id=$2 AND membership_access_valid(pm) AND pr.id=$3 AND pr.active
       AND pr.is_system AND pr.code IN ('OWNER','ADMINISTRATOR')
       AND EXISTS(SELECT 1 FROM role_permission WHERE role_id=pr.id AND permission_code='MOVEMENT_MANAGE')
       FOR SHARE OF pm,pr`,[context.propertyId,userId,roleId]);
@@ -44,7 +44,7 @@ async function notify(client:PoolClient,propertyId:string,id:string,title:string
     SELECT DISTINCT pm.user_id,$1::uuid,$2::uuid,$3::varchar,$4::varchar,$5::text FROM property_membership pm
     JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=pm.property_id
     JOIN property_role pr ON pr.id=mr.role_id AND pr.active AND pr.is_system AND pr.code IN ('OWNER','ADMINISTRATOR')
-    WHERE pm.property_id=$1 AND pm.status='ACTIVE' AND EXISTS(SELECT 1 FROM role_permission
+    WHERE pm.property_id=$1 AND membership_access_valid(pm) AND EXISTS(SELECT 1 FROM role_permission
       WHERE role_id=pr.id AND permission_code='MOVEMENT_MANAGE')`,[propertyId,id,kind,title,message]);
 }
 function digest(snapshot:AnimalTransferSnapshot){
@@ -108,7 +108,7 @@ async function visibleExternalDestinations(client:PoolClient,auth:AuthState,cont
       JOIN membership_role omr ON omr.membership_id=opm.id AND omr.property_id=opm.property_id
       JOIN property_role opr ON opr.id=omr.role_id AND opr.property_id=opm.property_id AND opr.active AND opr.code='OWNER'
       JOIN app_user ou ON ou.id=opm.user_id AND ou.status='ACTIVE' AND ou.deleted_at IS NULL
-      WHERE opm.property_id=p.id AND opm.status='ACTIVE' AND ou.email=$1::citext))
+      WHERE opm.property_id=p.id AND membership_access_valid(opm) AND ou.email=$1::citext))
     AND p.account_id<>$3 AND p.status='ACTIVE' AND p.deleted_at IS NULL
     AND EXISTS(SELECT 1 FROM effective_property_module WHERE property_id=p.id AND module_code='MOVEMENTS' AND enabled)
     AND EXISTS(SELECT 1 FROM effective_property_species WHERE property_id=p.id AND species_code='BOVINE' AND enabled)
@@ -117,11 +117,11 @@ async function visibleExternalDestinations(client:PoolClient,auth:AuthState,cont
         SELECT 1 FROM property_membership pm JOIN property_membership owner_membership ON owner_membership.property_id=pm.property_id
         JOIN property cp ON cp.id=pm.property_id AND cp.status='ACTIVE' AND cp.deleted_at IS NULL
         JOIN administrative_account ca ON ca.id=cp.account_id AND ca.status='ACTIVE'
-        WHERE pm.status='ACTIVE' AND pm.user_id=$4 AND owner_membership.status='ACTIVE'
+        WHERE membership_access_valid(pm) AND pm.user_id=$4 AND membership_access_valid(owner_membership)
         AND EXISTS(SELECT 1 FROM property_membership opm
           JOIN membership_role omr ON omr.membership_id=opm.id AND omr.property_id=opm.property_id
           JOIN property_role opr ON opr.id=omr.role_id AND opr.property_id=opm.property_id AND opr.active AND opr.code='OWNER'
-          WHERE opm.property_id=p.id AND opm.status='ACTIVE' AND opm.user_id=owner_membership.user_id)
+          WHERE opm.property_id=p.id AND membership_access_valid(opm) AND opm.user_id=owner_membership.user_id)
         AND EXISTS(SELECT 1 FROM membership_role mr JOIN property_role pr ON pr.id=mr.role_id AND pr.active WHERE mr.membership_id=pm.id)
         AND EXISTS(SELECT 1 FROM membership_role mr JOIN property_role pr ON pr.id=mr.role_id AND pr.active WHERE mr.membership_id=owner_membership.id)))
     ORDER BY lower(p.name),p.id`,[email,id,source.account_id,auth.userId]);

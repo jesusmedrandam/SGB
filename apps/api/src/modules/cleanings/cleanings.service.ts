@@ -12,7 +12,7 @@ async function access(client:PoolClient,auth:AuthState,context:PropertyContext,p
   const row=await superadminPropertyAccess(client,auth,context)??(await client.query<{account_id:string;today:string}>(
     `SELECT p.account_id,(now() AT TIME ZONE p.timezone)::date::text AS today
      FROM property p JOIN administrative_account aa ON aa.id=p.account_id AND aa.status='ACTIVE'
-     JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND pm.status='ACTIVE'
+     JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND membership_access_valid(pm)
      JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=p.id
      JOIN property_role pr ON pr.id=mr.role_id AND pr.property_id=p.id AND pr.active
      JOIN role_permission rp ON rp.role_id=pr.id AND rp.permission_code=$4
