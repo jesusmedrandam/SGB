@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import type { PoolClient, QueryResultRow } from 'pg';
 import { env } from '../../config.js';
 import { ApiError, conflict, forbidden } from '../../core/errors.js';
@@ -9,12 +10,13 @@ import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.t
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type { CreateInvitationInput } from './collaboration.schemas.js';
 import type {z} from 'zod';
-import type {membershipRolesSchema,updateRoleSchema} from './collaboration.schemas.js';
+import type {membershipRolesSchema,updateRoleSchema,createRoleSchema} from './collaboration.schemas.js';
 
 interface InvitationRow extends QueryResultRow {
   id: string;
   email: string;
   expires_at: Date;
+  access_until: string|null;
   job_title: string | null;
   pay_amount: string | null;
   pay_currency: string;
@@ -33,7 +35,7 @@ async function ownerGrant(client:PoolClient,userId:string,propertyId:string,role
   return (await client.query(`SELECT 1 FROM property_membership pm
     JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=pm.property_id
     JOIN property_role pr ON pr.id=mr.role_id AND pr.property_id=pm.property_id
-    WHERE pm.user_id=$1 AND pm.property_id=$2 AND pm.status='ACTIVE' AND ($3::uuid IS NULL OR pr.id=$3) AND pr.active AND pr.code='OWNER'
+    WHERE pm.user_id=$1 AND pm.property_id=$2 AND membership_access_valid(pm) AND ($3::uuid IS NULL OR pr.id=$3) AND pr.active AND pr.code='OWNER'
     FOR SHARE OF pm,pr`,[userId,propertyId,roleId])).rowCount;
 }
 async function requireOwner(client:PoolClient,auth:AuthState,context:PropertyContext){
@@ -89,7 +91,7 @@ async function invitationRoles(client: PoolClient, invitationId: string) {
 export async function getInvitationPreview(token: string) {
   return inTransaction(async (client) => {
     const result = await client.query<InvitationRow>(
-      `SELECT pi.id, pi.email::text, pi.expires_at, pi.job_title,
+      `SELECT pi.id, pi.email::text, pi.expires_at, pi.access_until::text, pi.job_title,
               pi.pay_amount::text, pi.pay_currency, pi.pay_frequency, pi.employment_notes,
               p.id AS property_id, p.name AS property_name, aa.name AS account_name,
               inviter.display_name AS inviter_name,
@@ -110,7 +112,7 @@ export async function getInvitationPreview(token: string) {
     return {
       id: invitation.id,
       email: invitation.email,
-      expiresAt: invitation.expires_at.toISOString(),
+      expiresAt: invitation.expires_at.toISOString(),accessUntil:invitation.access_until,
       property: { id: invitation.property_id, name: invitation.property_name },
       accountName: invitation.account_name,
       invitedBy: invitation.inviter_name,
@@ -128,15 +130,16 @@ export async function getInvitationPreview(token: string) {
 }
 
 export async function getPropertyTeam(auth: AuthState, context: PropertyContext) {
+  await pool.query('SELECT expire_property_access(NULL,$1)',[context.propertyId]);
   const canManage = context.permissions.has('MEMBERSHIP_MANAGE');
   const [members, invitations, roles, quota] = await Promise.all([
     pool.query<{
       id: string; user_id: string; display_name: string; email: string; status: string;
-      job_title: string | null; joined_at: Date | null; is_owner: boolean; is_primary_owner:boolean; roles: unknown;
+      job_title: string | null; access_until:string|null; joined_at: Date | null; is_owner: boolean; is_primary_owner:boolean; roles: unknown;
       pay_amount: string | null; pay_currency: string | null; pay_frequency: string | null;
     }>(
       `SELECT pm.id, u.id AS user_id, u.display_name, u.email::text, pm.status,
-              pm.job_title, pm.joined_at, bool_or(pr.code='OWNER' AND pr.active) AS is_owner,
+              pm.job_title, pm.access_until::text, pm.joined_at, bool_or(pr.code='OWNER' AND pr.active) AS is_owner,
               (p.owner_user_id=u.id) AS is_primary_owner,
               coalesce(jsonb_agg(jsonb_build_object('id', pr.id, 'code', pr.code, 'name', pr.name)
                 ORDER BY pr.name) FILTER (WHERE pr.id IS NOT NULL), '[]'::jsonb) AS roles,
@@ -153,9 +156,9 @@ export async function getPropertyTeam(auth: AuthState, context: PropertyContext)
       [context.propertyId],
     ),
     pool.query<{
-      id: string; email: string; expires_at: Date; job_title: string | null; roles: unknown;
+      id: string; email: string; expires_at: Date; access_until:string|null; job_title: string | null; roles: unknown;
     }>(
-      `SELECT pi.id, pi.email::text, pi.expires_at, pi.job_title,
+      `SELECT pi.id, pi.email::text, pi.expires_at, pi.access_until::text, pi.job_title,
               coalesce(jsonb_agg(jsonb_build_object('id', pr.id, 'code', pr.code, 'name', pr.name)
                 ORDER BY pr.name), '[]'::jsonb) AS roles
          FROM property_invitation pi
@@ -193,7 +196,7 @@ export async function getPropertyTeam(auth: AuthState, context: PropertyContext)
       displayName: member.display_name,
       email: member.email,
       status: member.status,
-      jobTitle: member.job_title,
+      jobTitle: member.job_title,accessUntil:member.access_until,
       joinedAt: member.joined_at?.toISOString() ?? null,
       isOwner: member.is_owner,
       isPrimaryOwner:member.is_primary_owner,
@@ -206,7 +209,7 @@ export async function getPropertyTeam(auth: AuthState, context: PropertyContext)
     invitations: canManage ? invitations.rows.map((invitation) => ({
       id: invitation.id,
       email: invitation.email,
-      expiresAt: invitation.expires_at.toISOString(),
+      expiresAt: invitation.expires_at.toISOString(),accessUntil:invitation.access_until,
       jobTitle: invitation.job_title,
       roles: invitation.roles,
     })) : [],
@@ -225,6 +228,7 @@ export async function createPropertyInvitation(
   metadata: RequestMetadata,
 ) {
   const invitationToken = issueToken('invite');
+  await pool.query('SELECT expire_property_access(NULL,$1)',[context.propertyId]);
   const expiresAt = new Date(Date.now() + env.INVITATION_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
   const created = await inTransaction(async (client) => {
     await superadminPropertyAccess(client,auth,context);
@@ -251,6 +255,7 @@ export async function createPropertyInvitation(
     }
     if(selectedRoles.rows.some(role=>['OWNER','ADMINISTRATOR'].includes(role.code)))await requireOwner(client,auth,context);
 
+    await validateAccessUntil(client,context.propertyId,input.accessUntil,selectedRoles.rows);
     const currentMember = await client.query(
       `SELECT 1 FROM property_membership pm
         JOIN app_user u ON u.id = pm.user_id
@@ -311,12 +316,12 @@ export async function createPropertyInvitation(
     const invitation = await client.query<{ id: string }>(
       `INSERT INTO property_invitation(
          property_id, email, token_hash, invited_by, expires_at, job_title,
-         pay_amount, pay_currency, pay_frequency, employment_notes
-       ) VALUES($1,$2,$3,$4,$5,$6,$7,'USD',$8,$9) RETURNING id`,
+         pay_amount, pay_currency, pay_frequency, employment_notes, access_until
+       ) VALUES($1,$2,$3,$4,$5,$6,$7,'USD',$8,$9,$10) RETURNING id`,
       [
         context.propertyId, input.email, invitationToken.hash, auth.userId, expiresAt,
         input.jobTitle ?? null, input.payAmount ?? null, input.payFrequency ?? null,
-        input.employmentNotes ?? null,
+        input.employmentNotes ?? null,input.accessUntil??null,
       ],
     );
     const invitationId = invitation.rows[0]!.id;
@@ -474,26 +479,31 @@ export async function updatePropertyMembershipRoles(auth:AuthState,context:Prope
   input:z.infer<typeof membershipRolesSchema>,metadata:RequestMetadata){
   return inTransaction(async client=>{
     await requireOwner(client,auth,context);
-    const member=(await client.query(`SELECT pm.user_id,pm.status,p.owner_user_id=pm.user_id AS primary_owner
+    const member=(await client.query(`SELECT pm.user_id,pm.status,pm.access_until::text,p.owner_user_id=pm.user_id AS primary_owner
       FROM property_membership pm JOIN property p ON p.id=pm.property_id
       WHERE pm.id=$1 AND pm.property_id=$2 FOR UPDATE OF pm`,[membershipId,context.propertyId])).rows[0];
     if(!member||member.status==='ENDED')throw notFound('La persona ya no tiene acceso a esta propiedad.');
     if(member.user_id===auth.userId)throw forbidden('SELF_MEMBERSHIP_PROTECTED','Pide a otro propietario que cambie tus roles.');
+    if(input.expectedAccessUntil!==undefined&&input.expectedAccessUntil!==member.access_until)throw conflict('MEMBERSHIP_ROLES_CHANGED','La vigencia cambió. Recarga la lista antes de guardar.');
     const previous=(await client.query('SELECT role_id FROM membership_role WHERE membership_id=$1 ORDER BY role_id',[membershipId])).rows.map(row=>row.role_id as string);
     if(previous.join(',')!==[...input.expectedRoleIds].sort().join(','))throw conflict('MEMBERSHIP_ROLES_CHANGED','Los roles cambiaron. Recarga la lista antes de guardar.');
     const roles=(await client.query('SELECT id,code FROM property_role WHERE property_id=$1 AND id=ANY($2::uuid[]) AND active FOR SHARE',
       [context.propertyId,input.roleIds])).rows;
     if(roles.length!==input.roleIds.length)throw new ApiError(400,'INVALID_ROLES','Uno o más roles no pertenecen a la propiedad.');
+    const accessUntil=input.accessUntil===undefined?member.access_until:input.accessUntil;
+    await validateAccessUntil(client,context.propertyId,accessUntil,roles);
     if(member.primary_owner&&!roles.some(role=>role.code==='OWNER'))throw forbidden('OWNER_MEMBERSHIP_PROTECTED','El propietario principal debe conservar su rol de dueño.');
     await client.query(`UPDATE user_session SET active_property_id=NULL,active_role_id=NULL
       WHERE user_id=$1 AND active_property_id=$2 AND NOT(active_role_id=ANY($3::uuid[])) AND revoked_at IS NULL`,
       [member.user_id,context.propertyId,input.roleIds]);
+    await client.query('UPDATE property_membership SET access_until=NULL WHERE id=$1',[membershipId]);
     await client.query('DELETE FROM membership_role WHERE membership_id=$1 AND NOT(role_id=ANY($2::uuid[]))',[membershipId,input.roleIds]);
     await client.query(`INSERT INTO membership_role(membership_id,property_id,role_id,assigned_by)
       SELECT $1,$2,unnest($3::uuid[]),$4 ON CONFLICT DO NOTHING`,[membershipId,context.propertyId,input.roleIds,auth.userId]);
+    await client.query('UPDATE property_membership SET access_until=$2 WHERE id=$1',[membershipId,accessUntil]);
     await audit(client,{auth,context,metadata,action:'PROPERTY_MEMBER_ROLES_UPDATED',entityType:'PROPERTY_MEMBERSHIP',entityId:membershipId,
-      beforeData:{roleIds:previous},afterData:{roleIds:input.roleIds}});
-    return {roleIds:input.roleIds};
+      beforeData:{roleIds:previous,accessUntil:member.access_until},afterData:{roleIds:input.roleIds,accessUntil}});
+    return {roleIds:input.roleIds,accessUntil};
   });
 }
 
@@ -504,7 +514,7 @@ export async function acceptPropertyInvitation(
 ) {
   return inTransaction(async (client) => {
     const result = await client.query<InvitationRow>(
-      `SELECT pi.id, pi.email::text, pi.expires_at, pi.job_title,
+      `SELECT pi.id, pi.email::text, pi.expires_at, pi.access_until::text, pi.job_title,
               pi.pay_amount::text, pi.pay_currency, pi.pay_frequency, pi.employment_notes,
               p.id AS property_id, p.name AS property_name, aa.name AS account_name,
               inviter.display_name AS inviter_name, true AS existing_user
@@ -533,6 +543,7 @@ export async function acceptPropertyInvitation(
         throw forbidden('INVITATION_AUTHORITY_REVOKED','Quien te invitó ya no tiene permiso para conceder este rol. Solicita una nueva invitación.');
     }
 
+    await validateAccessUntil(client,invitation.property_id,invitation.access_until,roles);
     const existing = await client.query<{ id: string; status: string }>(
       `SELECT id, status FROM property_membership
         WHERE property_id = $1 AND user_id = $2 FOR UPDATE`,
@@ -544,7 +555,7 @@ export async function acceptPropertyInvitation(
     const membership = existing.rows[0]
       ? await client.query<{ id: string }>(
         `UPDATE property_membership
-            SET status = 'ACTIVE', job_title = $3, joined_at = now(), ended_at = NULL
+            SET status = 'ACTIVE', job_title = $3, joined_at = now(), ended_at = NULL, access_until=NULL
           WHERE id = $1 AND property_id = $2 RETURNING id`,
         [existing.rows[0].id, invitation.property_id, invitation.job_title],
       )
@@ -561,6 +572,7 @@ export async function acceptPropertyInvitation(
          FROM invitation_role ir WHERE ir.invitation_id = $3`,
       [membershipId, auth.userId, invitation.id],
     );
+    await client.query('UPDATE property_membership SET access_until=$2 WHERE id=$1',[membershipId,invitation.access_until]);
     if (invitation.job_title) {
       await client.query(
         `UPDATE employment_term SET valid_until = current_date
@@ -602,5 +614,25 @@ export async function acceptPropertyInvitation(
       roleId: roles[0]!.id,
       roles,
     };
+  });
+}
+
+async function validateAccessUntil(client:PoolClient,propertyId:string,value:string|null|undefined,roles:Array<{code:string}>){
+  if(!value)return;
+  if(roles.some(role=>role.code==='OWNER'))throw new ApiError(400,'OWNER_ACCESS_PERMANENT','El acceso de los propietarios debe ser permanente.');
+  const valid=await client.query('SELECT $2::date >= (now() AT TIME ZONE timezone)::date AS valid FROM property WHERE id=$1',[propertyId,value]);
+  if(!valid.rows[0]?.valid)throw new ApiError(400,'ACCESS_UNTIL_PAST','La fecha de acceso debe ser hoy o posterior.');
+}
+
+export async function createPropertyRole(auth:AuthState,context:PropertyContext,input:z.infer<typeof createRoleSchema>,metadata:RequestMetadata){
+  return inTransaction(async client=>{
+    await requireOwner(client,auth,context);
+    const valid=await client.query('SELECT code FROM permission_catalog WHERE code=ANY($1::varchar[])',[input.permissions]);
+    if(valid.rowCount!==input.permissions.length)throw new ApiError(400,'INVALID_PERMISSIONS','Uno o más permisos no existen.');
+    const role=(await client.query(`INSERT INTO property_role(property_id,code,name,description,created_by)
+      VALUES($1,$2,$3,$4,$5) RETURNING id,version`,[context.propertyId,'CUSTOM_'+randomUUID(),input.name,input.description,auth.userId])).rows[0]!;
+    await client.query('INSERT INTO role_permission(role_id,permission_code) SELECT $1,unnest($2::varchar[])',[role.id,input.permissions]);
+    await audit(client,{auth,context,metadata,action:'PROPERTY_ROLE_CREATED',entityType:'PROPERTY_ROLE',entityId:role.id,afterData:input});
+    return role;
   });
 }

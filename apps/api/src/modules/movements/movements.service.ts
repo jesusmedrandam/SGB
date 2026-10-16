@@ -24,7 +24,7 @@ async function access(client:PoolClient,auth:AuthState,context:PropertyContext,p
   const row=await superadminPropertyAccess(client,auth,context)??(await client.query<{account_id:string;today:string}>(
     `SELECT p.account_id,(now() AT TIME ZONE p.timezone)::date::text AS today
      FROM property p JOIN administrative_account aa ON aa.id=p.account_id AND aa.status='ACTIVE'
-     JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND pm.status='ACTIVE'
+     JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND membership_access_valid(pm)
      JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=p.id
      JOIN property_role pr ON pr.id=mr.role_id AND pr.property_id=p.id AND pr.active
      JOIN role_permission rp ON rp.role_id=pr.id AND rp.permission_code=$4
@@ -42,7 +42,7 @@ async function destinationAccess(client:PoolClient,auth:AuthState,accountId:stri
   const row=(await client.query<{id:string}>(
     `SELECT p.id FROM property p
      JOIN administrative_account aa ON aa.id=p.account_id AND aa.status='ACTIVE'
-     JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND pm.status='ACTIVE'
+     JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND membership_access_valid(pm)
      JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=p.id
      JOIN property_role pr ON pr.id=mr.role_id AND pr.property_id=p.id AND pr.active
      JOIN role_permission rp ON rp.role_id=pr.id AND rp.permission_code='MOVEMENT_MANAGE'
@@ -121,7 +121,7 @@ export async function listMovementOptions(auth:AuthState,context:PropertyContext
   const [properties,groups,locations,animals]=await Promise.all([
     Boolean(context.isSuperadmin)?pool.query(`SELECT p.id,p.name FROM property p WHERE p.account_id=$1 AND p.deleted_at IS NULL ORDER BY p.name`,[account]):
     pool.query(`SELECT DISTINCT p.id,p.name FROM property p
-      JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND pm.status='ACTIVE'
+      JOIN property_membership pm ON pm.property_id=p.id AND pm.user_id=$2 AND membership_access_valid(pm)
       JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=p.id
       JOIN property_role pr ON pr.id=mr.role_id AND pr.active AND pr.property_id=p.id
       JOIN role_permission rp ON rp.role_id=pr.id AND rp.permission_code='MOVEMENT_MANAGE'
@@ -133,11 +133,11 @@ export async function listMovementOptions(auth:AuthState,context:PropertyContext
       LEFT JOIN group_location_assignment gla ON gla.group_id=g.id AND gla.ended_at IS NULL
       LEFT JOIN physical_location pl ON pl.id=gla.location_id
       WHERE g.account_id=$1 AND g.active AND ($3::boolean OR g.property_id IN
-        (SELECT pm.property_id FROM property_membership pm WHERE pm.user_id=$2 AND pm.status='ACTIVE'))
+        (SELECT pm.property_id FROM property_membership pm WHERE pm.user_id=$2 AND membership_access_valid(pm)))
       ORDER BY lower(g.name)`,[account,auth.userId,Boolean(context.isSuperadmin)]),
     pool.query(`SELECT id,name,kind,property_id AS "propertyId" FROM physical_location
       WHERE account_id=$1 AND active AND ($3::boolean OR property_id IN
-        (SELECT pm.property_id FROM property_membership pm WHERE pm.user_id=$2 AND pm.status='ACTIVE'))
+        (SELECT pm.property_id FROM property_membership pm WHERE pm.user_id=$2 AND membership_access_valid(pm)))
       ORDER BY lower(name)`,[account,auth.userId,Boolean(context.isSuperadmin)]),
     pool.query(`SELECT a.id,a.name,a.ear_tag_code AS "earTagCode",
       aga.group_id AS "groupId",ala.location_id AS "locationId" FROM animal a

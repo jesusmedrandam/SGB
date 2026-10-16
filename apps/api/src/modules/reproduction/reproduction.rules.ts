@@ -20,7 +20,7 @@ export async function requireRulesAdministrator(client:PoolClient,auth:AuthState
   const grant=await client.query(`SELECT 1 FROM property_membership pm
     JOIN membership_role mr ON mr.membership_id=pm.id AND mr.property_id=pm.property_id
     JOIN property_role pr ON pr.id=mr.role_id AND pr.property_id=pm.property_id
-    WHERE pm.property_id=$1 AND pm.user_id=$2 AND pm.status='ACTIVE' AND pr.id=$3
+    WHERE pm.property_id=$1 AND pm.user_id=$2 AND membership_access_valid(pm) AND pr.id=$3
       AND pr.active AND pr.is_system AND pr.code IN ('OWNER','ADMINISTRATOR') FOR SHARE OF pm,pr`,
     [context.propertyId,auth.userId,context.roleId]);
   if(!grant.rowCount)throw forbidden('RULES_ADMINISTRATOR_REQUIRED','Solo los administradores pueden modificar las reglas de la cuenta.');

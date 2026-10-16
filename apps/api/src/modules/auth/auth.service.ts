@@ -65,7 +65,7 @@ async function initialContext(client: PoolClient, userId: string): Promise<Conte
        JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
        JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
        JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = pm.property_id AND pr.active
-      WHERE pm.user_id = $1 AND pm.status = 'ACTIVE'
+      WHERE pm.user_id = $1 AND membership_access_valid(pm)
       ORDER BY
         EXISTS(SELECT 1 FROM membership_role own_mr JOIN property_role own_pr ON own_pr.id=own_mr.role_id AND own_pr.active
           WHERE own_mr.membership_id=pm.id AND own_pr.code='OWNER') DESC,
@@ -100,7 +100,7 @@ async function contextIsValid(
        JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
       WHERE pm.user_id = $1
         AND pm.property_id = $2
-        AND pm.status = 'ACTIVE'
+        AND membership_access_valid(pm)
         AND pr.id = $3
         AND pr.active
         AND p.deleted_at IS NULL
@@ -707,7 +707,7 @@ export async function changeContext(
          JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
          JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
          JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = pm.property_id AND pr.active
-        WHERE pm.user_id = $1 AND pm.property_id = $2 AND pm.status = 'ACTIVE' AND pr.id = $3`,
+        WHERE pm.user_id = $1 AND pm.property_id = $2 AND membership_access_valid(pm) AND pr.id = $3`,
       [auth.userId, propertyId, roleId],
     );
     const context = result.rows[0];
@@ -799,7 +799,7 @@ export async function getSessionOverview(auth: AuthState) {
        JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
        JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
        JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = pm.property_id AND pr.active
-      WHERE pm.user_id = $1 AND pm.status = 'ACTIVE'
+      WHERE pm.user_id = $1 AND membership_access_valid(pm)
       ORDER BY is_owner DESC, p.name, pr.name`,
     [auth.userId],
   );

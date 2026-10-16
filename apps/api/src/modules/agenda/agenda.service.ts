@@ -51,7 +51,7 @@ export async function listAgendaOptions(context:PropertyContext){
   const [users,animals]=await Promise.all([
     pool.query(`SELECT u.id,u.display_name AS name FROM property_membership pm
       JOIN app_user u ON u.id=pm.user_id AND u.status='ACTIVE' AND u.deleted_at IS NULL
-      WHERE pm.property_id=$1 AND pm.status='ACTIVE'
+      WHERE pm.property_id=$1 AND membership_access_valid(pm)
       ORDER BY lower(u.display_name) LIMIT 500`,[context.propertyId]),
     pool.query(`SELECT id,name,ear_tag_code AS "earTagCode" FROM animal
       WHERE property_id=$1 AND record_status='CURRENT' ORDER BY lower(name) LIMIT 5000`,
@@ -82,7 +82,7 @@ export async function createAgendaItem(auth:AuthState,context:PropertyContext,in
   return inTransaction(async client=>{
     await superadminPropertyAccess(client,auth,context);
     const participants=(await client.query<{id:string}>(`SELECT user_id AS id
-      FROM property_membership WHERE property_id=$1 AND status='ACTIVE'
+      FROM property_membership pm WHERE property_id=$1 AND membership_access_valid(pm)
       AND user_id=ANY($2::uuid[])`,[context.propertyId,input.userIds])).rows;
     if(participants.length!==input.userIds.length)
       throw invalidRequest('AGENDA_USER_INVALID','Algunos usuarios ya no pertenecen a esta propiedad.');
@@ -105,7 +105,7 @@ export async function createAgendaItem(auth:AuthState,context:PropertyContext,in
       SELECT recipients.user_id,$2,$1,'AGENDA_ASSIGNED',$3,$4
       FROM (SELECT ap.user_id FROM agenda_participant ap WHERE ap.item_id=$1
         UNION SELECT pm.user_id FROM property_membership pm
-          WHERE pm.property_id=$2 AND pm.status='ACTIVE' AND $5='ALL') recipients
+          WHERE pm.property_id=$2 AND membership_access_valid(pm) AND $5='ALL') recipients
       WHERE recipients.user_id<>$6
       ON CONFLICT(user_id,agenda_item_id,kind) DO NOTHING`,
       [id,context.propertyId,input.title,input.kind==='TASK'?'Tienes una tarea asignada.':

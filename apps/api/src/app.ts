@@ -8,6 +8,7 @@ import { pool } from './database/pool.js';
 import { requestId } from './middleware/request-id.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { animalsRouter } from './modules/animals/animals.routes.js';
+import {inventoryRouter} from './modules/animals/inventory.routes.js';
 import { brandsRouter } from './modules/animals/brands.routes.js';
 import { ownersRouter } from './modules/animals/owners.routes.js';
 import { groupsRouter, locationsRouter } from './modules/groups/groups.routes.js';
@@ -79,8 +80,9 @@ app.get('/health/ready', asyncHandler(async (_request, response) => {
     EXISTS(SELECT 1 FROM module_catalog WHERE code='REPRODUCTION_HEATS') AS reproduction_sections,
     EXISTS(SELECT 1 FROM schema_migration WHERE filename='0042_animal_classification_history.sql') AS classification_rules,EXISTS(SELECT 1 FROM schema_migration WHERE filename='0043_external_animal_transfers.sql') AS external_transfers,EXISTS(SELECT 1 FROM schema_migration WHERE filename='0044_external_transfer_visibility.sql') AS external_visibility,
     EXISTS(SELECT 1 FROM schema_migration WHERE filename='0045_outside_property_groups.sql') AS outside_groups,
-    EXISTS(SELECT 1 FROM schema_migration WHERE filename='0046_return_transfers_and_shared_ownership.sql') AS shared_ownership`);
-  response.json({externalTransferReturnsReady:features.rows[0].shared_ownership,propertyCoOwnersReady:features.rows[0].shared_ownership,outsidePropertyGroupsReady:features.rows[0].outside_groups,receivedAnimalHistoryCopiesReady:true,externalTransferVisibilityReady:features.rows[0].external_visibility,externalAnimalTransfersReady:features.rows[0].external_transfers, animalDetailsReady:true,reproductiveSourceIntegrityReady:true,mediaRecordDetailsReady:true,manualPregnancySourceReady:true,animalActionsReady:true,reproductionCycleReady:true,animalClassificationRulesReady:features.rows[0].classification_rules,reproductionFlowReady:features.rows[0].reproduction_sections,accountReproductionRulesReady:features.rows[0].reproduction,draftExpiryReady:features.rows[0].drafts,propertyInformationReady:features.rows[0].properties,ok: true, database: 'ready',accountCatalogReady:catalogs.rows[0]?.ready===true,supportReady:result.rows[0]?.support_ready===true,
+    EXISTS(SELECT 1 FROM schema_migration WHERE filename='0046_return_transfers_and_shared_ownership.sql') AS shared_ownership,
+    EXISTS(SELECT 1 FROM schema_migration WHERE filename='0047_herd_followup_and_access.sql') AS herd_improvements`);
+  response.json({herdImprovementsReady:features.rows[0].herd_improvements,externalTransferReturnsReady:features.rows[0].shared_ownership,propertyCoOwnersReady:features.rows[0].shared_ownership,outsidePropertyGroupsReady:features.rows[0].outside_groups,receivedAnimalHistoryCopiesReady:true,externalTransferVisibilityReady:features.rows[0].external_visibility,externalAnimalTransfersReady:features.rows[0].external_transfers, animalDetailsReady:true,reproductiveSourceIntegrityReady:true,mediaRecordDetailsReady:true,manualPregnancySourceReady:true,animalActionsReady:true,reproductionCycleReady:true,animalClassificationRulesReady:features.rows[0].classification_rules,reproductionFlowReady:features.rows[0].reproduction_sections,accountReproductionRulesReady:features.rows[0].reproduction,draftExpiryReady:features.rows[0].drafts,propertyInformationReady:features.rows[0].properties,ok: true, database: 'ready',accountCatalogReady:catalogs.rows[0]?.ready===true,supportReady:result.rows[0]?.support_ready===true,
     supportModesReady:result.rows[0]?.support_modes_ready===true,medicineDosesReady:result.rows[0]?.medicine_doses_ready===true,
     medicineClassificationDosesReady:result.rows[0]?.medicine_classification_doses_ready===true,
     userProfileReady:result.rows[0]?.user_profile_ready===true,
@@ -90,6 +92,7 @@ app.get('/health/ready', asyncHandler(async (_request, response) => {
 }));
 
 app.use('/auth', authRouter);
+app.use('/inventory', inventoryRouter);
 app.use('/animals', animalsRouter);
 app.use('/animal-brands', brandsRouter);
 app.use('/owners', ownersRouter);

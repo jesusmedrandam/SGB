@@ -183,7 +183,7 @@ export async function createAccountProperty(auth: AuthState, context: PropertyCo
        JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
        JOIN property_role pr ON pr.id = mr.role_id AND pr.active
        JOIN role_permission rp ON rp.role_id = pr.id AND rp.permission_code = 'PROPERTY_CREATE'
-       WHERE pm.property_id = $1 AND pm.user_id = $2 AND pm.status = 'ACTIVE' AND pr.id = $3
+       WHERE pm.property_id = $1 AND pm.user_id = $2 AND membership_access_valid(pm) AND pr.id = $3
          AND pr.code IN ('OWNER','ADMINISTRATOR') AND p.account_id = $4`,
       [context.propertyId, auth.userId, context.roleId, row.id],
     );
@@ -260,7 +260,7 @@ async function ensurePropertyManagement(client:PoolClient,auth:AuthState,context
        JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = pm.property_id
        JOIN property_role pr ON pr.id = mr.role_id AND pr.active
        JOIN role_permission rp ON rp.role_id = pr.id AND rp.permission_code = 'MODULE_MANAGE'
-       WHERE pm.property_id = $1 AND pm.user_id = $2 AND pm.status = 'ACTIVE' AND pr.id = $3`,
+       WHERE pm.property_id = $1 AND pm.user_id = $2 AND membership_access_valid(pm) AND pr.id = $3`,
       [context.propertyId, auth.userId, context.roleId],
     );
     if (!grant.rowCount) throw forbidden('MODULE_MANAGE_DENIED', 'El rol activo no permite configurar módulos.');

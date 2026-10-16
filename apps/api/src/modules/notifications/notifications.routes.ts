@@ -6,8 +6,9 @@ import {authenticate} from '../auth/auth.middleware.js';
 const id=z.object({id:z.uuid()});
 export const notificationsRouter=Router();notificationsRouter.use(authenticate);
 notificationsRouter.get('/',asyncHandler(async(req,res)=>{
+  await pool.query('SELECT notify_outside_returns($1)',[req.auth!.userId]);
   const rows=(await pool.query(`SELECT n.id,n.kind,n.title,n.message,
-    n.external_transfer_id AS "externalTransferId",n.agenda_item_id AS "agendaItemId",n.property_id AS "propertyId",
+    n.outside_group_id AS "outsideGroupId",n.access_event_id::text AS "accessEventId",n.external_transfer_id AS "externalTransferId",n.agenda_item_id AS "agendaItemId",n.property_id AS "propertyId",
     p.name AS "propertyName",n.read_at AS "readAt",n.created_at AS "createdAt"
     FROM app_notification n JOIN property p ON p.id=n.property_id
     WHERE n.user_id=$1 ORDER BY n.created_at DESC,n.id DESC LIMIT 100`,[req.auth!.userId])).rows;

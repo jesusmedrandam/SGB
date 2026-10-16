@@ -1,3 +1,5 @@
+import type {z} from 'zod';
+import type {createGroupSchema,updateGroupSchema} from './groups.schemas.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
@@ -11,6 +13,7 @@ import { locationOccupations, type LocationStay } from './location-occupations.j
 type Kind = 'PASTURE' | 'CORRAL';
 interface GroupRow {
   id: string; name: string; description: string | null; active: boolean; version: string;
+  external_phone:string|null;departed_on:string|null;expected_return_on:string|null;external_notes:string|null;
   location_id: string | null; location_name: string | null; location_kind: Kind | null;
   animal_count: string;kind:'INTERNAL'|'EXTERNAL';external_place:string|null;external_contact:string|null;
 }
@@ -24,7 +27,7 @@ interface LocationRow {
   group_id: string | null; group_name: string | null;
 }
 
-const groupFields = `lg.id, lg.name, lg.description, lg.active, lg.version::text,lg.kind,lg.external_place,lg.external_contact,
+const groupFields = `lg.id, lg.name, lg.description, lg.active, lg.version::text,lg.kind,lg.external_place,lg.external_contact,lg.external_phone,lg.departed_on::text,lg.expected_return_on::text,lg.external_notes,
   pl.id AS location_id, pl.name AS location_name, pl.kind AS location_kind,
   (SELECT count(*)::text FROM animal_group_assignment aga JOIN animal a ON a.id = aga.animal_id
     WHERE aga.group_id = lg.id AND aga.ended_at IS NULL AND a.record_status = 'CURRENT'
@@ -36,6 +39,7 @@ const groupJoins = `FROM livestock_group lg
 const group = (row: GroupRow) => ({
   id: row.id, name: row.name, description: row.description, active: row.active,
   kind:row.kind,externalPlace:row.external_place,externalContact:row.external_contact,
+  externalPhone:row.external_phone,departedOn:row.departed_on,expectedReturnOn:row.expected_return_on,externalNotes:row.external_notes,
   version: Number(row.version), animalCount: Number(row.animal_count),
   location: row.location_id ? { id: row.location_id, name: row.location_name!, kind: row.location_kind! } : null,
 });
@@ -113,7 +117,7 @@ async function access(client: PoolClient, auth: AuthState, context: PropertyCont
     const result=supportResult?{rows:[supportResult],rowCount:1}:await client.query<{ account_id: string }>(
     `SELECT p.account_id FROM property p
      JOIN administrative_account aa ON aa.id = p.account_id AND aa.status = 'ACTIVE'
-     JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND pm.status = 'ACTIVE'
+     JOIN property_membership pm ON pm.property_id = p.id AND pm.user_id = $2 AND membership_access_valid(pm)
      JOIN membership_role mr ON mr.membership_id = pm.id AND mr.property_id = p.id
      JOIN property_role pr ON pr.id = mr.role_id AND pr.property_id = p.id AND pr.active
      JOIN role_permission rp ON rp.role_id = pr.id AND rp.permission_code = $4
@@ -265,13 +269,13 @@ export async function updateLocation(auth: AuthState, context: PropertyContext, 
 }
 
 export async function createGroup(auth: AuthState, context: PropertyContext,
-  input: { name: string; description?: string | null | undefined;
-    locationId?: string | null | undefined;kind?:'INTERNAL'|'EXTERNAL';externalPlace?:string|null|undefined;externalContact?:string|null|undefined },
+  input: z.input<typeof createGroupSchema>,
   metadata: RequestMetadata) {
   try {
     return await inTransaction(async (client) => {
       const accountId = await access(client, auth, context, 'GROUP_MANAGE');
       const kind=input.kind??'INTERNAL';
+      validateFollowup(kind,input);
       if(kind==='EXTERNAL'&&(!input.externalPlace?.trim()||input.locationId)||kind==='INTERNAL'&&(input.externalPlace||input.externalContact))
         throw invalidRequest('GROUP_EXTERNAL_INVALID','Indica el lugar externo sin asignar potrero o corral.');
       if(kind==='INTERNAL'&&!input.locationId)throw invalidRequest('GROUP_LOCATION_REQUIRED','Selecciona un potrero o corral para el grupo.');
@@ -281,8 +285,8 @@ export async function createGroup(auth: AuthState, context: PropertyContext,
       }
       const inserted = await client.query<{ id: string }>(
         `INSERT INTO livestock_group(account_id, property_id, name, description,
-          created_by, updated_by,kind,external_place,external_contact) VALUES($1,$2,$3,$4,$5,$5,$6,$7,$8) RETURNING id`,
-        [accountId, context.propertyId, input.name, input.description || null, auth.userId,kind,input.externalPlace?.trim()||null,input.externalContact?.trim()||null],
+          created_by, updated_by,kind,external_place,external_contact,external_phone,departed_on,expected_return_on,external_notes) VALUES($1,$2,$3,$4,$5,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+        [accountId, context.propertyId, input.name, input.description || null, auth.userId,kind,input.externalPlace?.trim()||null,input.externalContact?.trim()||null,input.externalPhone||null,input.departedOn??null,input.expectedReturnOn??null,input.externalNotes||null],
       );
       const id = inserted.rows[0]!.id;
       if (input.locationId) await client.query(
@@ -299,7 +303,7 @@ export async function createGroup(auth: AuthState, context: PropertyContext,
 }
 
 export async function updateGroup(auth: AuthState, context: PropertyContext, id: string,
-  input: { name: string; description?: string | null | undefined; expectedVersion: number;externalPlace?:string|null|undefined;externalContact?:string|null|undefined },
+  input: z.infer<typeof updateGroupSchema>,
   metadata: RequestMetadata) {
   try {
     return await inTransaction(async (client) => {
@@ -317,10 +321,12 @@ export async function updateGroup(auth: AuthState, context: PropertyContext, id:
       const description = input.description === undefined ? before.description : input.description || null;
       const externalPlace=input.externalPlace===undefined?before.externalPlace:input.externalPlace?.trim()||null;
       const externalContact=input.externalContact===undefined?before.externalContact:input.externalContact?.trim()||null;
+      const followup={externalPhone:input.externalPhone===undefined?before.externalPhone:input.externalPhone||null,departedOn:input.departedOn===undefined?before.departedOn:input.departedOn||null,expectedReturnOn:input.expectedReturnOn===undefined?before.expectedReturnOn:input.expectedReturnOn||null,externalNotes:input.externalNotes===undefined?before.externalNotes:input.externalNotes||null};
+      validateFollowup(before.kind,followup);
       if(before.kind==='EXTERNAL'&&!externalPlace||before.kind==='INTERNAL'&&(externalPlace||externalContact))throw invalidRequest('GROUP_EXTERNAL_INVALID','Revisa la referencia del lugar externo.');
-      if (before.name === input.name && before.description === description&&before.externalPlace===externalPlace&&before.externalContact===externalContact) return before;
-      await client.query(`UPDATE livestock_group SET name = $2, description = $3, updated_by = $4,external_place=$5,external_contact=$6 WHERE id = $1`,
-        [id, input.name, description, auth.userId,externalPlace,externalContact]);
+      if (before.name === input.name && before.description === description&&before.externalPlace===externalPlace&&before.externalContact===externalContact&&before.externalPhone===followup.externalPhone&&before.departedOn===followup.departedOn&&before.expectedReturnOn===followup.expectedReturnOn&&before.externalNotes===followup.externalNotes) return before;
+      await client.query(`UPDATE livestock_group SET name = $2, description = $3, updated_by = $4,external_place=$5,external_contact=$6,external_phone=$7,departed_on=$8,expected_return_on=$9,external_notes=$10 WHERE id = $1`,
+        [id, input.name, description, auth.userId,externalPlace,externalContact,followup.externalPhone,followup.departedOn,followup.expectedReturnOn,followup.externalNotes]);
       const after = await getGroup(client, context.propertyId, id);
       await audit(client, auth, context, metadata, 'GROUP_UPDATED', 'LIVESTOCK_GROUP', id, before, after);
       return after;
@@ -522,4 +528,12 @@ export async function assignAnimalToGroup(auth: AuthState, context: PropertyCont
       return after;
     });
   } catch (error) { return translate(error); }
+}
+
+function validateFollowup(kind:string,input:{externalPhone?:string|null|undefined;departedOn?:string|null|undefined;expectedReturnOn?:string|null|undefined;externalNotes?:string|null|undefined}){
+  if(kind!=='EXTERNAL'&&(input.externalPhone||input.departedOn||input.expectedReturnOn||input.externalNotes)){
+    throw invalidRequest('GROUP_FOLLOWUP_EXTERNAL_ONLY','El seguimiento de regreso corresponde a grupos externos.');
+  }
+  if(input.departedOn&&input.expectedReturnOn&&input.expectedReturnOn<input.departedOn)
+    throw invalidRequest('RETURN_BEFORE_DEPARTURE','El regreso previsto no puede ser anterior a la salida.');
 }
