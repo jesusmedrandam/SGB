@@ -82,9 +82,7 @@ function animal(row: AnimalRow) {
     classification:row.classification, brands: row.brands, activePregnancyId:row.active_pregnancy_id??null,
     externalStay:row.external_stay??null,transferredOutAt:row.transferred_out_at??null,lastBirthOn:row.last_birth_on??null,lastLossOn:row.last_loss_on??null,
     hasReproductiveHistory:row.has_reproductive_history??false,registeredBirthDate:row.registered_birth_date??null,
-    profilePhotoUrl:row.profile_photo_asset&&env.CLOUDINARY_CLOUD_NAME
-      ? cloudinary.url(row.profile_photo_asset,{secure:true,cloud_name:env.CLOUDINARY_CLOUD_NAME,
-        width:120,height:120,crop:'fill',quality:'auto',fetch_format:'auto'}) : null,
+    profilePhotoUrl:animalProfilePhotoUrl(row.profile_photo_asset),
     group:row.group_id ? {id:row.group_id,name:row.group_name!}:null,
     location:row.location_id ? {id:row.location_id,name:row.location_name!,kind:row.location_kind!}:null };
 }
@@ -489,3 +487,6 @@ export async function insertAnimalInTransaction(client:PoolClient,auth:AuthState
       );
       return created;
 }
+
+export const animalProfilePhotoUrl=(asset:string|null)=>asset&&env.CLOUDINARY_CLOUD_NAME
+  ?cloudinary.url(asset,{secure:true,cloud_name:env.CLOUDINARY_CLOUD_NAME,width:120,height:120,crop:'fill',quality:'auto',fetch_format:'auto'}):null;
