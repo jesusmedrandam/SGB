@@ -4,6 +4,7 @@ import { pool } from '../../database/pool.js';
 import { hashToken } from '../../security/tokens.js';
 import { idempotentMutation } from '../../middleware/idempotency.js';
 import {superadminPropertyContext} from './superadmin-access.js';
+import {z} from 'zod';
 
 function bearerToken(header: string | undefined): string | null {
   if (!header) return null;
@@ -72,10 +73,19 @@ export const requireSuperadmin: RequestHandler = (request, _response, next) => {
   next();
 };
 
-export const requirePropertyContext: RequestHandler = async (request, _response, next) => {
+export const requirePropertyContext: RequestHandler = async (request, response, next) => {
   try {
-    const auth = request.auth;
+    let auth = request.auth;
     if (!auth) throw unauthorized();
+    const propertyId=request.header('x-sgb-property-id'),roleId=request.header('x-sgb-role-id');
+    if(propertyId!==undefined||roleId!==undefined){
+      if(request.method!=='GET'||auth.supportMode)
+        throw forbidden('READ_CONTEXT_ONLY','La descarga por propiedad solo permite consultas con tus propios accesos.');
+      const target=z.object({propertyId:z.uuid(),roleId:z.uuid()}).parse({propertyId,roleId});
+      // Request-local context: membership, expiry, role and modules are checked below as usual.
+      auth={...auth,activePropertyId:target.propertyId,activeRoleId:target.roleId};
+      request.auth=auth;
+    }
     if (!auth.activePropertyId || !auth.activeRoleId) {
       throw forbidden('PROPERTY_CONTEXT_REQUIRED', 'Selecciona una propiedad y un rol para continuar.');
     }
@@ -131,6 +141,8 @@ export const requirePropertyContext: RequestHandler = async (request, _response,
       enabledModules: new Set(moduleResult.rows.map((row) => row.module_code)),
       enabledSpecies: new Set(speciesResult.rows.map((row) => row.species_code)),
     };
+    response.setHeader('x-sgb-property-id',auth.activePropertyId);
+    response.setHeader('x-sgb-role-id',auth.activeRoleId);
     next();
   } catch (error) {
     next(error);
