@@ -39,7 +39,7 @@ app.disable('x-powered-by');
 if (env.TRUST_PROXY) app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({ origin: env.FRONTEND_URL, credentials: true,
-  exposedHeaders: ['etag', 'x-idempotent-replay','retry-after'] }));
+  exposedHeaders: ['etag', 'x-idempotent-replay','retry-after','x-sgb-property-id','x-sgb-role-id'] }));
 app.use(requestId);
 app.use(express.json({ limit: '1mb' }));
 app.use((request, response, next) => {
@@ -48,13 +48,15 @@ app.use((request, response, next) => {
     // Unchanged records therefore return 304 without downloading the JSON again.
     response.setHeader('cache-control', 'private, no-cache');
     response.vary('authorization');
+    response.vary('x-sgb-property-id');
+    response.vary('x-sgb-role-id');
   }
   next();
 });
 
 app.get('/health', (_request, response) => {
   response.json({ ok: true, service: 'sgb-api', version: '2.0.0-alpha.1',
-    capabilities:['superadmin-support','media-details','selective-offline-media','explicit-support-mode','medicine-weight-dose','medicine-classification-dose','pasture-occupation-history','user-profile','account-email-change','account-sessions','medicine-edit-history','condition-treatment-history','account-catalog-editing','cleaning-sync-validation','draft-expiry-24h','property-information'] });
+    capabilities:['property-download-context','superadmin-support','media-details','selective-offline-media','explicit-support-mode','medicine-weight-dose','medicine-classification-dose','pasture-occupation-history','user-profile','account-email-change','account-sessions','medicine-edit-history','condition-treatment-history','account-catalog-editing','cleaning-sync-validation','draft-expiry-24h','property-information'] });
 });
 
 app.get('/health/ready', asyncHandler(async (_request, response) => {
