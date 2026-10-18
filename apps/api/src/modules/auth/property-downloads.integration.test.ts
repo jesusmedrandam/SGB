@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import test from 'node:test';
 import {app} from '../../app.js';
 import {pool} from '../../database/pool.js';
+import {hashToken} from '../../security/tokens.js';
 import {register,login,getSessionOverview,resendEmailVerification,verifyEmail,changeContext} from './auth.service.js';
 import {createPropertyInvitation,acceptPropertyInvitation,createPropertyRole,getPropertyRoles} from '../collaboration/collaboration.service.js';
 
@@ -51,7 +52,12 @@ test('lecturas por propiedad y rol sin cambiar la sesión, permisos inmediatos y
   assert.equal((await fetch(url+'/animals',{headers:target})).status,403,'Removed role is rejected immediately');
   const saved=(await pool.query('SELECT active_property_id,active_role_id FROM user_session WHERE id=$1',[a.auth.sessionId])).rows[0];
   assert.equal(saved.active_property_id,a.context.propertyId);assert.equal(saved.active_role_id,a.context.roleId);
-  const admin=await login({email:process.env.BOOTSTRAP_SUPERADMIN_EMAIL!,password:process.env.BOOTSTRAP_SUPERADMIN_PASSWORD!,deviceId:randomUUID()},metadata);
+  const adminUser=(await pool.query<{id:string}>('SELECT id FROM app_user WHERE is_superadmin AND deleted_at IS NULL')).rows[0];
+  assert.ok(adminUser,'Run the superadministrator bootstrap before integration tests');
+  const accessToken='property-download-admin-'+randomUUID();
+  const admin={accessToken,sessionId:(await pool.query<{id:string}>(`INSERT INTO user_session(user_id,access_token_hash,refresh_token_hash,device_id,access_expires_at,expires_at)
+    VALUES($1,$2,$3,$4,now()+interval '15 minutes',now()+interval '1 day') RETURNING id`,
+    [adminUser.id,hashToken(accessToken),hashToken(randomUUID()),randomUUID()])).rows[0]!.id};
   const adminTarget={...target,authorization:`Bearer ${admin.accessToken}`,'x-sgb-property-id':c.context.propertyId,'x-sgb-role-id':c.context.roleId};
   assert.equal((await fetch(url+'/animals',{headers:adminTarget})).status,403,'Superadmin user mode cannot download unassigned properties');
   await pool.query('UPDATE user_session SET support_mode=true,active_property_id=$2,active_role_id=$3 WHERE id=$1',[admin.sessionId,c.context.propertyId,c.context.roleId]);
