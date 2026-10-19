@@ -12,6 +12,7 @@ import type { z } from 'zod';
 import {insertInitialParents} from './parents.service.js';
 
 interface AnimalRow {
+  castrated_on:string|null;
   separation_reason?:string|null;counts_for_occupancy?:boolean|null;
   external_stay?:{place:string;contact:string|null}|null;
   id: string;
@@ -42,7 +43,7 @@ interface AnimalRow {
 
 const animalFields = `CASE WHEN NOT EXISTS(SELECT 1 FROM animal_group_assignment aga WHERE aga.animal_id=animal.id AND aga.ended_at IS NULL) THEN
  (SELECT m.reason FROM livestock_movement m JOIN livestock_movement_animal ma ON ma.movement_id=m.id WHERE ma.animal_id=animal.id AND m.kind='SEPARACION' AND m.status='COMPLETADO' ORDER BY m.applied_at DESC LIMIT 1) END AS separation_reason, id, name, description, ear_tag_code, sex, species_code,
-  birth_date::text AS birth_date, entry_date::text AS entry_date,
+  birth_date::text AS birth_date, entry_date::text AS entry_date,castrated_on::text AS castrated_on,
   initial_weight::text AS initial_weight, initial_weight_unit_code,
   availability_status_code, version::text AS version,transferred_out_at,
   (SELECT json_build_object('place',g.external_place,'contact',g.external_contact)
@@ -77,7 +78,7 @@ const animalFields = `CASE WHEN NOT EXISTS(SELECT 1 FROM animal_group_assignment
 function animal(row: AnimalRow) {
   return { id: row.id, name: row.name, description: row.description,
     earTagCode: row.ear_tag_code, sex: row.sex,
-    speciesCode: row.species_code, birthDate: row.birth_date, entryDate: row.entry_date,
+    speciesCode: row.species_code, birthDate: row.birth_date, entryDate: row.entry_date,castratedOn:row.castrated_on??null,
     initialWeight: row.initial_weight === null ? null : Number(row.initial_weight),
     initialWeightUnitCode: row.initial_weight_unit_code,
     availabilityStatusCode: row.availability_status_code, version: Number(row.version),

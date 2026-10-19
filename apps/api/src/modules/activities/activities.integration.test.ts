@@ -2,6 +2,8 @@ import {createLocation} from '../groups/groups.service.js';
 import {createGroup} from '../groups/groups.service.js';
 import {inTransaction} from '../../database/transaction.js';
 import {expireDrafts} from '../../core/drafts.js';
+import {captureAnimal} from '../movements/external-transfers.history.js';
+import {validateTarget} from '../media/media.service.js';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import test from 'node:test';
@@ -87,5 +89,28 @@ test('actividades aplican herraje una vez, conservan historial y respetan la pro
     assert.equal((await pool.query("SELECT count(*)::int AS total FROM audit_event WHERE entity_id=$1 AND action LIKE '%DRAFT_EXPIRED'",[expires.id])).rows[0].total,1);
     assert.equal(await expireDrafts(),0,'Expiration is idempotent');
     assert.equal((await pool.query('SELECT expired_at FROM livestock_activity WHERE id=$1',[applied.id])).rows[0].expired_at,null,'Applied records survive');
+    const castration={kind:'CASTRACION' as const,title:'Castración de macho',occurredOn:today,animalIds:[other.id]};
+    await assert.rejects(()=>createActivity(auth,context,{...castration,animalIds:[first.id]},metadata),
+      (error:{code?:string})=>error.code==='CASTRATION_ANIMAL_INVALID');
+    const cancelledCastration=await createActivity(auth,context,castration,metadata);
+    assert.equal((await getAnimal(context,other.id)).castratedOn,null,'A draft never changes the animal');
+    await cancelActivity(auth,context,cancelledCastration.id,metadata);
+    assert.equal((await getAnimal(context,other.id)).castratedOn,null);
+    const one=await createActivity(auth,context,castration,metadata);
+    const two=await createActivity(auth,context,castration,metadata);
+    await applyActivity(auth,context,one.id,metadata);
+    assert.equal((await getAnimal(context,other.id)).castratedOn,today);
+    await inTransaction(async client=>{assert.equal((await captureAnimal(client,context,other.id)).profile.castratedOn,today);});
+    await assert.rejects(()=>pool.query("UPDATE animal SET sex='FEMALE' WHERE id=$1",[other.id]),(error:{code?:string})=>error.code==='23514');
+    const noCastrationView={...context,permissions:new Set([...context.permissions].filter(code=>code!=='CASTRATION_VIEW'))};
+    await assert.rejects(()=>inTransaction(client=>validateTarget(client,noCastrationView,'LIVESTOCK_ACTIVITY',one.id)),(error:{code?:string})=>error.code==='MEDIA_TARGET_NOT_FOUND');
+    await pool.query("DELETE FROM role_permission WHERE role_id=$1 AND permission_code='CASTRATION_MANAGE'",[role.id]);
+    await assert.rejects(()=>cancelActivity(auth,context,two.id,metadata),(error:{code?:string})=>error.code==='ACTIVITY_DENIED');
+    await pool.query("INSERT INTO role_permission(role_id,permission_code) VALUES($1,'CASTRATION_MANAGE')",[role.id]);
+    await assert.rejects(()=>applyActivity(auth,context,two.id,metadata),(error:{code?:string})=>error.code==='CASTRATION_ANIMAL_INVALID');
+    await assert.rejects(()=>createActivity(auth,context,castration,metadata),(error:{code?:string})=>error.code==='CASTRATION_ANIMAL_INVALID');
+    await pool.query("UPDATE property_module SET enabled=false WHERE property_id=$1 AND module_code='CASTRATION'",[property.id]);
+    await assert.rejects(()=>cancelActivity(auth,context,two.id,metadata),(error:{code?:string})=>error.code==='ACTIVITY_DENIED');
+    assert.equal((await listActivities({...context,enabledModules:new Set([...context.enabledModules].filter(code=>code!=='CASTRATION'))})).some(row=>row.kind==='CASTRACION'),false);
   }finally{await pool.end();}
 });

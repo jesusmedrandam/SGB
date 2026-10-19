@@ -62,6 +62,7 @@ export async function validateTarget(client:PoolClient,context:PropertyContext,t
   if(!context.permissions.has(target.permission))
     throw forbidden('PERMISSION_DENIED','Tu rol no tiene acceso a este registro.');
   const result=await client.query(`SELECT 1 FROM ${target.table} WHERE id=$1 AND ${target.property}=$2
+    ${type==='LIVESTOCK_ACTIVITY'&&!context.isSuperadmin&&!(context.enabledModules.has('CASTRATION')&&context.permissions.has('CASTRATION_VIEW'))?"AND kind<>'CASTRACION'":''}
     ${target.condition?`AND ${target.condition}`:''}`,[id,context.propertyId]);
   if(!result.rowCount)throw invalidRequest('MEDIA_TARGET_NOT_FOUND','El registro no pertenece a esta propiedad.');
 }
@@ -179,16 +180,18 @@ export async function listMedia(context:PropertyContext,type?:string,id?:string,
     JOIN storage_object so ON so.id=ma.storage_object_id AND so.status='AVAILABLE'
     LEFT JOIN LATERAL (SELECT source.entity_type,source.entity_id FROM media_attachment source
       WHERE source.property_id=ma.property_id AND source.storage_object_id=ma.storage_object_id
+        AND (source.entity_type<>'LIVESTOCK_ACTIVITY' OR $8::boolean OR NOT EXISTS(SELECT 1 FROM livestock_activity ca WHERE ca.id=source.entity_id AND ca.kind='CASTRACION'))
         AND source.deleted_at IS NULL AND source.entity_type=ANY($4::varchar[])
         AND source.entity_type NOT IN ('ANIMAL','PROPERTY')
       ORDER BY (source.id=ma.id) DESC,source.id LIMIT 1) source_record ON true
     LEFT JOIN animal ON animal.id=ma.entity_id AND ma.entity_type='ANIMAL'
     WHERE ma.property_id=$1 AND ma.deleted_at IS NULL AND ma.entity_type=ANY($4::varchar[])
+      AND (ma.entity_type<>'LIVESTOCK_ACTIVITY' OR $8::boolean OR NOT EXISTS(SELECT 1 FROM livestock_activity ca WHERE ca.id=ma.entity_id AND ca.kind='CASTRACION'))
       AND ($2::varchar IS NULL OR ma.entity_type=$2) AND ($3::uuid IS NULL OR ma.entity_id=$3)
       AND ($5::uuid IS NULL OR ma.storage_object_id=$5)
       AND ($7::uuid[] IS NULL OR ma.id=ANY($7::uuid[]))
     ORDER BY COALESCE(ma.captured_on,so.created_at::date) DESC,so.created_at DESC,ma.id DESC LIMIT 500 OFFSET $6`,
-    [context.propertyId,type??null,id??null,visible,objectId??null,(page-1)*500,attachmentIds??null]);
+    [context.propertyId,type??null,id??null,visible,objectId??null,(page-1)*500,attachmentIds??null,Boolean(context.isSuperadmin)||context.enabledModules.has('CASTRATION')&&context.permissions.has('CASTRATION_VIEW')]);
   return rows.rows.map(({provider_asset_id,...row})=>({...row,byteSize:Number(row.byte_size),
     url:url(provider_asset_id,row.kind),
     thumbnailUrl:row.kind==='IMAGE'?cloudinary.url(provider_asset_id,{secure:true,

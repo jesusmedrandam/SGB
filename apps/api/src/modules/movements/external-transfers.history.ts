@@ -82,7 +82,7 @@ export async function captureAnimal(client:PoolClient,context:PropertyContext,id
     [`${row.display_name}: ${row.ownership_percent}%`,row.valid_until?`Hasta: ${row.valid_until}`:null]);
   const activities=(await client.query(`SELECT a.id,a.title,a.occurred_on::text,a.description,a.kind FROM livestock_activity a
     JOIN livestock_activity_animal x ON x.activity_id=a.id WHERE a.property_id=$1 AND x.animal_id=$2 AND a.status='COMPLETADA' ORDER BY a.id`,[context.propertyId,id])).rows;
-  for(const row of activities)add('TASKS','LIVESTOCK_ACTIVITY',row,row.title,row.occurred_on,row.description,[]);
+  for(const row of activities)add(row.kind==='CASTRACION'?'CASTRATION':'TASKS','LIVESTOCK_ACTIVITY',row,row.title,row.occurred_on,row.description,[]);
   const identity=(await client.query('SELECT identity_id FROM animal WHERE id=$1',[id])).rows[0].identity_id as string;
   for(const row of history.values())if(sharing&&!context.permissions.has(modulePermissions[row.module]??'ANIMAL_VIEW'))
     throw forbidden('EXTERNAL_HISTORY_PERMISSION_REQUIRED','Tu rol necesita permiso para consultar todo el historial que se compartirá.');
@@ -118,7 +118,7 @@ export async function captureAnimal(client:PoolClient,context:PropertyContext,id
 }
 
 const modulePermissions:Record<string,string>={CORE:'ANIMAL_VIEW',REPRODUCTION:'REPRODUCTION_VIEW',HEALTH:'HEALTH_VIEW',
-  WEIGHING:'WEIGHING_VIEW',PRODUCTION:'PRODUCTION_VIEW',MOVEMENTS:'MOVEMENT_VIEW',TASKS:'ACTIVITY_VIEW'};
+  WEIGHING:'WEIGHING_VIEW',PRODUCTION:'PRODUCTION_VIEW',MOVEMENTS:'MOVEMENT_VIEW',TASKS:'ACTIVITY_VIEW',CASTRATION:'CASTRATION_VIEW'};
 export function visibleAnimalSnapshot(snapshot:AnimalTransferSnapshot,context:PropertyContext){
   const types=visibleMediaTypes(context);const can=(module:string)=>context.enabledModules.has(module)&&context.permissions.has(modulePermissions[module]!);
   return {profile:context.permissions.has('ANIMAL_VIEW')?snapshot.profile:null,
