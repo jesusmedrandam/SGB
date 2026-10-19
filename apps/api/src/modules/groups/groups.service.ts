@@ -8,16 +8,19 @@ import { pool } from '../../database/pool.js';
 import { inTransaction } from '../../database/transaction.js';
 import type { AuthState, PropertyContext, RequestMetadata } from '../auth/auth.types.js';
 import { readAnimal } from '../animals/animals.service.js';
+import {validatePastureChange,savePastureConditions,type PastureConditions} from './grazing.js';
 import { locationOccupations, type LocationStay } from './location-occupations.js';
 
 type Kind = 'PASTURE' | 'CORRAL';
 interface GroupRow {
   id: string; name: string; description: string | null; active: boolean; version: string;
   external_phone:string|null;departed_on:string|null;expected_return_on:string|null;external_notes:string|null;
+  locations:Array<{id:string;name:string;kind:Kind}>;
   location_id: string | null; location_name: string | null; location_kind: Kind | null;
   animal_count: string;kind:'INTERNAL'|'EXTERNAL';external_place:string|null;external_contact:string|null;
 }
 interface LocationRow {
+  today:string;
   id: string; kind: Kind; name: string; description: string | null; active: boolean;
   version: string; area_value: string | null; area_unit_code: string | null;
   pasture_use: string | null; capacity_estimate: number | null; water_available: boolean | null;
@@ -29,6 +32,9 @@ interface LocationRow {
 
 const groupFields = `lg.id, lg.name, lg.description, lg.active, lg.version::text,lg.kind,lg.external_place,lg.external_contact,lg.external_phone,lg.departed_on::text,lg.expected_return_on::text,lg.external_notes,
   pl.id AS location_id, pl.name AS location_name, pl.kind AS location_kind,
+  COALESCE((SELECT json_agg(json_build_object('id',place.id,'name',place.name,'kind',place.kind) ORDER BY place.name)
+    FROM group_location_use use JOIN physical_location place ON place.id=use.location_id
+    WHERE use.group_id=lg.id AND use.ended_at IS NULL),'[]'::json) AS locations,
   (SELECT count(*)::text FROM animal_group_assignment aga JOIN animal a ON a.id = aga.animal_id
     WHERE aga.group_id = lg.id AND aga.ended_at IS NULL AND a.record_status = 'CURRENT'
       AND a.availability_status_code IN ('ACTIVE','INACTIVE')) AS animal_count`;
@@ -40,8 +46,8 @@ const group = (row: GroupRow) => ({
   id: row.id, name: row.name, description: row.description, active: row.active,
   kind:row.kind,externalPlace:row.external_place,externalContact:row.external_contact,
   externalPhone:row.external_phone,departedOn:row.departed_on,expectedReturnOn:row.expected_return_on,externalNotes:row.external_notes,
-  version: Number(row.version), animalCount: Number(row.animal_count),
-  location: row.location_id ? { id: row.location_id, name: row.location_name!, kind: row.location_kind! } : null,
+  locations:row.locations,version: Number(row.version), animalCount: Number(row.animal_count),
+  location: row.location_id ? { id: row.location_id, name: row.locations.length>1?row.locations.map(place=>place.name).join(' + '):row.location_name!, kind: row.location_kind! } : null,
 });
 const location = (row: LocationRow) => ({
   id: row.id, name: row.name, kind: row.kind, description: row.description, active: row.active,
@@ -71,6 +77,7 @@ export async function listGroups(context: PropertyContext) {
 }
 
 const locationFields = `pl.id, pl.kind, pl.name, pl.description, pl.active, pl.version::text,
+  (now() AT TIME ZONE (SELECT timezone FROM property WHERE id=pl.property_id))::date::text AS today,
   pl.area_value::text, pl.area_unit_code, pl.pasture_use, pl.capacity_estimate,
   pl.water_available, pl.last_rest_date::text, pl.floor_material, pl.covered,
   lg.id AS group_id, lg.name AS group_name,
@@ -79,7 +86,7 @@ const locationFields = `pl.id, pl.kind, pl.name, pl.description, pl.active, pl.v
     'notes', pg.notes, 'catalogItemId', pg.catalog_item_id) ORDER BY pg.name)
     FROM pasture_grass pg WHERE pg.location_id = pl.id), '[]'::json) AS grasses`;
 const locationJoins = `FROM physical_location pl
-  LEFT JOIN group_location_assignment gla ON gla.location_id = pl.id AND gla.ended_at IS NULL
+  LEFT JOIN group_location_use gla ON gla.location_id = pl.id AND gla.ended_at IS NULL
   LEFT JOIN livestock_group lg ON lg.id = gla.group_id`;
 
 export async function listLocations(context: PropertyContext) {
@@ -92,15 +99,17 @@ export async function listLocations(context: PropertyContext) {
       ala.started_at::text AS "startedAt", ala.ended_at::text AS "endedAt",
       COALESCE(sm.movement_on, (ala.started_at AT TIME ZONE p.timezone)::date)::text AS "startedOn",
       COALESCE(em.movement_on, (ala.ended_at AT TIME ZONE p.timezone)::date)::text AS "endedOn"
-     FROM animal_location_assignment ala JOIN property p ON p.id=ala.property_id
+     FROM animal_grazing_stay ala JOIN property p ON p.id=ala.property_id
      JOIN physical_location pl ON pl.id=ala.location_id AND pl.kind='PASTURE'
      LEFT JOIN livestock_movement sm ON sm.id=ala.movement_batch_id AND sm.status='COMPLETADO'
      LEFT JOIN (SELECT ma.animal_id, ma.source_location_id, m.applied_at, m.movement_on
        FROM livestock_movement_animal ma JOIN livestock_movement m ON m.id=ma.movement_id
        WHERE m.status='COMPLETADO') em ON em.animal_id=ala.animal_id
-         AND em.source_location_id=ala.location_id AND em.applied_at=ala.ended_at
+         AND em.applied_at=ala.ended_at
      WHERE ala.property_id=$1 ORDER BY ala.started_at, ala.id`, [context.propertyId]),
   ]);
+  const observations=await pool.query<{location_id:string;observed_on:string;entry_height_cm:string|null;exit_state:string|null}>(
+    'SELECT location_id,observed_on::text,entry_height_cm::text,exit_state FROM pasture_observation WHERE property_id=$1 ORDER BY observed_on,recorded_at',[context.propertyId]);
   const byLocation = new Map<string, LocationStay[]>();
   for (const stay of stays.rows) {
     const entries = byLocation.get(stay.locationId) ?? [];
@@ -108,7 +117,9 @@ export async function listLocations(context: PropertyContext) {
     byLocation.set(stay.locationId, entries);
   }
   return result.rows.map(row => ({...location(row), ...(row.kind === 'PASTURE'
-    ? locationOccupations(byLocation.get(row.id) ?? [], row.last_rest_date) : {})}));
+    ? (()=>{const data=locationOccupations(byLocation.get(row.id)??[],row.last_rest_date,row.today,observations.rows.filter(note=>note.location_id===row.id).map(note=>({observedOn:note.observed_on,exitState:note.exit_state})));return {...data,occupationHistory:data.occupationHistory.map(period=>{
+      const notes=observations.rows.filter(note=>note.location_id===row.id&&note.observed_on>=period.startedOn&&(!period.endedOn||note.observed_on<=period.endedOn));
+      return {...period,entryHeightCm:notes.find(note=>note.entry_height_cm!==null)?.entry_height_cm??null,exitState:notes.filter(note=>note.exit_state).at(-1)?.exit_state??null};})};})() : {})}));
 }
 
 async function access(client: PoolClient, auth: AuthState, context: PropertyContext,
@@ -382,7 +393,7 @@ export async function setGroupState(auth: AuthState, context: PropertyContext, i
 }
 
 export async function setGroupLocation(auth: AuthState, context: PropertyContext, id: string,
-  input: { locationId: string | null; expectedVersion: number }, metadata: RequestMetadata) {
+  input: { locationId: string | null; expectedVersion: number;pastureConditions?:PastureConditions }, metadata: RequestMetadata) {
   try {
     return await inTransaction(async (client) => {
       await access(client, auth, context, 'GROUP_MANAGE');
@@ -419,6 +430,7 @@ export async function setGroupLocation(auth: AuthState, context: PropertyContext
         || positions.rows.some((row) => row.location_id !== before.location?.id)) {
         throw conflict('ANIMAL_LOCATION_INCONSISTENT', 'La ubicación de un animal no coincide con la del grupo.');
       }
+      await validatePastureChange(client,context.propertyId,memberIds,[input.locationId],input.pastureConditions);
       const instant = new Date();
       const batchId = randomUUID();
       if (before.location) {
@@ -449,6 +461,7 @@ export async function setGroupLocation(auth: AuthState, context: PropertyContext
         `UPDATE animal SET updated_by = $2 WHERE id = ANY($1::uuid[])`, [memberIds, auth.userId],
       );
       await client.query(`UPDATE livestock_group SET updated_by = $2 WHERE id = $1`, [id, auth.userId]);
+      await savePastureConditions(client,batchId,new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil'}).format(instant),auth.userId,input.pastureConditions);
       const after = await getGroup(client, context.propertyId, id);
       await audit(client, auth, context, metadata, 'GROUP_LOCATION_CHANGED', 'LIVESTOCK_GROUP', id, before, after);
       return after;
@@ -490,9 +503,7 @@ export async function assignAnimalToGroup(auth: AuthState, context: PropertyCont
         `SELECT location_id FROM animal_location_assignment
          WHERE animal_id = $1 AND ended_at IS NULL FOR UPDATE`, [input.animalId],
       );
-      if (positions.rows[0] && !current.rowCount) {
-        throw conflict('ANIMAL_LOCATION_INCONSISTENT', 'El animal tiene una ubicación sin grupo vigente.');
-      }
+      // A separated animal may keep a physical location while it has no group.
       if (current.rows[0]) {
         const origin = await getGroup(client, context.propertyId, current.rows[0].group_id);
         if (positions.rows[0]?.location_id !== (origin.location?.id ?? undefined)) {

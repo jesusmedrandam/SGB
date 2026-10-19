@@ -341,7 +341,7 @@ test('registro, verificación, sesión y auditoría funcionan contra PostgreSQL'
     assert.equal((await listAnimals(ownerContext,{page:1,search:'',groupId:secondGroup.id})).items.length,0);
     assert.equal((await listGroups(ownerContext)).find((entry) => entry.id === firstGroup.id)?.animalCount, 1);
     const moved = await setGroupLocation(ownerAuth, ownerContext, firstGroup.id,
-      { locationId: pastureB.id, expectedVersion: firstGroup.version }, metadata);
+      { locationId: pastureB.id, expectedVersion: firstGroup.version,pastureConditions:[{locationId:pastureA.id,exitState:'REMAINS'}] }, metadata);
     assert.equal((await getAnimal(ownerContext, animal.id)).location?.id, pastureB.id);
     await assert.rejects(
       () => setGroupLocation(ownerAuth, ownerContext, firstGroup.id,

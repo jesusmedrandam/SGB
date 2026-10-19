@@ -12,6 +12,7 @@ import type { z } from 'zod';
 import {insertInitialParents} from './parents.service.js';
 
 interface AnimalRow {
+  separation_reason?:string|null;counts_for_occupancy?:boolean|null;
   external_stay?:{place:string;contact:string|null}|null;
   id: string;
   name: string;
@@ -39,7 +40,8 @@ interface AnimalRow {
   total_count?:number;
 }
 
-const animalFields = `id, name, description, ear_tag_code, sex, species_code,
+const animalFields = `CASE WHEN NOT EXISTS(SELECT 1 FROM animal_group_assignment aga WHERE aga.animal_id=animal.id AND aga.ended_at IS NULL) THEN
+ (SELECT m.reason FROM livestock_movement m JOIN livestock_movement_animal ma ON ma.movement_id=m.id WHERE ma.animal_id=animal.id AND m.kind='SEPARACION' AND m.status='COMPLETADO' ORDER BY m.applied_at DESC LIMIT 1) END AS separation_reason, id, name, description, ear_tag_code, sex, species_code,
   birth_date::text AS birth_date, entry_date::text AS entry_date,
   initial_weight::text AS initial_weight, initial_weight_unit_code,
   availability_status_code, version::text AS version,transferred_out_at,
@@ -80,6 +82,7 @@ function animal(row: AnimalRow) {
     initialWeightUnitCode: row.initial_weight_unit_code,
     availabilityStatusCode: row.availability_status_code, version: Number(row.version),
     classification:row.classification, brands: row.brands, activePregnancyId:row.active_pregnancy_id??null,
+    separatedFromGroup:Boolean(row.separation_reason),separationReason:row.separation_reason??null,countsForOccupancy:row.counts_for_occupancy??true,
     externalStay:row.external_stay??null,transferredOutAt:row.transferred_out_at??null,lastBirthOn:row.last_birth_on??null,lastLossOn:row.last_loss_on??null,
     hasReproductiveHistory:row.has_reproductive_history??false,registeredBirthDate:row.registered_birth_date??null,
     profilePhotoUrl:animalProfilePhotoUrl(row.profile_photo_asset),
@@ -120,15 +123,15 @@ export async function readAnimal(client: PoolClient, context: PropertyContext, i
     return row ? { animalId: row.parent_animal_id, name: row.name ?? row.reported_parent_name! } : null;
   };
   const position = await client.query<{
-    group_id: string | null; group_name: string | null;
+    counts_for_occupancy:boolean|null;group_id: string | null; group_name: string | null;
     location_id: string | null; location_name: string | null; location_kind: 'PASTURE' | 'CORRAL' | null;
   }>(
-    `SELECT group_id, group_name, location_id, location_name, location_kind
+    `SELECT counts_for_occupancy,group_id, group_name, location_id, location_name, location_kind
      FROM animal_current_position WHERE animal_id = $1 AND property_id = $2`,
     [id, context.propertyId],
   );
   const place = position.rows[0];
-  return { ...animal(result.rows[0]),
+  return { ...animal({...result.rows[0]!,counts_for_occupancy:place?.counts_for_occupancy??null}),
     mother: parent('MOTHER'), father: parent('FATHER'),
     group: place?.group_id ? { id: place.group_id, name: place.group_name! } : null,
     location: place?.location_id ? { id: place.location_id,
@@ -149,7 +152,7 @@ export async function listAnimals(context: PropertyContext, filters: z.infer<typ
     brandId,birthFrom,birthTo}=filters;
   const result = await pool.query<AnimalRow>(
     `SELECT ${animalFields}, pos.group_id, pos.group_name, pos.location_id, pos.location_name,
-       pos.location_kind, count(*) OVER()::int AS total_count,
+       pos.location_kind,pos.counts_for_occupancy, count(*) OVER()::int AS total_count,
        (SELECT pp.display_name FROM animal_ownership ao
          JOIN property_party pp ON pp.id=ao.party_id
          WHERE ao.animal_id=animal.id AND ao.valid_until IS NULL
@@ -162,7 +165,7 @@ export async function listAnimals(context: PropertyContext, filters: z.infer<typ
        AND ($5::varchar IS NULL OR animal.sex::text=$5)
        AND ($6::varchar IS NULL OR animal.availability_status_code=$6)
        AND ($7::uuid IS NULL OR pos.group_id=$7)
-       AND ($8::uuid IS NULL OR pos.location_id=$8)
+       AND ($8::uuid IS NULL OR pos.location_id=$8 OR EXISTS(SELECT 1 FROM group_location_use use WHERE use.group_id=pos.group_id AND use.ended_at IS NULL AND use.location_id=$8))
        AND ($9::uuid IS NULL OR EXISTS(SELECT 1 FROM animal_ownership ao
          WHERE ao.animal_id=animal.id AND ao.party_id=$9 AND ao.valid_until IS NULL))
        AND ($10::uuid IS NULL OR EXISTS(SELECT 1 FROM animal_catalog_assignment aca

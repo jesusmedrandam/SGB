@@ -60,7 +60,8 @@ test('grupos externos: animales activos, crías, operaciones, ida y regreso, per
   const options=await listMovementOptions(auth,context);assert.equal(options.groups.find(group=>group.id===outside.id)!.kind,'EXTERNAL');
   const move=async(source:string,destination:string)=>{
     const draft=await createMovement(auth,context,{kind:'GRUPO',selectionMode:'MANUAL',sourceGroupId:source,destinationGroupId:destination,
-      destinationPropertyId:property.id,animalIds:[cow.id],movementOn:today(),reason:'Cambio de cuidado'},metadata);
+      destinationPropertyId:property.id,animalIds:[cow.id],movementOn:today(),reason:'Cambio de cuidado',
+      pastureConditions:source===inside.id?[{locationId:place.id,exitState:'REMAINS'}]:[]},metadata);
     await applyMovement(auth,context,draft.id,metadata);
   };
   await move(outside.id,inside.id);
