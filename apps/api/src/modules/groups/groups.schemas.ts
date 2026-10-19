@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {pastureConditionsSchema} from './grazing.js';
 
 export const idSchema = z.object({ id: z.uuid() });
 const name = z.string().trim().min(1).max(160);
@@ -17,7 +18,7 @@ export const groupStateSchema = z.object({
   active: z.boolean(), expectedVersion: z.number().int().positive(),locationId:z.uuid().optional(),
 });
 export const groupLocationSchema = z.object({
-  locationId: z.uuid(), expectedVersion: z.number().int().positive(),
+  locationId: z.uuid(), expectedVersion: z.number().int().positive(),pastureConditions:pastureConditionsSchema.optional(),
 });
 const grass = z.object({
   name: name, percent: z.number().min(0).max(100).nullable().optional(),

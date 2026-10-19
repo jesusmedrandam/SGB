@@ -76,7 +76,7 @@ test('borrador, rotación de grupo, selección manual y traslado conservan histo
       destinationGroupId:group.id,movementOn:date(),reason:'Rotación de pastoreo',
       selectionMode:'GRUPO' as const,animalIds:[]};
     const rotation=await createMovement(auth,context,{...base,kind:'UBICACION',
-      destinationLocationId:rotatedPasture.id},metadata);
+      destinationLocationId:rotatedPasture.id,pastureConditions:[{locationId:sourcePasture.id,exitState:'REMAINS'}]},metadata);
     assert.equal(rotation.status,'BORRADOR');assert.equal(rotation.animals.length,2);
     assert.equal((await listMovementOptions(auth,context)).properties.length,2);
     await assert.rejects(()=>createMovement(auth,context,{...base,kind:'UBICACION',
@@ -97,7 +97,7 @@ test('borrador, rotación de grupo, selección manual y traslado conservan histo
     const relocation=await createMovement(auth,context,{kind:'PROPIEDAD',
       selectionMode:'MANUAL',sourceGroupId:groupTwo.id,destinationGroupId:destGroup.id,
       destinationPropertyId:second.propertyId,movementOn:date(),reason:'Traslado a segunda finca',
-      animalIds:[first.id]},metadata);
+      animalIds:[first.id],pastureConditions:[{locationId:groupPasture.id,exitState:'REMAINS'}]},metadata);
     await assert.rejects(()=>createMovement(auth,context,{kind:'PROPIEDAD',
       selectionMode:'MANUAL',sourceGroupId:groupTwo.id,destinationGroupId:destGroup.id,
       destinationPropertyId:randomUUID(),movementOn:date(),reason:'Destino ajeno',
@@ -106,7 +106,7 @@ test('borrador, rotación de grupo, selección manual y traslado conservan histo
     const edited=await updateMovement(auth,context,relocation.id,{kind:'PROPIEDAD',
       selectionMode:'MANUAL',sourceGroupId:groupTwo.id,destinationGroupId:destGroup.id,
       destinationPropertyId:second.propertyId,movementOn:date(),reason:'Traslado definitivo',
-      animalIds:[first.id],expectedVersion:relocation.version},metadata);
+      animalIds:[first.id],expectedVersion:relocation.version,pastureConditions:[{locationId:groupPasture.id,exitState:'REMAINS'}]},metadata);
     assert.equal(edited.version,relocation.version+1);
     await applyMovement(auth,context,relocation.id,metadata);
     assert.equal((await getAnimal(destinationContext,first.id)).group?.id,destGroup.id);
@@ -123,17 +123,15 @@ test('borrador, rotación de grupo, selección manual y traslado conservan histo
     assert.equal(intervals.rows[2]?.property_id,second.propertyId);
     const toCancel=await createMovement(auth,context,{...base,kind:'GRUPO',
       sourceGroupId:group.id,destinationGroupId:groupTwo.id,selectionMode:'MANUAL',
-      animalIds:[other.id],reason:'Borrador cancelable'},metadata);
+      animalIds:[other.id],reason:'Borrador cancelable',pastureConditions:[{locationId:rotatedPasture.id,exitState:'REMAINS'}]},metadata);
     await cancelMovement(auth,context,toCancel.id,metadata);
     const sourceLocations=await listLocations(context);
     const firstHistory=sourceLocations.find(entry=>entry.id===sourcePasture.id)!;
     assert.equal(firstHistory.currentAnimalCount,0);
-    assert.equal(firstHistory.occupationHistory?.length,1);
-    assert.equal(firstHistory.occupationHistory?.[0]?.animalCount,2);
-    assert.equal(firstHistory.occupationHistory?.[0]?.endedOn,base.movementOn);
+    assert.equal(firstHistory.occupationHistory?.length,0,'Same-day entry and exit do not create a zero-day occupation');
     const ongoing=sourceLocations.find(entry=>entry.id===rotatedPasture.id)!;
     assert.equal(ongoing.currentAnimalCount,1);
-    assert.equal(ongoing.occupationHistory?.[0]?.animalCount,2);
+    assert.equal(ongoing.occupationHistory?.[0]?.animalCount,1,'A same-day group change does not inflate the animal count');
     assert.equal(ongoing.occupationHistory?.[0]?.endedOn,null);
     assert.equal(ongoing.occupationHistory?.[0]?.startedOn,base.movementOn);
     assert.deepEqual(sourceLocations.find(entry=>entry.id===initialPasture.id)?.occupationHistory,[]);
@@ -150,7 +148,7 @@ test('borrador, rotación de grupo, selección manual y traslado conservan histo
         destinationLocationId:sourcePasture.id},metadata),
     (error:{code?:string})=>error.code==='MOVEMENT_DENIED');
 
-    const expires=await createMovement(auth,context,{...base,kind:'UBICACION',destinationLocationId:sourcePasture.id},metadata);
+    const expires=await createMovement(auth,context,{...base,kind:'UBICACION',destinationLocationId:sourcePasture.id,pastureConditions:[{locationId:rotatedPasture.id,exitState:'REMAINS'}]},metadata);
     // Test clock fixture: creation timestamps are immutable through normal application writes.
     await inTransaction(async client=>{await client.query('SET LOCAL session_replication_role=replica');await client.query("UPDATE livestock_movement SET created_at=now()-interval '24 hours' WHERE id=$1",[expires.id]);});
     assert.equal((await listMovements(context)).some(row=>row.id===expires.id),false,'Expired drafts disappear at the 24-hour boundary');
