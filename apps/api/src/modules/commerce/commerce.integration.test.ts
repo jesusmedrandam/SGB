@@ -9,7 +9,7 @@ import {createAnimal} from '../animals/animals.service.js';
 import {createGroup} from '../groups/groups.service.js';
 import {cancelCommerce,createCommerce,listCommerce} from './commerce.service.js';
 import {createCatalogItem,listCatalogItems} from '../catalogs/catalogs.service.js';
-import {createFinanceAccount,createFinanceMovement,financeAccounts}
+import {createFinanceAccount,createFinanceMovement,financeAccounts,financeMovements,applyFinanceSchedule,cancelFinanceMovement,updateFinanceAccount}
   from '../finances/finances.service.js';
 
 const meta={ipAddress:'127.0.0.1',userAgent:'sgb-commerce-test'};
@@ -89,5 +89,50 @@ test('una venta registra salida reversible y las finanzas privadas respetan el Ã
     assert.equal((await financeAccounts(owner.auth,undefined,'PERSONAL'))[0]?.balance,80);
     assert.equal((await financeAccounts(outsider.auth,undefined,'PERSONAL')).length,0);
     assert.equal((await financeAccounts(owner.auth,owner.context,'PROPERTY')).length,0);
+    const tomorrow=(await pool.query(`SELECT (current_date+1)::text AS day`)).rows[0].day;
+    const planned={kind:'EXPENSE' as const,sourceAccountId:personal.id,destinationAccountId:null,amount:15.25,
+      occurredOn:tomorrow,scheduledOn:tomorrow,category:null,concept:'Pago programado',notes:null};
+    const future=await createFinanceMovement(owner.auth,undefined,'PERSONAL',planned,meta);
+    assert.equal(future.effectiveAt,null);
+    assert.equal((await financeAccounts(owner.auth,undefined,'PERSONAL'))[0].balance,80);
+    assert(!(await financeMovements(owner.auth,undefined,'PERSONAL')).some(row=>row.id===future.id));
+    assert((await financeMovements(owner.auth,undefined,'PERSONAL',true)).some(row=>row.id===future.id));
+    await pool.query('SELECT notify_finance_due($1)',[owner.auth.userId]);
+    assert.equal((await pool.query('SELECT 1 FROM app_notification WHERE finance_movement_id=$1',[future.id])).rowCount,0);
+    await assert.rejects(()=>applyFinanceSchedule(owner.auth,undefined,'PERSONAL',future.id,today,meta),{code:'FINANCE_EFFECTIVE_DATE'});
+    await assert.rejects(()=>createFinanceMovement(owner.auth,undefined,'PERSONAL',{kind:'EXPENSE',sourceAccountId:personal.id,destinationAccountId:null,amount:15.25,occurredOn:tomorrow,category:null,concept:'Futuro',notes:null},meta),{code:'FINANCE_FUTURE_DATE'});
+    const due=await createFinanceMovement(owner.auth,undefined,'PERSONAL',{...planned,scheduledOn:today,occurredOn:today},meta);
+    await pool.query('SELECT notify_finance_due($1)',[owner.auth.userId]);
+    await pool.query('SELECT notify_finance_due($1)',[owner.auth.userId]);
+    const reminders=await pool.query('SELECT * FROM app_notification WHERE finance_movement_id=$1',[due.id]);
+    assert.equal(reminders.rowCount,1,'Due notification is emitted once');assert.equal(reminders.rows[0].property_id,null);
+    assert.equal((await pool.query('SELECT can_view_finance_reminder($1,$2) AS allowed',[due.id,outsider.auth.userId])).rows[0].allowed,false);
+    await assert.rejects(()=>applyFinanceSchedule(outsider.auth,undefined,'PERSONAL',due.id,today,meta),{code:'FINANCE_SCHEDULE_NOT_FOUND'});
+    await Promise.all([applyFinanceSchedule(owner.auth,undefined,'PERSONAL',due.id,today,meta),applyFinanceSchedule(owner.auth,undefined,'PERSONAL',due.id,today,meta)]);
+    assert.equal((await financeAccounts(owner.auth,undefined,'PERSONAL'))[0].balance,64.75,'Concurrent confirmation debits exactly once');
+    assert.equal((await financeMovements(owner.auth,undefined,'PERSONAL')).filter(row=>row.id===due.id).length,1);
+    await cancelFinanceMovement(owner.auth,undefined,'PERSONAL',due.id,'Pago anulado',meta);
+    assert.equal((await financeAccounts(owner.auth,undefined,'PERSONAL'))[0].balance,80);
+    await cancelFinanceMovement(owner.auth,undefined,'PERSONAL',future.id,'No se pagarÃ¡',meta);
+    assert.equal((await financeAccounts(owner.auth,undefined,'PERSONAL'))[0].balance,80,'Cancelling an unapplied schedule has no balance effect');
+    await assert.rejects(()=>applyFinanceSchedule(owner.auth,undefined,'PERSONAL',future.id,today,meta),{code:'FINANCE_SCHEDULE_CANCELLED'});
+    const income=await createFinanceMovement(owner.auth,undefined,'PERSONAL',{...planned,kind:'INCOME',sourceAccountId:null,destinationAccountId:personal.id,scheduledOn:today,occurredOn:today},meta);
+    await updateFinanceAccount(owner.auth,undefined,'PERSONAL',personal.id,{name:'Efectivo privado',kind:'CASH',active:false},meta);
+    await assert.rejects(()=>applyFinanceSchedule(owner.auth,undefined,'PERSONAL',income.id,today,meta),{code:'FINANCE_ACCOUNT_DISABLED'});
+    await updateFinanceAccount(owner.auth,undefined,'PERSONAL',personal.id,{name:'Efectivo privado',kind:'CASH',active:true},meta);
+    await applyFinanceSchedule(owner.auth,undefined,'PERSONAL',income.id,today,meta);
+    assert.equal((await financeAccounts(owner.auth,undefined,'PERSONAL'))[0].balance,95.25);
+    const propertyAccount=await createFinanceAccount(owner.auth,owner.context,'PROPERTY',{name:'Caja del predio',kind:'CASH',openingBalance:200},meta);
+    const propertyDue=await createFinanceMovement(owner.auth,owner.context,'PROPERTY',{...planned,sourceAccountId:propertyAccount.id,scheduledOn:today,occurredOn:today},meta);
+    assert.equal((await pool.query('SELECT can_view_finance_reminder($1,$2) AS allowed',[propertyDue.id,owner.auth.userId])).rows[0].allowed,true);
+    await pool.query('SELECT notify_finance_due($1)',[owner.auth.userId]);
+    assert.equal((await pool.query('SELECT 1 FROM app_notification WHERE finance_movement_id=$1',[propertyDue.id])).rowCount,1);
+    await applyFinanceSchedule(owner.auth,owner.context,'PROPERTY',propertyDue.id,today,meta);
+    assert.equal((await financeAccounts(owner.auth,owner.context,'PROPERTY'))[0].balance,184.75);
+    await pool.query(`DELETE FROM role_permission WHERE role_id=$1 AND permission_code='FINANCE_MANAGE'`,[owner.context.roleId]);
+    await assert.rejects(()=>applyFinanceSchedule(owner.auth,owner.context,'PROPERTY',propertyDue.id,today,meta),{code:'FINANCE_DENIED'});
+    await pool.query(`DELETE FROM role_permission WHERE role_id=$1 AND permission_code='FINANCE_VIEW'`,[owner.context.roleId]);
+    assert.equal((await pool.query('SELECT can_view_finance_reminder($1,$2) AS allowed',[propertyDue.id,owner.auth.userId])).rows[0].allowed,false,'Revoked access hides financial notices');
+
   }finally{await pool.end();}
 });

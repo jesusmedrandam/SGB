@@ -5,7 +5,7 @@ import {authenticate,requireModule,requirePermission,requirePropertyContext}
   from '../auth/auth.middleware.js';
 import type {RequestMetadata} from '../auth/auth.types.js';
 import {financeAccounts,financeMovements,createFinanceAccount,createFinanceMovement,
-  cancelFinanceMovement,updateFinanceAccount,personalEnabled} from './finances.service.js';
+  applyFinanceSchedule,cancelFinanceMovement,updateFinanceAccount,personalEnabled} from './finances.service.js';
 const meta=(req:Request):RequestMetadata=>({ipAddress:req.ip||null,
   userAgent:req.header('user-agent')?.slice(0,1000)??null});
 const amount=z.number().finite().min(0).max(999999999999.99)
@@ -17,6 +17,8 @@ const movement=z.object({kind:z.enum(['INCOME','EXPENSE','TRANSFER']),
   sourceAccountId:z.uuid().nullable(),destinationAccountId:z.uuid().nullable(),
   amount:amount.positive(),occurredOn:z.iso.date(),category:z.string().trim().max(120).nullable(),
   concept:z.string().trim().min(1).max(240),notes:z.string().trim().max(3000).nullable()});
+const schedule=movement.omit({occurredOn:true}).extend({kind:z.enum(['INCOME','EXPENSE']),scheduledOn:z.iso.date()})
+ .transform(input=>({...input,occurredOn:input.scheduledOn}));
 const id=z.object({id:z.uuid()});const cancel=z.object({reason:z.string().trim().min(3).max(3000)});
 function routes(scope:'PROPERTY'|'PERSONAL'){
  const router=Router();router.use(authenticate);
@@ -29,6 +31,20 @@ function routes(scope:'PROPERTY'|'PERSONAL'){
  }));
  router.get('/movements',view,asyncHandler(async(req,res)=>{
   res.json({ok:true,data:await financeMovements(req.auth!,req.propertyContext,scope)});
+ }));
+ router.get('/schedules',view,asyncHandler(async(req,res)=>{
+  res.json({ok:true,data:await financeMovements(req.auth!,req.propertyContext,scope,true)});
+ }));
+ router.post('/schedules',manage,asyncHandler(async(req,res)=>{
+  res.status(201).json({ok:true,data:await createFinanceMovement(req.auth!,req.propertyContext,scope,schedule.parse(req.body),meta(req))});
+ }));
+ router.post('/schedules/:id/apply',manage,asyncHandler(async(req,res)=>{
+  res.json({ok:true,data:await applyFinanceSchedule(req.auth!,req.propertyContext,scope,id.parse(req.params).id,
+   z.object({occurredOn:z.iso.date()}).parse(req.body).occurredOn,meta(req))});
+ }));
+ router.post('/schedules/:id/cancel',manage,asyncHandler(async(req,res)=>{
+  res.json({ok:true,data:await cancelFinanceMovement(req.auth!,req.propertyContext,scope,
+   id.parse(req.params).id,cancel.parse(req.body).reason,meta(req))});
  }));
  router.post('/accounts',manage,asyncHandler(async(req,res)=>{
   res.status(201).json({ok:true,data:await createFinanceAccount(req.auth!,req.propertyContext,

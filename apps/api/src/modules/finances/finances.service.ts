@@ -9,7 +9,7 @@ type Scope='PROPERTY'|'PERSONAL';
 type AccountInput={name:string;kind:'CASH'|'BANK'|'WALLET'|'CREDIT_CARD'|'OTHER';openingBalance:number};
 type MovementInput={kind:'INCOME'|'EXPENSE'|'TRANSFER';sourceAccountId:string|null;
   destinationAccountId:string|null;amount:number;occurredOn:string;category:string|null;
-  concept:string;notes:string|null};
+  concept:string;notes:string|null;scheduledOn?:string};
 const scopeId=(auth:AuthState,context:PropertyContext|undefined,scope:Scope)=>
   scope==='PERSONAL'?auth.userId:context!.propertyId;
 const column=(scope:Scope)=>scope==='PERSONAL'?'user_id':'property_id';
@@ -58,7 +58,7 @@ function translate(reason:unknown):never{
 const accountSelect=`SELECT a.id,a.name,a.kind,a.opening_balance::float8 AS "openingBalance",
  a.active,a.created_at AS "createdAt",
  (a.opening_balance+coalesce((SELECT sum(CASE WHEN m.destination_account_id=a.id THEN
-    m.amount ELSE -m.amount END) FROM finance_movement m WHERE m.cancelled_at IS NULL
+    m.amount ELSE -m.amount END) FROM finance_movement m WHERE m.cancelled_at IS NULL AND m.effective_at IS NOT NULL
     AND (m.source_account_id=a.id OR m.destination_account_id=a.id)),0))::float8 AS balance
  FROM finance_account a`;
 export async function financeAccounts(auth:AuthState,context:PropertyContext|undefined,scope:Scope){
@@ -68,14 +68,17 @@ export async function financeAccounts(auth:AuthState,context:PropertyContext|und
 const movementSelect=`SELECT m.id,m.kind,m.source_account_id AS "sourceAccountId",
  m.destination_account_id AS "destinationAccountId",s.name AS "sourceAccountName",
  d.name AS "destinationAccountName",m.amount::float8 AS amount,m.occurred_on::text AS "occurredOn",
+ (m.scheduled_on+time '09:00') AT TIME ZONE coalesce((SELECT timezone FROM property WHERE id=m.property_id),'America/Guayaquil') AS "reminderAt",
+ m.scheduled_on::text AS "scheduledOn",m.effective_at AS "effectiveAt",
  m.category,m.concept,m.notes,m.cancelled_at AS "cancelledAt",
  m.cancellation_reason AS "cancellationReason",m.created_at AS "createdAt"
  FROM finance_movement m LEFT JOIN finance_account s ON s.id=m.source_account_id
  LEFT JOIN finance_account d ON d.id=m.destination_account_id`;
-export async function financeMovements(auth:AuthState,context:PropertyContext|undefined,scope:Scope){
+export async function financeMovements(auth:AuthState,context:PropertyContext|undefined,scope:Scope,scheduled=false){
   return (await pool.query(`${movementSelect} WHERE m.scope=$1 AND m.${column(scope)}=$2
-    ORDER BY m.occurred_on DESC,m.created_at DESC LIMIT 2000`,
-    [scope,scopeId(auth,context,scope)])).rows;
+    AND ($3::boolean AND m.scheduled_on IS NOT NULL OR NOT $3::boolean AND m.effective_at IS NOT NULL)
+    ORDER BY m.occurred_on DESC,m.created_at DESC,m.id DESC LIMIT 2000`,
+    [scope,scopeId(auth,context,scope),scheduled])).rows;
 }
 async function readAccount(client:PoolClient,scope:Scope,idValue:string,id:string){
   const row=(await client.query(`${accountSelect} WHERE a.scope=$1 AND a.${column(scope)}=$2
@@ -127,7 +130,7 @@ export async function createFinanceMovement(auth:AuthState,context:PropertyConte
       (now() AT TIME ZONE timezone)::date::text AS today FROM property WHERE id=$1`:
       `SELECT (now() AT TIME ZONE 'America/Guayaquil')::date::text AS today`,
       scope==='PROPERTY'?[owner]:[])).rows[0]!.today;
-    if(input.occurredOn>today)throw invalidRequest('FINANCE_FUTURE_DATE',
+    if(!input.scheduledOn&&input.occurredOn>today)throw invalidRequest('FINANCE_FUTURE_DATE',
       'La fecha del movimiento no puede ser futura.');
     const ids=[...new Set([input.sourceAccountId,input.destinationAccountId].filter(
       (value):value is string=>Boolean(value)))].sort();
@@ -138,13 +141,13 @@ export async function createFinanceMovement(auth:AuthState,context:PropertyConte
       throw invalidRequest('FINANCE_ACCOUNT_DISABLED','Selecciona cuentas activas de este ámbito.');
     const row=(await client.query<{id:string}>(`INSERT INTO finance_movement
       (scope,property_id,user_id,kind,source_account_id,destination_account_id,
-       amount,occurred_on,category,concept,notes,created_by)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+       amount,occurred_on,category,concept,notes,created_by,scheduled_on,effective_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,CASE WHEN $13::date IS NULL THEN now() ELSE NULL END) RETURNING id`,
       [scope,scope==='PROPERTY'?owner:null,scope==='PERSONAL'?owner:null,input.kind,
         input.sourceAccountId,input.destinationAccountId,input.amount,input.occurredOn,
-        input.category,input.concept,input.notes,auth.userId])).rows[0]!;
+        input.category,input.concept,input.notes,auth.userId,input.scheduledOn??null])).rows[0]!;
     const after=await readMovement(client,scope,owner,row.id);
-    await audit(client,auth,context,scope,meta,'FINANCE_MOVEMENT_CREATED','FINANCE_MOVEMENT',row.id,null,after);
+    await audit(client,auth,context,scope,meta,input.scheduledOn?'FINANCE_SCHEDULE_CREATED':'FINANCE_MOVEMENT_CREATED','FINANCE_MOVEMENT',row.id,null,after);
     return after;
   });}catch(error){translate(error);}
 }
@@ -163,4 +166,32 @@ export async function cancelFinanceMovement(auth:AuthState,context:PropertyConte
     await audit(client,auth,context,scope,meta,'FINANCE_MOVEMENT_CANCELLED','FINANCE_MOVEMENT',id,before,after);
     return after;
   });}catch(error){translate(error);}
+}
+
+export async function applyFinanceSchedule(auth:AuthState,context:PropertyContext|undefined,
+ scope:Scope,id:string,occurredOn:string,meta:RequestMetadata){
+ return inTransaction(async client=>{
+  await access(client,auth,context,scope);const owner=scopeId(auth,context,scope);
+  const locked=(await client.query(`SELECT id FROM finance_movement
+   WHERE id=$1 AND scope=$2 AND ${column(scope)}=$3 FOR UPDATE`,[id,scope,owner])).rows[0];
+  if(!locked)throw new ApiError(404,'FINANCE_SCHEDULE_NOT_FOUND','Pago o cobro programado no encontrado.');
+  const before=await readMovement(client,scope,owner,id);
+  if(!before.scheduledOn)throw invalidRequest('FINANCE_NOT_SCHEDULED','Este movimiento no es un pago o cobro programado.');
+  if(before.cancelledAt)throw conflict('FINANCE_SCHEDULE_CANCELLED','El pago o cobro está cancelado.');
+  if(before.effectiveAt)return before;
+  const today=(await client.query(`SELECT (now() AT TIME ZONE coalesce(
+   (SELECT timezone FROM property WHERE id=$1),'America/Guayaquil'))::date::text AS today`,
+   [scope==='PROPERTY'?owner:null])).rows[0].today;
+  if(occurredOn>today||occurredOn<before.scheduledOn)
+   throw invalidRequest('FINANCE_EFFECTIVE_DATE','La fecha efectiva debe estar entre la fecha prevista y hoy.');
+  const ids=[before.sourceAccountId,before.destinationAccountId].filter(Boolean).sort();
+  const accounts=(await client.query(`SELECT id,active FROM finance_account WHERE scope=$1
+   AND ${column(scope)}=$2 AND id=ANY($3::uuid[]) ORDER BY id FOR UPDATE`,[scope,owner,ids])).rows;
+  if(accounts.length!==ids.length||accounts.some(row=>!row.active))
+   throw invalidRequest('FINANCE_ACCOUNT_DISABLED','Selecciona cuentas activas antes de hacer efectivo el movimiento.');
+  await client.query('UPDATE finance_movement SET effective_at=now(),occurred_on=$2 WHERE id=$1',[id,occurredOn]);
+  const after=await readMovement(client,scope,owner,id);
+  await audit(client,auth,context,scope,meta,'FINANCE_SCHEDULE_APPLIED','FINANCE_MOVEMENT',id,before,after);
+  return after;
+ });
 }
