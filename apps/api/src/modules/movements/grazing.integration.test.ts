@@ -26,6 +26,19 @@ test('separación temporal, reincorporación, ocupación opcional, potreros comb
   const destination=await createGroup(auth,context,{name:'Receptor',locationId:d!.id},metadata);
   const animal=await createAnimal(auth,context,createAnimalSchema.parse({name:'Lucera',sex:'FEMALE',speciesCode:'BOVINE',groupId:group.id}),metadata);
   const on=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Guayaquil'}).format(new Date());
+  // Migration 0024 allowed a first placement without a source paddock.
+  const initialValues=[(await pool.query('SELECT account_id FROM property WHERE id=$1',[property.id])).rows[0].account_id,
+    property.id,group.id,a!.id,on,auth.userId];
+  const initialSql=`INSERT INTO livestock_movement(account_id,source_property_id,destination_property_id,kind,
+    selection_mode,source_group_id,destination_group_id,source_location_id,destination_location_id,movement_on,
+    reason,created_by,updated_by) VALUES($1,$2,$2,'UBICACION','GRUPO',$3,$3,NULL,$4,$5,'Primera ubicación',$6,$6) RETURNING id`;
+  const initial=(await pool.query(initialSql,initialValues)).rows[0];
+  await pool.query("UPDATE livestock_movement SET status='COMPLETADO',applied_at=now() WHERE id=$1",[initial.id]);
+  assert.equal((await pool.query('SELECT source_location_id FROM livestock_movement WHERE id=$1',[initial.id])).rows[0].source_location_id,null);
+  await assert.rejects(()=>pool.query(initialSql,[...initialValues.slice(0,3),null,...initialValues.slice(4)]),
+    (error:{code?:string})=>error.code==='23514','A destination remains mandatory');
+  await assert.rejects(()=>pool.query(initialSql.replace('NULL,$4','$4,$4'),initialValues),
+    (error:{code?:string})=>error.code==='23514','Ordinary rotations must change paddock');
   const base:MovementInput={kind:'SEPARACION',selectionMode:'MANUAL',sourceGroupId:group.id,destinationGroupId:null,
     destinationPropertyId:property.id,movementOn:on,reason:'Reposo por lesión',animalIds:[animal.id]};
   await assert.rejects(()=>createMovement(auth,context,base,metadata),(error:{code?:string})=>error.code==='PASTURE_EXIT_STATE_REQUIRED');

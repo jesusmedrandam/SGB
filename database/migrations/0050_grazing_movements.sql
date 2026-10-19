@@ -23,9 +23,10 @@ ALTER TABLE livestock_movement ADD CONSTRAINT movement_groups_grazing CHECK(
  kind='SEPARACION' AND source_group_id IS NOT NULL AND destination_group_id IS NULL OR
  kind<>'SEPARACION' AND destination_group_id IS NOT NULL AND
  (source_group_id IS NOT NULL OR kind='GRUPO' AND selection_mode='MANUAL'));
+-- Preserve first placements without a source, already allowed by migration 0024.
 ALTER TABLE livestock_movement ADD CONSTRAINT movement_rotation_grazing CHECK(kind<>'UBICACION' OR
- selection_mode='GRUPO' AND source_group_id=destination_group_id AND source_location_id IS NOT NULL
- AND destination_location_id IS NOT NULL AND source_location_id<>destination_location_id);
+ selection_mode='GRUPO' AND source_group_id=destination_group_id AND destination_location_id IS NOT NULL
+ AND (source_location_id IS NULL OR source_location_id<>destination_location_id));
 
 CREATE OR REPLACE FUNCTION validate_group_location_assignment() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE places uuid[]; BEGIN
