@@ -82,6 +82,7 @@ test('una venta registra salida reversible y las finanzas privadas respetan el Ã
       'Otra vez',meta),(error:{code?:string})=>error.code==='COMMERCE_CANCELLED');
     const personal=await createFinanceAccount(owner.auth,undefined,'PERSONAL',{
       name:'Efectivo privado',kind:'CASH',openingBalance:100},meta);
+    assert.equal(personal.balance,100,'The initial balance is reflected before any movements');
     await createFinanceMovement(owner.auth,undefined,'PERSONAL',{
       kind:'EXPENSE',sourceAccountId:personal.id,destinationAccountId:null,amount:20,
       occurredOn:today,category:null,concept:'Gasto privado',notes:null},meta);

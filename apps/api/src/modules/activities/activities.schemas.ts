@@ -1,6 +1,6 @@
 import {z} from 'zod';
 export const idSchema=z.object({id:z.uuid()});
-export const activitySchema=z.object({kind:z.enum(['HERRAJE','DESCORNE','OTRA']),
+export const activitySchema=z.object({kind:z.enum(['HERRAJE','DESCORNE','CASTRACION','OTRA']),
   title:z.string().trim().min(2).max(180),occurredOn:z.iso.date(),
   description:z.string().trim().max(5000).nullable().optional(),
   brandId:z.uuid().nullable().optional(),

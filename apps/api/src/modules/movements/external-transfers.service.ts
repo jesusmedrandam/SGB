@@ -324,7 +324,7 @@ export async function acceptExternalTransfer(auth:AuthState,context:PropertyCont
         ...(animal.birthDate?{birthDate:animal.birthDate}:{}),...(earTagCode?{earTagCode}:{}),
         ...(animal.initialWeight!=null?{initialWeight:animal.initialWeight,initialWeightUnitCode:animal.initialWeightUnitCode!}:{}),
         owners,breedIds:breeds,colorIds:colors,brandIds:brands},metadata,dest.account_id,dest.today);
-      await client.query('UPDATE animal SET identity_id=$2 WHERE id=$1',[received.id,snapshot.identityId]);
+      await client.query('UPDATE animal SET identity_id=$2,castrated_on=$3 WHERE id=$1',[received.id,snapshot.identityId,animal.castratedOn??null]);
       moved.set(item.source_animal_id,received.id);
       await client.query('UPDATE external_animal_transfer_item SET destination_animal_id=$3 WHERE transfer_id=$1 AND source_animal_id=$2',[id,item.source_animal_id,received.id]);
       await client.query(`INSERT INTO animal_received_history(animal_id,transfer_id,source_animal_id,snapshot,has_given_birth,has_confirmed_offspring,last_birth_on,last_loss_on)
