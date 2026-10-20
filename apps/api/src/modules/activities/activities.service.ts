@@ -1,3 +1,4 @@
+import {animalOptionPhotos} from '../animals/animals.service.js';
 import {requireLiveDraft} from '../../core/drafts.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type {PoolClient} from 'pg';
@@ -5,7 +6,7 @@ import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
 import {pool} from '../../database/pool.js';
 import {inTransaction} from '../../database/transaction.js';
 import type {AuthState,PropertyContext,RequestMetadata} from '../auth/auth.types.js';
-import type {ActivityInput} from './activities.schemas.js';
+import {activitySchema,type ActivityInput} from './activities.schemas.js';
 
 async function access(client:PoolClient,auth:AuthState,context:PropertyContext,permission:string,module='TASKS'){
   const row=await superadminPropertyAccess(client,auth,context)??(await client.query<{account_id:string;today:string}>(
@@ -30,7 +31,7 @@ async function audit(client:PoolClient,auth:AuthState,context:PropertyContext,
       before===null?null:JSON.stringify(before),JSON.stringify(after),metadata.ipAddress,metadata.userAgent]);
 }
 const fields=`ac.id,ac.kind,ac.title,ac.occurred_on::text AS "occurredOn",
-  ac.description,ac.brand_id AS "brandId",b.name AS "brandName",
+  ac.procedure,ac.description,ac.brand_id AS "brandId",b.name AS "brandName",
   ac.status,ac.version::int,ac.created_at AS "createdAt",
   ac.applied_at AS "appliedAt",ac.cancelled_at AS "cancelledAt",
   COALESCE((SELECT json_agg(json_build_object('id',a.id,'name',a.name,
@@ -57,10 +58,11 @@ export async function listActivityOptions(context:PropertyContext){
     pool.query(`SELECT id,name FROM livestock_brand WHERE account_id=(SELECT account_id FROM property
       WHERE id=$1) AND active ORDER BY lower(name)`,[context.propertyId]),
   ]);
-  return {animals:animals.rows,brands:brands.rows,canCastrate:Boolean(context.isSuperadmin)||context.enabledModules.has('CASTRATION')&&context.permissions.has('CASTRATION_MANAGE')};
+  return {animals:await animalOptionPhotos(context.propertyId,animals.rows),brands:brands.rows,canCastrate:Boolean(context.isSuperadmin)||context.enabledModules.has('CASTRATION')&&context.permissions.has('CASTRATION_MANAGE')};
 }
 async function validate(client:PoolClient,auth:AuthState,context:PropertyContext,input:ActivityInput,
   accountId:string,today:string){
+  activitySchema.parse(input);
   if(input.occurredOn>today)throw invalidRequest('ACTIVITY_FUTURE_DATE',
     'La actividad realizada no puede tener fecha futura. Usa la agenda para programarla.');
   if(input.kind==='CASTRACION')await access(client,auth,context,'CASTRATION_MANAGE','CASTRATION');
@@ -95,10 +97,10 @@ export async function createActivity(auth:AuthState,context:PropertyContext,inpu
     const {account_id,today}=await access(client,auth,context,'ACTIVITY_MANAGE');
     await validate(client,auth,context,input,account_id,today);
     const row=(await client.query<{id:string}>(`INSERT INTO livestock_activity(account_id,property_id,
-      kind,title,occurred_on,description,brand_id,created_by,updated_by)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$8) RETURNING id`,
+      kind,title,occurred_on,description,brand_id,created_by,updated_by,procedure)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$8,$9::jsonb) RETURNING id`,
       [account_id,context.propertyId,input.kind,input.title,input.occurredOn,
-        input.description??null,input.brandId??null,auth.userId])).rows[0]!;
+        input.description??null,input.brandId??null,auth.userId,input.procedure?JSON.stringify(input.procedure):null])).rows[0]!;
     await details(client,row.id,input.animalIds);
     const after=await read(client,row.id);
     await audit(client,auth,context,metadata,'ACTIVITY_DRAFT_CREATED',row.id,null,after);
@@ -125,9 +127,9 @@ export async function updateActivity(auth:AuthState,context:PropertyContext,id:s
     await validate(client,auth,context,input,account_id,today);
     const before=await read(client,id);
     await client.query(`UPDATE livestock_activity SET kind=$2,title=$3,occurred_on=$4,
-      description=$5,brand_id=$6,updated_by=$7 WHERE id=$1`,
+      description=$5,brand_id=$6,updated_by=$7,procedure=$8::jsonb WHERE id=$1`,
       [id,input.kind,input.title,input.occurredOn,input.description??null,
-        input.brandId??null,auth.userId]);
+        input.brandId??null,auth.userId,input.procedure?JSON.stringify(input.procedure):null]);
     await details(client,id,input.animalIds);
     const after=await read(client,id);
     await audit(client,auth,context,metadata,'ACTIVITY_DRAFT_UPDATED',id,before,after);
@@ -142,7 +144,7 @@ export async function applyActivity(auth:AuthState,context:PropertyContext,id:st
     const before=await read(client,id);
     const animals=(before.animals as Array<{id:string}>).map((item)=>item.id);
     const input:ActivityInput={kind:before.kind,title:before.title,occurredOn:before.occurredOn,
-      description:before.description,brandId:before.brandId,animalIds:animals};
+      description:before.description,procedure:before.procedure,brandId:before.brandId,animalIds:animals};
     await validate(client,auth,context,input,account_id,today);
     if(input.kind==='CASTRACION')await client.query('UPDATE animal SET castrated_on=$2,updated_by=$3 WHERE id=ANY($1::uuid[])',
       [animals,input.occurredOn,auth.userId]);

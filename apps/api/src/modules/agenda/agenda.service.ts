@@ -1,3 +1,4 @@
+import {animalOptionPhotos} from '../animals/animals.service.js';
 import type {PoolClient} from 'pg';
 import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
 import {pool} from '../../database/pool.js';
@@ -71,7 +72,7 @@ export async function listAgendaOptions(context:PropertyContext){
     pool.query(`SELECT id,name,ear_tag_code AS "earTagCode" FROM animal
       WHERE property_id=$1 AND record_status='CURRENT' AND transferred_out_at IS NULL AND $2::boolean
       ORDER BY lower(name) LIMIT 5000`,[context.propertyId,context.permissions.has('ANIMAL_VIEW')])]);
-  return {users:users.rows,animals:animals.rows,tasks:allowed(context,'TASK','MANAGE'),
+  return {users:users.rows,animals:await animalOptionPhotos(context.propertyId,animals.rows),tasks:allowed(context,'TASK','MANAGE'),
     events:allowed(context,'EVENT','MANAGE')};
 }
 async function audit(client:PoolClient,auth:AuthState,context:PropertyContext,meta:RequestMetadata,

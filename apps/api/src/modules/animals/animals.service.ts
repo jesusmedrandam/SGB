@@ -494,3 +494,13 @@ export async function insertAnimalInTransaction(client:PoolClient,auth:AuthState
 
 export const animalProfilePhotoUrl=(asset:string|null)=>asset&&env.CLOUDINARY_CLOUD_NAME
   ?cloudinary.url(asset,{secure:true,cloud_name:env.CLOUDINARY_CLOUD_NAME,width:120,height:120,crop:'fill',quality:'auto',fetch_format:'auto'}):null;
+
+export async function animalOptionPhotos<T extends {id:string}>(propertyId:string,rows:T[]){
+ if(!rows.length)return rows.map(row=>({...row,profilePhotoUrl:null as string|null}));
+ const photos=(await pool.query<{id:string;asset:string}>(`SELECT DISTINCT ON(ma.entity_id) ma.entity_id AS id,so.provider_asset_id AS asset
+  FROM media_attachment ma JOIN storage_object so ON so.id=ma.storage_object_id AND so.status='AVAILABLE' AND so.kind='IMAGE'
+  JOIN animal a ON a.id=ma.entity_id AND a.property_id=$1 WHERE ma.entity_type='ANIMAL' AND ma.entity_id=ANY($2::uuid[])
+  AND ma.deleted_at IS NULL AND ma.relation_code='PROFILE' ORDER BY ma.entity_id,ma.created_at DESC`,[propertyId,rows.map(row=>row.id)])).rows;
+ const byId=new Map(photos.map(row=>[row.id,animalProfilePhotoUrl(row.asset)]));
+ return rows.map(row=>({...row,profilePhotoUrl:byId.get(row.id)??null}));
+}
