@@ -1,3 +1,4 @@
+import {animalOptionPhotos} from '../animals/animals.service.js';
 import {cycleTrueHeats,requireRulesAdministrator} from './reproduction.rules.js';
 import {insertAnimalInTransaction} from '../animals/animals.service.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
@@ -309,7 +310,7 @@ export async function listReproductionCandidates(context: PropertyContext) {
       FROM animal WHERE property_id = $1 AND species_code = 'BOVINE'
       AND record_status = 'CURRENT' AND availability_status_code = 'ACTIVE'
       ORDER BY lower(name), id LIMIT 2000`, [context.propertyId]);
-  return result.rows;
+  return animalOptionPhotos(context.propertyId,result.rows);
 }
 
 export async function createHeat(auth: AuthState, context: PropertyContext,

@@ -52,7 +52,7 @@ test('actividades aplican herraje una vez, conservan historial y respetan la pro
     assert.equal((await listActivityOptions(context)).brands.length,1);
     const today=(await pool.query<{today:string}>(`SELECT (now() AT TIME ZONE timezone)::date::text
       AS today FROM property WHERE id=$1`,[property.id])).rows[0]!.today;
-    const base={kind:'HERRAJE' as const,title:'Herraje del lote',occurredOn:today,
+    const base={procedure:{method:'FRIO',operatorName:'Responsable de prueba',site:'Costado'},kind:'HERRAJE' as const,title:'Herraje del lote',occurredOn:today,
       brandId:brand.id,animalIds:[first.id,other.id]};
     await assert.rejects(()=>createActivity(auth,context,{...base,brandId:randomUUID()},metadata),
       (error:{code?:string})=>error.code==='ACTIVITY_BRAND_INVALID');
@@ -64,12 +64,16 @@ test('actividades aplican herraje una vez, conservan historial y respetan la pro
     assert.equal(updated.version,created.version+1);
     const applied=await applyActivity(auth,context,created.id,metadata);
     assert.equal(applied.status,'COMPLETADA');
+    assert.equal(applied.procedure.method,'FRIO');assert.equal(applied.procedure.site,'Costado');
     assert.equal((await getAnimal(context,first.id)).brands[0]?.id,brand.id);
     assert.equal((await getAnimal(context,other.id)).brands[0]?.id,brand.id);
     await assert.rejects(()=>applyActivity(auth,context,created.id,metadata),
       (error:{code?:string})=>error.code==='ACTIVITY_FINAL');
+    await assert.rejects(()=>createActivity(auth,context,{kind:'DESCORNE',title:'Desbotone',occurredOn:today,animalIds:[other.id],procedure:{method:'DESBOTONE_QUIMICO'}},metadata));
+    await assert.rejects(()=>createActivity(auth,context,{kind:'DESCORNE',title:'Desbotone',occurredOn:today,animalIds:[other.id],procedure:{method:'QUIRURGICA'}},metadata));
     const second=await createActivity(auth,context,{kind:'DESCORNE',title:'Descorne',
-      occurredOn:today,animalIds:[other.id]},metadata);
+      occurredOn:today,animalIds:[other.id],procedure:{method:'DESBOTONE_QUIMICO',productName:'Producto registrado',operatorName:'Veterinario',painControl:'Registrada en tratamiento',followUpOn:today}},metadata);
+    assert.equal(second.procedure.productName,'Producto registrado');
     await cancelActivity(auth,context,second.id,metadata);
     assert.equal((await listActivities(context)).length,2);
     assert.equal((await listActivities({...context,propertyId:randomUUID()})).length,0);

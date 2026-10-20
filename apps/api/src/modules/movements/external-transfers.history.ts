@@ -80,9 +80,9 @@ export async function captureAnimal(client:PoolClient,context:PropertyContext,id
     FROM animal_ownership o JOIN property_party p ON p.id=o.party_id WHERE o.animal_id=$1 ORDER BY o.id`,[id])).rows;
   for(const row of ownership)add('CORE','ANIMAL_OWNERSHIP',row,'Propietarios',row.valid_from,null,
     [`${row.display_name}: ${row.ownership_percent}%`,row.valid_until?`Hasta: ${row.valid_until}`:null]);
-  const activities=(await client.query(`SELECT a.id,a.title,a.occurred_on::text,a.description,a.kind FROM livestock_activity a
+  const activities=(await client.query(`SELECT a.id,a.title,a.occurred_on::text,a.description,a.kind,a.procedure FROM livestock_activity a
     JOIN livestock_activity_animal x ON x.activity_id=a.id WHERE a.property_id=$1 AND x.animal_id=$2 AND a.status='COMPLETADA' ORDER BY a.id`,[context.propertyId,id])).rows;
-  for(const row of activities)add(row.kind==='CASTRACION'?'CASTRATION':'TASKS','LIVESTOCK_ACTIVITY',row,row.title,row.occurred_on,row.description,[]);
+  for(const row of activities)add(row.kind==='CASTRACION'?'CASTRATION':'TASKS','LIVESTOCK_ACTIVITY',row,row.title,row.occurred_on,row.description,row.procedure?['Método: '+row.procedure.method.replaceAll('_',' ').toLocaleLowerCase('es'),row.procedure.otherMethod,row.procedure.productName,row.procedure.operatorName,row.procedure.site,row.procedure.painControl,row.procedure.followUpOn]:[]);
   const identity=(await client.query('SELECT identity_id FROM animal WHERE id=$1',[id])).rows[0].identity_id as string;
   for(const row of history.values())if(sharing&&!context.permissions.has(modulePermissions[row.module]??'ANIMAL_VIEW'))
     throw forbidden('EXTERNAL_HISTORY_PERMISSION_REQUIRED','Tu rol necesita permiso para consultar todo el historial que se compartirá.');

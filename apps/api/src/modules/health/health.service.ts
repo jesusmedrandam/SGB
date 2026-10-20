@@ -1,3 +1,4 @@
+import {animalOptionPhotos} from '../animals/animals.service.js';
 import {requireLiveDraft} from '../../core/drafts.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type {PoolClient} from 'pg';
@@ -106,7 +107,7 @@ export async function listHealthOptions(context:PropertyContext){
       LEFT JOIN account_animal_classification_name n ON n.code=c.code
         AND n.account_id=(SELECT account_id FROM property WHERE id=$1) ORDER BY c.code`,[context.propertyId]),
   ]);
-  return {animals:animals.rows,groups:groups.rows,units:units.rows,classifications:classifications.rows,
+  return {animals:await animalOptionPhotos(context.propertyId,animals.rows),groups:groups.rows,units:units.rows,classifications:classifications.rows,
     administrationRoutes:await listCatalogItems(context,'ADMINISTRATION_ROUTES')};
 }
 const fields=`c.id,c.medicine_id AS "medicineId",COALESCE(c.medicine_snapshot->>'name',m.name) AS "medicineName",

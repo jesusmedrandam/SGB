@@ -1,3 +1,4 @@
+import {animalOptionPhotos} from '../animals/animals.service.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type {PoolClient} from 'pg';
 import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
@@ -36,10 +37,10 @@ export async function listCommerce(context:PropertyContext){
     ORDER BY r.traded_on DESC,r.created_at DESC LIMIT 2000`,[context.propertyId])).rows;
 }
 export async function listCommerceAnimals(context:PropertyContext){
-  return (await pool.query(`SELECT id,name,ear_tag_code AS "earTagCode",
+  return animalOptionPhotos(context.propertyId,(await pool.query(`SELECT id,name,ear_tag_code AS "earTagCode",
     availability_status_code AS status FROM animal
     WHERE property_id=$1 AND record_status='CURRENT' AND availability_status_code='ACTIVE'
-    ORDER BY lower(name),id LIMIT 5000`,[context.propertyId])).rows;
+    ORDER BY lower(name),id LIMIT 5000`,[context.propertyId])).rows);
 }
 async function access(client:PoolClient,auth:AuthState,context:PropertyContext){
   const row=await superadminPropertyAccess(client,auth,context)??(await client.query<{account_id:string;today:string;timezone:string}>(`

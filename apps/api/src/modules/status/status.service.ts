@@ -1,3 +1,4 @@
+import {animalOptionPhotos} from '../animals/animals.service.js';
 import {ApiError,conflict,invalidRequest} from '../../core/errors.js';
 import {pool} from '../../database/pool.js';
 import {inTransaction} from '../../database/transaction.js';
@@ -23,11 +24,11 @@ export async function listAnimalStatusEvents(context:PropertyContext,animalId?:s
     [context.propertyId,animalId??null])).rows;
 }
 export async function listStatusOptions(context:PropertyContext){
-  return (await pool.query(`SELECT id,name,ear_tag_code AS "earTagCode",
+  return animalOptionPhotos(context.propertyId,(await pool.query(`SELECT id,name,ear_tag_code AS "earTagCode",
     availability_status_code AS status,version::int FROM animal
     WHERE property_id=$1 AND record_status='CURRENT'
       AND availability_status_code IN ('ACTIVE','MISSING','INACTIVE') AND transferred_out_at IS NULL
-    ORDER BY lower(name),id LIMIT 5000`,[context.propertyId])).rows;
+    ORDER BY lower(name),id LIMIT 5000`,[context.propertyId])).rows);
 }
 
 export async function recordAnimalStatus(auth:AuthState,context:PropertyContext,input:Input){

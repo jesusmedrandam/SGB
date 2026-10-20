@@ -1,3 +1,4 @@
+import {animalOptionPhotos} from '../animals/animals.service.js';
 import {validatePastureChange,savePastureConditions,type PastureConditions} from '../groups/grazing.js';
 import {requireLiveDraft} from '../../core/drafts.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
@@ -153,7 +154,7 @@ export async function listMovementOptions(auth:AuthState,context:PropertyContext
   ]);
   const ids=new Set(properties.rows.map((row)=>row.id as string));
   return {properties:properties.rows,groups:groups.rows.filter((row)=>ids.has(row.propertyId)),
-    locations:locations.rows.filter((row)=>ids.has(row.propertyId)),animals:animals.rows};
+    locations:locations.rows.filter((row)=>ids.has(row.propertyId)),animals:await animalOptionPhotos(context.propertyId,animals.rows)};
 }
 
 async function resolve(client:PoolClient,auth:AuthState,context:PropertyContext,

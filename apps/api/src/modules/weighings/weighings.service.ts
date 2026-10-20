@@ -1,3 +1,4 @@
+import {animalOptionPhotos} from '../animals/animals.service.js';
 import {superadminPropertyAccess} from '../auth/superadmin-access.js';
 import type {PoolClient} from 'pg';
 import {ApiError,conflict,forbidden,invalidRequest} from '../../core/errors.js';
@@ -61,10 +62,10 @@ export async function listWeighings(context:PropertyContext,animalId?:string){
     [context.propertyId,animalId??null])).rows;
 }
 export async function listWeighingOptions(context:PropertyContext){
-  return (await pool.query(`SELECT a.id,a.name,a.ear_tag_code AS "earTagCode"
+  return animalOptionPhotos(context.propertyId,(await pool.query(`SELECT a.id,a.name,a.ear_tag_code AS "earTagCode"
     FROM animal a WHERE a.property_id=$1 AND a.record_status='CURRENT'
       AND a.availability_status_code='ACTIVE'
-    ORDER BY lower(a.name),a.id LIMIT 5000`,[context.propertyId])).rows;
+    ORDER BY lower(a.name),a.id LIMIT 5000`,[context.propertyId])).rows);
 }
 export async function createWeighing(auth:AuthState,context:PropertyContext,input:WeighingInput,
   metadata:RequestMetadata){
